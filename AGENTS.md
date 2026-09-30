@@ -39,6 +39,7 @@ it before finishing any change. CI (`.github/workflows/ci.yml`) runs exactly tha
 - `src/background/` — service worker: capture flow, generation + UI-capability registries, API dispatch
 - `src/content/` — isolated-world content script: snip overlay, conversation state, UI-frame host
 - `src/ui/` — `result-frame.html`/`.ts`/`.css`: extension-origin iframe that renders all injected UI
+- `src/workspace/` — extension-tab fallback that shows the capture when a page rejects injection
 - `src/options/` — options page: API key, default prompt, request limits
 - `src/lib/` — shared logic: Anthropic client, crop math, storage, request limits, typed protocols
 - `scripts/extension-smoke.mjs` — the `test:browser` script
@@ -64,7 +65,7 @@ it before finishing any change. CI (`.github/workflows/ci.yml`) runs exactly tha
   frame traffic goes over a capability-attested `MessageChannel` — never plain
   `window.postMessage`, DOM events, or attributes.
 - `npm run test:browser` enforces parts of this (a hostile-page probe checks that answer/composer
-  text and key events never reach the host DOM). README "Privacy" documents the full contract.
+  text and key events never reach the host DOM). `docs/security.md` documents the full contract.
 
 ## Gotchas
 
