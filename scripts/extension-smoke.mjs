@@ -108,6 +108,28 @@ async function waitForUiFrame(page) {
   return frame;
 }
 
+async function verifyEscapeClose(page, frame, focusTarget, flow) {
+  await focusTarget.focus();
+  await page.keyboard.down('Escape');
+  try {
+    // Hold the key across renderer and MessageChannel tasks so teardown cannot
+    // win a race against an immediately dispatched keyup.
+    await sleep(100);
+    if (frame.isDetached() || await page.locator(UI_HOST_SELECTOR).count() !== 1) {
+      throw new Error(`${flow}: the UI frame was removed before Escape was released.`);
+    }
+    if (!await frame.evaluate(() => document.hasFocus())) {
+      throw new Error(`${flow}: the UI frame lost focus before Escape was released.`);
+    }
+  } finally {
+    await page.keyboard.up('Escape');
+  }
+  await page.locator(UI_HOST_SELECTOR).waitFor({
+    state: 'detached',
+    timeout: TEST_TIMEOUT_MS,
+  });
+}
+
 async function verifyInternalOverlayStyle(frame) {
   const overlay = frame.locator('#snapscreen-overlay-root');
   await overlay.waitFor({ state: 'visible', timeout: TEST_TIMEOUT_MS });
@@ -551,11 +573,12 @@ try {
       await verifyInternalOverlayStyle(uiFrame);
       await verifySnipInstruction(uiFrame, 'No-API-key flow');
 
-      await uiFrame.locator('#snapscreen-overlay-root').press('Escape');
-      await uiHost.waitFor({
-        state: 'detached',
-        timeout: TEST_TIMEOUT_MS,
-      });
+      await verifyEscapeClose(
+        page,
+        uiFrame,
+        uiFrame.locator('#snapscreen-overlay-root'),
+        'No-API-key cancellation',
+      );
 
       await injectAndStartSnip(worker, contentLoader, {
         apiKey: TEST_API_KEY,
@@ -653,9 +676,11 @@ try {
 
       await sleep(50);
       await assertHostPageIsolation(page);
+      await verifyEscapeClose(page, uiFrame, composer, 'Result-panel close');
+      await assertHostPageIsolation(page);
 
       process.stdout.write(
-        'Unpacked-extension smoke test passed: exact keyed/no-key instruction, strict-CSP extension-frame crop, answer, composer, and host-page isolation verified.\n',
+        'Unpacked-extension smoke test passed: exact keyed/no-key instruction, strict-CSP extension-frame crop, answer, composer, Escape-release teardown, and host-page isolation verified.\n',
       );
     })(),
     timeoutFailure,
