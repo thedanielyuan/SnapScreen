@@ -1,7 +1,7 @@
 # AGENTS.md
 
 SnapScreen is a Chrome extension (Manifest V3) that captures a selected region of the current
-tab and answers questions about it via the Anthropic API (`claude-sonnet-5`, streamed SSE).
+tab and answers questions about it via the Anthropic API (`claude-sonnet-5-5`, streamed SSE).
 TypeScript (strict), built by Vite 8 + @crxjs/vite-plugin from `src/manifest.json`. No UI
 framework and no runtime npm dependencies — shipped code is plain DOM + `fetch`; everything in
 `package.json` is a devDependency.
@@ -70,8 +70,15 @@ it before finishing any change. CI (`.github/workflows/ci.yml`) runs exactly tha
 
 - `src/ui/result-frame.html` must stay an explicit `rolldownOptions.input` in `vite.config.ts`;
   being a web_accessible_resource alone would not get its TS/CSS bundled.
-- Model settings in `src/lib/anthropic.ts` (thinking disabled, effort low, `max_tokens: 1024`)
-  are a deliberate speed-over-depth choice for this product; don't change them casually.
+- Model settings in `src/lib/anthropic.ts` (thinking off, effort high, `max_tokens: 4096`)
+  are a deliberate product choice; don't change them casually.
+  Sonnet 5.5 returns 400 for `thinking: {type: 'disabled'}`, so "off" is
+  `{type: 'between_tools'}`. It must be the only field in `thinking`, and effort must stay
+  `high` or lower.
+- Answer requests send `fallbacks: 'default'` with the `server-side-fallback-2026-07-01` beta
+  header. A refusal from the cyber or frontier-LLM classifier then continues on Anthropic's
+  fallback model in the same SSE stream. The switch is marked by a `fallback` content block,
+  which the stream reader ignores. Other refusal categories still end in the `refusal` error.
 - CI's `npm audit --audit-level=moderate` gate can turn red from a new upstream advisory with no
   code change in the PR.
 - The smoke test reads `dist/` — a stale build tests stale code. Build first, always.

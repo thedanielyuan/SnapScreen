@@ -11,6 +11,7 @@ import {
 } from '../content/snip-overlay';
 import { setDocumentUiRoot } from '../content/ui-root';
 import type { CsToBgMessage } from '../lib/messages';
+import { API_REQUEST_TIMEOUT_MS } from '../lib/request-limits';
 import {
   WORKSPACE_PORT_NAME,
   isBackgroundToWorkspaceMessage,
@@ -19,6 +20,9 @@ import {
 } from '../lib/workspace-protocol';
 
 const REQUEST_TIMEOUT_MS = 30_000;
+// Answers stream until the API client's own timeout; wait slightly longer so
+// its specific error reaches the panel before this generic one.
+const GENERATION_REQUEST_TIMEOUT_MS = API_REQUEST_TIMEOUT_MS + 5_000;
 const RECONNECT_DELAY_MS = 250;
 const MAX_RECONNECT_ATTEMPTS = 5;
 
@@ -89,9 +93,10 @@ if (!bootstrap) {
       }
 
       const requestId = crypto.randomUUID();
+      const isGeneration = message.type === 'ANALYZE' || message.type === 'FOLLOW_UP';
       const timeout = setTimeout(() => {
         pending.delete(requestId);
-        const cancellation = message.type === 'ANALYZE' || message.type === 'FOLLOW_UP'
+        const cancellation = isGeneration
           ? {
               type: 'CANCEL_GENERATION' as const,
               captureId: message.captureId,
@@ -113,7 +118,7 @@ if (!bootstrap) {
           }
         }
         reject(new Error('The SnapScreen workspace request timed out.'));
-      }, REQUEST_TIMEOUT_MS);
+      }, isGeneration ? GENERATION_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS);
       pending.set(requestId, { resolve, reject, timeout });
       port.postMessage({
         type: 'SNAPSCREEN_WORKSPACE_REQUEST',

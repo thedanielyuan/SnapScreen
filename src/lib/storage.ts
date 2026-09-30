@@ -17,7 +17,7 @@ export const LIMIT_CONSTRAINTS = {
   maxInputCharacters: { min: 100, max: 50_000, default: 4_000 },
   // Anthropic's direct API accepts at most 10 MB per base64 image.
   maxScreenshotBytes: { min: 1_000_000, max: 10_000_000, default: 5_000_000 },
-  // 2,576 px is Sonnet 5's native long edge; 8,000 px is the API ceiling.
+  // 2,576 px is Sonnet 5.5's native long edge; 8,000 px is the API ceiling.
   maxScreenshotDimension: { min: 512, max: 8_000, default: 2_576 },
   maxConversationTurns: { min: 2, max: 50, default: 12 },
 } as const;
