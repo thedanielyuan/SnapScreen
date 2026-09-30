@@ -5,6 +5,7 @@ import {
   buildScreenshotQaSystemPrompt,
 } from './screenshot-qa-prompt';
 import {
+  API_REQUEST_TIMEOUT_MS,
   RequestLimitError,
   assertHistoryScreenshotsWithinLimits,
   assertScreenshotWithinLimits,
@@ -22,8 +23,11 @@ import {
 } from './session-history';
 
 const API_URL = 'https://api.anthropic.com/v1/messages';
-const MODEL = 'claude-sonnet-5';
-const REQUEST_TIMEOUT_MS = 60_000;
+const MODEL = 'claude-sonnet-5-5';
+// Server-side refusal fallback: when a safety classifier declines (on Sonnet
+// 5.5, the cyber and frontier_llm categories), the API reruns the request on
+// Anthropic's recommended fallback model within the same stream.
+const REFUSAL_FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 const MAX_PROVIDER_ERROR_BYTES = 16_384;
 const MAX_PROVIDER_ERROR_CHARACTERS = 240;
 
@@ -162,7 +166,7 @@ export async function verifyApiKey(apiKey: string, signal?: AbortSignal): Promis
       {
         model: MODEL,
         max_tokens: 1,
-        thinking: { type: 'disabled' },
+        thinking: { type: 'between_tools' },
         messages: [{ role: 'user', content: 'Hi' }],
       },
       requestSignal,
@@ -183,16 +187,20 @@ async function callApi(
       apiKey,
       {
         model: MODEL,
-        max_tokens: 1024,
-        // Thinking off + low effort: fast answers, and the token budget goes
-        // entirely to the visible response.
-        thinking: { type: 'disabled' },
-        output_config: { effort: 'low' },
+        max_tokens: 4096,
+        // Thinking off: fast answers, and the token budget goes entirely to
+        // the visible response. Sonnet 5.5 rejects `disabled`; `between_tools`
+        // is its no-extended-thinking setting (effort must stay `high` or
+        // below, and no other `thinking` fields are allowed).
+        thinking: { type: 'between_tools' },
+        output_config: { effort: 'high' },
+        fallbacks: 'default',
         stream: true,
         system,
         messages,
       },
       requestSignal,
+      [REFUSAL_FALLBACK_BETA],
     );
 
     const { text, stopReason } = await readSseStream(response, onDelta, requestSignal);
@@ -398,7 +406,7 @@ async function withRequestTimeout<T>(
   callerSignal: AbortSignal | undefined,
   operation: (requestSignal: AbortSignal) => Promise<T>,
 ): Promise<T> {
-  const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  const timeoutSignal = AbortSignal.timeout(API_REQUEST_TIMEOUT_MS);
   const requestSignal = callerSignal
     ? AbortSignal.any([callerSignal, timeoutSignal])
     : timeoutSignal;
@@ -421,17 +429,21 @@ async function postToApi(
   apiKey: string,
   body: object,
   signal: AbortSignal,
+  betas: readonly string[] = [],
 ): Promise<Response> {
+  const headers: Record<string, string> = {
+    'x-api-key': apiKey,
+    'anthropic-version': '2023-06-01',
+    'content-type': 'application/json',
+    'anthropic-dangerous-direct-browser-access': 'true',
+  };
+  if (betas.length > 0) headers['anthropic-beta'] = betas.join(',');
+
   let response: Response;
   try {
     response = await fetch(API_URL, {
       method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
+      headers,
       body: JSON.stringify(body),
       signal,
     });

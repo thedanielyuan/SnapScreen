@@ -175,7 +175,7 @@ function answerSse(answer) {
           id: 'msg_snapscreen_smoke',
           type: 'message',
           role: 'assistant',
-          model: 'claude-sonnet-5',
+          model: 'claude-sonnet-5-5',
           content: [],
           stop_reason: null,
           stop_sequence: null,

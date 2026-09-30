@@ -70,6 +70,11 @@ function lastRequestBody(mock: ReturnType<typeof vi.fn>): Record<string, unknown
   return JSON.parse(requestInit.body as string) as Record<string, unknown>;
 }
 
+function lastRequestHeaders(mock: ReturnType<typeof vi.fn>): Record<string, string> {
+  const [, requestInit] = mock.mock.calls[0] as [string, RequestInit];
+  return requestInit.headers as Record<string, string>;
+}
+
 function textDelta(text: string): SseEvent {
   return { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } };
 }
@@ -128,9 +133,12 @@ describe('analyzeImage', () => {
     expect(JSON.stringify(body.messages)).toContain(hiddenInstruction);
     expect(body.system).toContain(SCREENSHOT_QA_SYSTEM_PROMPT);
     expect(body.system).not.toContain(hiddenInstruction);
-    expect(body.thinking).toEqual({ type: 'disabled' });
-    expect(body.output_config).toEqual({ effort: 'low' });
+    expect(body.model).toBe('claude-sonnet-5-5');
+    expect(body.thinking).toEqual({ type: 'between_tools' });
+    expect(body.output_config).toEqual({ effort: 'high' });
+    expect(body.fallbacks).toBe('default');
     expect(body.stream).toBe(true);
+    expect(lastRequestHeaders(mock)['anthropic-beta']).toBe('server-side-fallback-2026-07-01');
   });
 
   it('adds a manual fallback question after the image when provided', async () => {
@@ -216,6 +224,33 @@ describe('analyzeImage', () => {
     });
     expect(streamed.text).toBe('**Bold** and `code_value`');
     expect(seen).toEqual(['**Bold**', '**Bold** and `code_value`']);
+  });
+
+  it('continues streamed text across a server-side refusal fallback boundary', async () => {
+    stubStream([
+      textDelta('Par'),
+      {
+        type: 'content_block_start',
+        index: 1,
+        content_block: {
+          type: 'fallback',
+          from: { model: 'claude-sonnet-5-5' },
+          to: { model: 'claude-sonnet-5' },
+        },
+      },
+      { type: 'content_block_stop', index: 1 },
+      textDelta('tial answer'),
+      messageDelta('end_turn'),
+      messageStop(),
+    ]);
+    const seen: string[] = [];
+
+    const result = await analyzeImage('key', 'data:image/png;base64,QUJD', {
+      onDelta: (text) => seen.push(text),
+    });
+
+    expect(result.text).toBe('Partial answer');
+    expect(seen).toEqual(['Par', 'Partial answer']);
   });
 
   it('appends a cut-off notice when stop_reason is max_tokens', async () => {
@@ -339,7 +374,7 @@ describe('analyzeImage', () => {
 
   it('maps a timeout while consuming the response body', async () => {
     const timeout = new AbortController();
-    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeout.signal);
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeout.signal);
     stubHangingStream();
 
     const result = analyzeImage('key', 'data:image/png;base64,QUJD');
@@ -350,6 +385,7 @@ describe('analyzeImage', () => {
       code: 'timeout',
       message: 'Request timed out. Please try again.',
     });
+    expect(timeoutSpy).toHaveBeenCalledWith(120_000);
   });
 
   it('preserves a caller AbortError while consuming the response body', async () => {
@@ -579,8 +615,11 @@ describe('verifyApiKey', () => {
     const mock = stubFetch({ content: [{ type: 'text', text: 'Hi' }] });
     await expect(verifyApiKey('key')).resolves.toBeUndefined();
     const body = lastRequestBody(mock);
+    expect(body.model).toBe('claude-sonnet-5-5');
     expect(body.max_tokens).toBe(1);
+    expect(body.thinking).toEqual({ type: 'between_tools' });
     expect(body.stream).toBeUndefined();
+    expect(lastRequestHeaders(mock)['anthropic-beta']).toBeUndefined();
     const response = await mock.mock.results[0].value as Response;
     expect(response.bodyUsed).toBe(true);
   });
