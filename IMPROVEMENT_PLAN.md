@@ -43,9 +43,9 @@ Effort scale: **XS** = minutes, **S** = under an hour, **M** = a few hours, **L*
 - **Why:** Dead code that looks load-bearing is worse than no code; anyone extending re-analysis will trip over it.
 - **Affected:** `src/lib/anthropic.ts`.
 
-#### C6. Adaptive-thinking token squeeze on Sonnet 5 — **XS, user-visible impact**
-- **What:** The API request (`src/lib/anthropic.ts:95–100`) omits the `thinking` parameter. On `claude-sonnet-5`, omitting it means **adaptive thinking runs by default**, and thinking tokens count against the hard `max_tokens: 1024` cap. A hard question can burn most of the budget on (invisible) thinking and return a truncated or empty answer — surfacing as the cryptic "No response text received" error — plus added latency for a tool whose whole point is instant answers.
-- **Recommendation (model string stays `claude-sonnet-5`):** either add `thinking: { type: "disabled" }` with `output_config: { effort: "low" }` for fast snappy answers, or keep adaptive thinking and raise `max_tokens` substantially (e.g. 4096+). The first option fits this product better.
+#### C6. Adaptive-thinking token squeeze on Sonnet 5.5 — **XS, user-visible impact**
+- **What:** The API request (`src/lib/anthropic.ts:95–100`) omits the `thinking` parameter. On `claude-sonnet-5-5`, omitting it means **adaptive thinking runs by default**, and thinking tokens count against the hard `max_tokens: 1024` cap. A hard question can burn most of the budget on (invisible) thinking and return a truncated or empty answer — surfacing as the cryptic "No response text received" error — plus added latency for a tool whose whole point is instant answers.
+- **Recommendation (model string stays `claude-sonnet-5-5`):** either add `thinking: { type: "between_tools" }` (Sonnet 5.5 rejects `"disabled"`) with `output_config: { effort: "low" }` for fast snappy answers, or keep adaptive thinking and raise `max_tokens` substantially (e.g. 4096+). The first option fits this product better.
 - **Affected:** `src/lib/anthropic.ts` (`callApi`).
 
 #### C7. No `stop_reason` handling — **S**
