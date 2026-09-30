@@ -79,6 +79,11 @@ it before finishing any change. CI (`.github/workflows/ci.yml`) runs exactly tha
   header. A refusal from the cyber or frontier-LLM classifier then continues on Anthropic's
   fallback model in the same SSE stream. The switch is marked by a `fallback` content block,
   which the stream reader ignores. Other refusal categories still end in the `refusal` error.
+- Answer requests use automatic prompt caching (top-level `cache_control`). First answers and
+  follow-ups must send the same `system` prompt and resend earlier messages unchanged, or
+  follow-ups silently miss the cache and pay full input price. That is why the follow-up rules
+  live in the shared system prompt, not in a separate prompt or a mid-conversation `system`
+  message (Sonnet 5, the fallback model, isn't documented to accept those).
 - CI's `npm audit --audit-level=moderate` gate can turn red from a new upstream advisory with no
   code change in the PR.
 - The smoke test reads `dist/` — a stale build tests stale code. Build first, always.

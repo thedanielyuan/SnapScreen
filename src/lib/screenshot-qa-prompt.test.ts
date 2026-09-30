@@ -26,6 +26,12 @@ describe('screenshot QA prompt', () => {
     );
   });
 
+  it('includes follow-up rules so first answers and follow-ups share one prompt', () => {
+    expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('Follow-up rules');
+    expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('1–3 sentences unless they ask for more detail');
+    expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('Do not re-summarize or re-describe the screenshot');
+  });
+
   it('appends saved default prompt as hidden extra guidance', () => {
     const prompt = buildScreenshotQaSystemPrompt('Prefer concise answers.');
 

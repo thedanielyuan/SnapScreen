@@ -70,6 +70,13 @@ function lastRequestBody(mock: ReturnType<typeof vi.fn>): Record<string, unknown
   return JSON.parse(requestInit.body as string) as Record<string, unknown>;
 }
 
+function requestBodies(mock: ReturnType<typeof vi.fn>): Array<Record<string, unknown>> {
+  return mock.mock.calls.map((call) => {
+    const [, requestInit] = call as [string, RequestInit];
+    return JSON.parse(requestInit.body as string) as Record<string, unknown>;
+  });
+}
+
 function lastRequestHeaders(mock: ReturnType<typeof vi.fn>): Record<string, string> {
   const [, requestInit] = mock.mock.calls[0] as [string, RequestInit];
   return requestInit.headers as Record<string, string>;
@@ -138,6 +145,7 @@ describe('analyzeImage', () => {
     expect(body.output_config).toEqual({ effort: 'high' });
     expect(body.fallbacks).toBe('default');
     expect(body.stream).toBe(true);
+    expect(body.cache_control).toEqual({ type: 'ephemeral' });
     expect(lastRequestHeaders(mock)['anthropic-beta']).toBe('server-side-fallback-2026-07-01');
   });
 
@@ -607,6 +615,24 @@ describe('followUp', () => {
       ...turn(3),
       { role: 'user', content: 'newest' },
     ]);
+  });
+
+  it('resends the first request unchanged under the same system prompt so it can hit the cache', async () => {
+    const mock = stubStream(okEvents);
+    const first = await analyzeImage('key', pngDataUrl(100, 100), {
+      hiddenInstruction: 'Keep it concise.',
+    });
+    await followUp('key', 'And this?', first.history, {
+      sessionInstruction: 'Keep it concise.',
+    });
+
+    const [firstBody, followUpBody] = requestBodies(mock);
+    expect(followUpBody.cache_control).toEqual({ type: 'ephemeral' });
+    expect(followUpBody.system).toBe(firstBody.system);
+    const firstMessages = firstBody.messages as AnthropicMessage[];
+    expect(
+      (followUpBody.messages as AnthropicMessage[]).slice(0, firstMessages.length),
+    ).toEqual(firstMessages);
   });
 });
 
