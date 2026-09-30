@@ -42,8 +42,12 @@ function expectCanonicalInstruction(): void {
 }
 
 function dispatchOverlayKey(key: string, init: KeyboardEventInit = {}): void {
-  uiQuery<HTMLDivElement>('#snapscreen-overlay-root')?.dispatchEvent(
+  const overlay = uiQuery<HTMLDivElement>('#snapscreen-overlay-root');
+  overlay?.dispatchEvent(
     new KeyboardEvent('keydown', { bubbles: true, key, ...init }),
+  );
+  overlay?.dispatchEvent(
+    new KeyboardEvent('keyup', { bubbles: true, key, ...init }),
   );
 }
 
@@ -194,16 +198,80 @@ describe('keyboard crop selection', () => {
     ).toBeLessThanOrEqual(600);
   });
 
-  it('cancels from Escape and removes the isolated host', () => {
+  it('keeps the focused overlay until Escape is released, including key repeats', () => {
     const onCancelled = vi.fn();
     startSnipOverlay({ onRegionSelected: vi.fn(), onCancelled });
     dispatchOverlayKey('Enter');
+    const overlay = uiQuery<HTMLDivElement>('#snapscreen-overlay-root')!;
 
-    dispatchOverlayKey('Escape');
+    for (const repeat of [false, true]) {
+      const event = new KeyboardEvent('keydown', {
+        bubbles: true, cancelable: true, key: 'Escape', repeat,
+      });
+      overlay.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+      expect(onCancelled).not.toHaveBeenCalled();
+      expect(getUiRootForTesting()?.activeElement).toBe(overlay);
+    }
 
+    const release = new KeyboardEvent('keyup', {
+      bubbles: true, cancelable: true, key: 'Escape',
+    });
+    overlay.dispatchEvent(release);
+
+    expect(release.defaultPrevented).toBe(true);
     expect(onCancelled).toHaveBeenCalledTimes(1);
     expect(getUiHostForTesting()).toBeNull();
   });
+
+  it('does not cancel a new overlay when Escape is released from a disposed overlay', () => {
+    const onCancelled = vi.fn();
+    startSnipOverlay({ onRegionSelected: vi.fn(), onCancelled });
+    const previous = uiQuery<HTMLDivElement>('#snapscreen-overlay-root')!;
+    previous.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    startSnipOverlay({ onRegionSelected: vi.fn(), onCancelled });
+
+    previous.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape' }));
+    uiQuery('#snapscreen-overlay-root')?.dispatchEvent(
+      new KeyboardEvent('keyup', { key: 'Escape' }),
+    );
+
+    expect(onCancelled).not.toHaveBeenCalled();
+    expect(uiQuery('#snapscreen-overlay-root')).not.toBeNull();
+  });
+
+  it.each(['pointerup', 'pointercancel', 'Enter'])(
+    'waits for Escape release without submitting or closing on %s',
+    (action) => {
+      const frames = installAnimationFrameQueue();
+      const onRegionSelected = vi.fn();
+      const onCancelled = vi.fn();
+      startSnipOverlay({ onRegionSelected, onCancelled });
+      if (action === 'Enter') {
+        dispatchOverlayKey('Enter');
+      } else {
+        dispatchOverlayPointer('pointerdown', { button: 0, clientX: 25, clientY: 30 });
+        dispatchOverlayPointer('pointermove', { clientX: 125, clientY: 90 });
+      }
+      const overlay = uiQuery<HTMLDivElement>('#snapscreen-overlay-root')!;
+      overlay.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+
+      if (action === 'Enter') {
+        dispatchOverlayKey('Enter');
+      } else {
+        dispatchOverlayPointer(action, { clientX: 125, clientY: 90 });
+      }
+      frames.shift()?.(0);
+      frames.shift()?.(0);
+      expect(onRegionSelected).not.toHaveBeenCalled();
+      expect(onCancelled).not.toHaveBeenCalled();
+      expect(uiQuery('#snapscreen-overlay-root')).toBe(overlay);
+
+      overlay.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape' }));
+      expect(onCancelled).toHaveBeenCalledTimes(1);
+      expect(getUiHostForTesting()).toBeNull();
+    },
+  );
 
   it('keeps focus in the keyboard crop dialog when Tab is pressed', () => {
     startSnipOverlay({ onRegionSelected: vi.fn(), onCancelled: vi.fn() });
@@ -403,6 +471,7 @@ describe('keyboard crop selection', () => {
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape' }));
     window.dispatchEvent(new PointerEvent('pointerup', {
       clientX: 500,
       clientY: 300,

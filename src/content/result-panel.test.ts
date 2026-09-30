@@ -150,18 +150,97 @@ describe('result panel isolation and focus', () => {
     );
   });
 
-  it('handles Escape only from inside the isolated panel', () => {
+  it('keeps focus inside the panel until its Escape press is released', () => {
     const onClose = vi.fn();
     showResultPanel(options({ onClose }));
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape' }));
     expect(onClose).not.toHaveBeenCalled();
 
-    uiQuery('.snapscreen-panel')?.dispatchEvent(
-      new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' }),
+    const composer = uiQuery<HTMLTextAreaElement>('.snapscreen-input')!;
+    composer.dispatchEvent(
+      new KeyboardEvent('keyup', { bubbles: true, key: 'Escape' }),
     );
+    expect(onClose).not.toHaveBeenCalled();
+
+    for (const repeat of [false, true]) {
+      const event = new KeyboardEvent('keydown', {
+        bubbles: true, cancelable: true, key: 'Escape', repeat,
+      });
+      composer.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(getUiRootForTesting()?.activeElement).toBe(composer);
+    }
+
+    const release = new KeyboardEvent('keyup', {
+      bubbles: true, cancelable: true, key: 'Escape',
+    });
+    composer.dispatchEvent(release);
+    expect(release.defaultPrevented).toBe(true);
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(getUiHostForTesting()).toBeNull();
+  });
+
+  it('closes only the screenshot lightbox when Escape is released', () => {
+    const onClose = vi.fn();
+    showResultPanel(options({ dataUrl: 'data:image/png;base64,AA==', onClose }));
+    const imageButton = uiQuery<HTMLButtonElement>('.snapscreen-panel-image-btn')!;
+    imageButton.click();
+    const closeButton = uiQuery<HTMLButtonElement>('.snapscreen-lightbox-close')!;
+
+    for (const repeat of [false, true]) {
+      closeButton.dispatchEvent(new KeyboardEvent('keydown', {
+        bubbles: true, key: 'Escape', repeat,
+      }));
+      expect(uiQuery('.snapscreen-lightbox')).not.toBeNull();
+      expect(getUiRootForTesting()?.activeElement).toBe(closeButton);
+    }
+    closeButton.dispatchEvent(new KeyboardEvent('keyup', {
+      bubbles: true, key: 'Escape',
+    }));
+
+    expect(uiQuery('.snapscreen-lightbox')).toBeNull();
+    expect(uiQuery<HTMLElement>('.snapscreen-panel')?.inert).toBe(false);
+    expect(getUiRootForTesting()?.activeElement).toBe(imageButton);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('honors Escape release when a pending answer rerenders the panel', () => {
+    const onClose = vi.fn();
+    showResultPanel(options({ pending: true, onStop: vi.fn(), onClose }));
+    uiQuery('.snapscreen-send-btn-stop')?.dispatchEvent(
+      new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' }),
+    );
+
+    showResultPanel(options({
+      messages: [{ role: 'assistant', content: 'Answer' }], onClose,
+    }));
+    expect(onClose).not.toHaveBeenCalled();
+    uiQuery('.snapscreen-input')?.dispatchEvent(
+      new KeyboardEvent('keyup', { bubbles: true, key: 'Escape' }),
+    );
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(getUiHostForTesting()).toBeNull();
+  });
+
+  it('does not carry an Escape press across panel disposal', () => {
+    const onClose = vi.fn();
+    showResultPanel(options({ onClose }));
+    uiQuery('.snapscreen-input')?.dispatchEvent(
+      new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' }),
+    );
+    disposeResultPanel();
+    showResultPanel(options({ onClose }));
+
+    uiQuery('.snapscreen-input')?.dispatchEvent(
+      new KeyboardEvent('keyup', { bubbles: true, key: 'Escape' }),
+    );
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(uiQuery('.snapscreen-panel')).not.toBeNull();
   });
 
   it('makes the underlying panel inert while the screenshot lightbox is open', () => {
