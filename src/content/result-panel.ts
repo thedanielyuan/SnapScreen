@@ -24,6 +24,8 @@ const STOP_ICON_SVG = `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidd
 let panelPosition: { top: number; left: number } | null = null;
 let panelPositioningAbort: AbortController | null = null;
 let panelDragAbort: AbortController | null = null;
+// An answer can rerender the panel between Escape keydown and keyup.
+let panelEscapePressed = false;
 let lightboxAbort: AbortController | null = null;
 let lightboxReturnFocus: HTMLElement | null = null;
 let toastTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -85,6 +87,7 @@ export function showResultPanel(options: ResultPanelOptions): void {
 
   let root = queryUiElement<HTMLDivElement>(`#${PANEL_ID}`);
   if (!root) {
+    panelEscapePressed = false;
     root = document.createElement('div');
     root.id = PANEL_ID;
     uiRoot.append(root);
@@ -530,6 +533,7 @@ function resetPanelCursor(): void {
 }
 
 export function disposeResultPanel(): void {
+  panelEscapePressed = false;
   cancelPanelFrames();
   panelPosition = null;
   panelPositioningAbort?.abort();
@@ -672,16 +676,26 @@ function openScreenshotLightbox(dataUrl: string, returnFocusEl: HTMLElement): vo
   const { signal } = abort;
 
   const close = () => closeScreenshotLightbox();
+  let escapePressed = false;
 
   closeBtn.addEventListener('click', close, { signal });
   backdrop.addEventListener('click', close, { signal });
   lightbox.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
       event.preventDefault();
-      close();
+      event.stopPropagation();
+      escapePressed = true;
       return;
     }
     trapFocus(lightbox, event);
+  }, { signal });
+  lightbox.addEventListener('keyup', (event) => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!escapePressed) return;
+    escapePressed = false;
+    close();
   }, { signal });
 
   closeBtn.focus();
@@ -770,10 +784,20 @@ function setupPanelPositioningListeners(
     if (event.key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();
-      closePanel(onClose);
+      // Closing on keydown can remove the iframe before the key is released,
+      // sending that keyup to the host page instead of this isolated UI.
+      panelEscapePressed = true;
       return;
     }
     trapFocus(panel, event);
+  }, { signal });
+  panel.addEventListener('keyup', (event) => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!panelEscapePressed) return;
+    panelEscapePressed = false;
+    closePanel(onClose);
   }, { signal });
 
   const resizeObserver = new ResizeObserver(reclamp);

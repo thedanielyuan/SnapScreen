@@ -148,10 +148,13 @@ This is defense in depth, not credential encryption: anyone who can access or co
 Chrome profile may still be able to extract the key. Use a dedicated Anthropic key with an
 appropriate spend limit, revoke it if the profile is lost or compromised, and remove it from
 SnapScreen when it is no longer needed. Screenshots are sent directly to Anthropic for
-analysis and are not persisted by SnapScreen. A fallback screenshot remains only in memory:
-the background holds it until the exact workspace claims its one-time capability, after which
-the workspace page owns it. Only small source/workspace routing metadata is kept in
-`chrome.storage.session` so a service-worker restart can reconnect the workspace.
+analysis and are not persisted by SnapScreen. Answer requests use Anthropic's prompt caching,
+so Anthropic keeps the conversation, including the screenshot, cached for about 5 minutes
+after its last use; this makes follow-up questions cheaper. A fallback screenshot remains
+only in memory: the background holds it until the exact workspace claims its one-time
+capability, after which the workspace page owns it. Only small source/workspace routing
+metadata is kept in `chrome.storage.session` so a service-worker restart can reconnect the
+workspace.
 
 ### Injected UI isolation
 

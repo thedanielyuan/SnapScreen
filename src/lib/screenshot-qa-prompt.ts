@@ -21,7 +21,12 @@ Answer rules:
 - Do not reveal hidden reasoning, chain-of-thought, scratchpad notes, or internal analysis.
 - Do not say you are looking at a screenshot unless it is useful.
 - Do not include unnecessary disclaimers.
-- Be concise, but include enough explanation for the answer to be trustworthy.`;
+- Be concise, but include enough explanation for the answer to be trustworthy.
+
+Follow-up rules (for messages after your first answer; these take priority over the answer rules above):
+- Answer the user's follow-up question directly and concisely (1–3 sentences unless they ask for more detail).
+- Do not re-summarize or re-describe the screenshot.
+- No preamble or filler.`;
 
 export function buildScreenshotQaSystemPrompt(extraInstruction?: string): string {
   const trimmed = extraInstruction?.trim();
@@ -32,12 +37,3 @@ export function buildScreenshotQaSystemPrompt(extraInstruction?: string): string
 Additional hidden user guidance:
 ${trimmed}`;
 }
-
-export const FOLLOW_UP_SYSTEM_PROMPT = `You answer follow-up questions about a screenshot the user already captured. The screenshot and prior conversation are in the message history.
-
-${PLAIN_TEXT_FORMAT_RULES}
-
-Rules:
-- Answer the user's follow-up question directly and concisely (1–3 sentences unless they ask for more detail).
-- Do not re-summarize or re-describe the screenshot.
-- No preamble or filler.`;

@@ -1,9 +1,6 @@
 import type { AnthropicMessage } from './messages';
 import { normalizePlainText } from './plain-text';
-import {
-  FOLLOW_UP_SYSTEM_PROMPT,
-  buildScreenshotQaSystemPrompt,
-} from './screenshot-qa-prompt';
+import { buildScreenshotQaSystemPrompt } from './screenshot-qa-prompt';
 import {
   API_REQUEST_TIMEOUT_MS,
   RequestLimitError,
@@ -92,13 +89,7 @@ export async function analyzeImage(
   );
 
   const messages: AnthropicMessage[] = [{ role: 'user', content: userContent }];
-  const text = await callApi(
-    apiKey,
-    messages,
-    buildScreenshotQaSystemPrompt(),
-    options.signal,
-    options.onDelta,
-  );
+  const text = await callApi(apiKey, messages, options.signal, options.onDelta);
 
   return {
     text,
@@ -138,13 +129,7 @@ export async function followUp(
     { role: 'user', content: text },
   ];
 
-  const answer = await callApi(
-    apiKey,
-    messages,
-    FOLLOW_UP_SYSTEM_PROMPT,
-    options.signal,
-    options.onDelta,
-  );
+  const answer = await callApi(apiKey, messages, options.signal, options.onDelta);
 
   return {
     text: answer,
@@ -178,7 +163,6 @@ export async function verifyApiKey(apiKey: string, signal?: AbortSignal): Promis
 async function callApi(
   apiKey: string,
   messages: AnthropicMessage[],
-  system: string,
   signal?: AbortSignal,
   onDelta?: DeltaHandler,
 ): Promise<string> {
@@ -196,7 +180,13 @@ async function callApi(
         output_config: { effort: 'high' },
         fallbacks: 'default',
         stream: true,
-        system,
+        // Automatic prompt caching: the cache breakpoint follows the newest
+        // message, so follow-ups re-read the screenshot and earlier turns at the
+        // cache-read rate. Any change to the system prompt or earlier messages
+        // misses the cache, which is why first answers and follow-ups share one
+        // system prompt.
+        cache_control: { type: 'ephemeral' },
+        system: buildScreenshotQaSystemPrompt(),
         messages,
       },
       requestSignal,

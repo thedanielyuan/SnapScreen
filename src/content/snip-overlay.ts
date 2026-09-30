@@ -112,6 +112,7 @@ export function startSnipOverlay(options: SnipOverlayOptions): SnipOverlayDispos
   let dragging = false;
   let activePointerId: number | null = null;
   let keyboardRect: Rect | null = null;
+  let escapePressed = false;
   let active = true;
   let firstPaintFrame: number | null = null;
   let secondPaintFrame: number | null = null;
@@ -140,6 +141,7 @@ export function startSnipOverlay(options: SnipOverlayOptions): SnipOverlayDispos
   }
 
   function completeSelection(rect: Rect): void {
+    if (escapePressed) return;
     if (rect.width < MIN_CROP_SIZE || rect.height < MIN_CROP_SIZE) {
       cancel();
       return;
@@ -193,7 +195,7 @@ export function startSnipOverlay(options: SnipOverlayOptions): SnipOverlayDispos
   }
 
   function cancel(): void {
-    if (!active) return;
+    if (!active || escapePressed) return;
     teardown(true);
     options.onCancelled();
   }
@@ -232,7 +234,13 @@ export function startSnipOverlay(options: SnipOverlayOptions): SnipOverlayDispos
     }
     if (e.key === 'Escape') {
       consumeKeyboardEvent(e);
-      cancel();
+      // Keep the focused iframe alive until keyup, or the release can reach
+      // the host page after cancellation removes the frame.
+      escapePressed = true;
+      return;
+    }
+    if (escapePressed) {
+      consumeKeyboardEvent(e);
       return;
     }
     if (dragging) return;
@@ -282,6 +290,14 @@ export function startSnipOverlay(options: SnipOverlayOptions): SnipOverlayDispos
     if (keyboardRect) updateSelection(keyboardRect, true);
   }
 
+  function onKeyUp(e: KeyboardEvent): void {
+    if (e.key !== 'Escape') return;
+    consumeKeyboardEvent(e);
+    if (!escapePressed) return;
+    escapePressed = false;
+    cancel();
+  }
+
   function onResize(): void {
     const previousBounds = lastImageBounds;
     const bounds = getImageBounds();
@@ -321,6 +337,7 @@ export function startSnipOverlay(options: SnipOverlayOptions): SnipOverlayDispos
     root.removeEventListener('pointerup', onPointerUp);
     root.removeEventListener('pointercancel', onPointerCancel);
     root.removeEventListener('keydown', onKeyDown);
+    root.removeEventListener('keyup', onKeyUp);
     window.removeEventListener('resize', onResize);
     root.style.display = 'none';
     root.remove();
@@ -346,6 +363,7 @@ export function startSnipOverlay(options: SnipOverlayOptions): SnipOverlayDispos
   root.addEventListener('pointerup', onPointerUp);
   root.addEventListener('pointercancel', onPointerCancel);
   root.addEventListener('keydown', onKeyDown);
+  root.addEventListener('keyup', onKeyUp);
   window.addEventListener('resize', onResize);
   frozenPage.addEventListener('load', onResize);
   root.focus({ preventScroll: true });
