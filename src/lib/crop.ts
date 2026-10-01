@@ -1,4 +1,10 @@
 import type { Rect } from './messages';
+import { inspectPngDataUrl, type ScreenshotMetadata } from './request-limits';
+import type { SnapScreenLimits } from './storage';
+
+// PNG size tracks pixel count only roughly, so an image over the byte limit
+// can need a second, smaller pass.
+const MAX_FIT_PASSES = 4;
 
 export async function cropImage(
   dataUrl: string,
@@ -46,6 +52,70 @@ export async function cropImage(
   } finally {
     bitmap.close();
   }
+}
+
+/**
+ * Downscales a PNG screenshot that exceeds the edge or byte limit, so large
+ * selections on high-DPI screens are sent at a lower resolution instead of
+ * being rejected. An image that already fits, can't be decoded, or stays too
+ * large is returned unchanged, so request validation still reports it.
+ */
+export async function fitScreenshotToLimits(
+  dataUrl: string,
+  limits: Pick<SnapScreenLimits, 'maxScreenshotBytes' | 'maxScreenshotDimension'>,
+): Promise<string> {
+  let metadata: ScreenshotMetadata;
+  try {
+    metadata = inspectPngDataUrl(dataUrl);
+  } catch {
+    return dataUrl;
+  }
+  const longestEdge = Math.max(metadata.width, metadata.height);
+  if (
+    metadata.bytes <= limits.maxScreenshotBytes
+    && longestEdge <= limits.maxScreenshotDimension
+  ) {
+    return dataUrl;
+  }
+
+  let scale = Math.min(
+    1,
+    limits.maxScreenshotDimension / longestEdge,
+    byteScale(metadata.bytes, limits.maxScreenshotBytes),
+  );
+  try {
+    const bitmap = await createImageBitmap(await (await fetch(dataUrl)).blob());
+    try {
+      for (let pass = 0; pass < MAX_FIT_PASSES; pass += 1) {
+        const blob = await encodeScaled(bitmap, scale);
+        if (blob.size <= limits.maxScreenshotBytes) return await blobToDataUrl(blob);
+        scale *= byteScale(blob.size, limits.maxScreenshotBytes);
+      }
+    } finally {
+      bitmap.close();
+    }
+  } catch {
+    // Validation reports the original image's size or format instead.
+  }
+  return dataUrl;
+}
+
+function byteScale(bytes: number, maxBytes: number): number {
+  // Aims 10% under the limit, because PNG size isn't proportional to area.
+  return bytes > maxBytes ? Math.sqrt(maxBytes / bytes) * 0.9 : 1;
+}
+
+async function encodeScaled(bitmap: ImageBitmap, scale: number): Promise<Blob> {
+  // Rounding keeps the longest edge exactly at the limit when scaling by edge.
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = new OffscreenCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Failed to get canvas context');
+
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  return canvas.convertToBlob({ type: 'image/png' });
 }
 
 function validateCropRequest(rect: Rect): void {

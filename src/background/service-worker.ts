@@ -1,5 +1,5 @@
 import contentScript from '../content/index.ts?script&iife';
-import { cropImage } from '../lib/crop';
+import { cropImage, fitScreenshotToLimits } from '../lib/crop';
 import { analyzeImage, followUp, AnthropicError } from '../lib/anthropic';
 import {
   getSettings,
@@ -1075,9 +1075,14 @@ async function handleControllerMessage(
             message.sessionSettings,
             settings,
           );
+          // High-DPI captures can exceed the limits; send them downscaled.
+          const screenshot = await fitScreenshotToLimits(
+            message.dataUrl,
+            sessionSettings.limits,
+          );
           const result = await keepAliveUntilSettled(analyzeImage(
             settings.apiKey,
-            message.dataUrl,
+            screenshot,
             {
               hiddenInstruction: sessionSettings.defaultPrompt,
               userQuestion: message.question,
