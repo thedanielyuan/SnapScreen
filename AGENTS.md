@@ -28,6 +28,8 @@ trailing commas).
 
 Pushing a `v*` tag runs `.github/workflows/release.yml`: the same checks, then `npm run package`,
 then a GitHub release with the zip. The tag must match the `package.json` version.
+`.github/workflows/live-api.yml` runs `src/lib/anthropic.live.test.ts` against the real API
+daily with the `SNAPSCREEN_LIVE_API_KEY` secret; without that variable the test is skipped.
 
 ## Layout
 
@@ -115,6 +117,8 @@ then a GitHub release with the zip. The tag must match the `package.json` versio
 - The extension version lives only in `package.json`; `vite.config.ts` writes it into the built
   manifest, so `src/manifest.json` has no `version`. Bump it with
   `npm version <x.y.z> --no-git-tag-version`.
+- GitHub turns off scheduled workflows in a public repo after 60 days without activity, which
+  stops the daily live API check. Re-enable it from the repo's Actions tab.
 - CI's `npm audit` gate can turn red from a new upstream advisory with no code change.
 - Manual run: `npm run build`, then chrome://extensions → Developer mode → Load unpacked →
   `dist/`. Reload the extension after each rebuild. Real answers need an Anthropic API key,

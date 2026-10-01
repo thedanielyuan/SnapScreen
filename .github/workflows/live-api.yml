@@ -1,0 +1,29 @@
+name: Live API check
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Call the real Anthropic API
+        env:
+          SNAPSCREEN_LIVE_API_KEY: ${{ secrets.SNAPSCREEN_LIVE_API_KEY }}
+        run: |
+          if [ -z "$SNAPSCREEN_LIVE_API_KEY" ]; then
+            echo "::error::Add a SNAPSCREEN_LIVE_API_KEY repository secret: a dedicated Anthropic key with a low spend limit."
+            exit 1
+          fi
+          npx vitest run src/lib/anthropic.live.test.ts
