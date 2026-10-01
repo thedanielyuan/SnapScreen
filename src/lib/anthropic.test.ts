@@ -141,7 +141,8 @@ describe('analyzeImage', () => {
     expect(body.system).toContain(SCREENSHOT_QA_SYSTEM_PROMPT);
     expect(body.system).not.toContain(hiddenInstruction);
     expect(body.model).toBe('claude-sonnet-5-5');
-    expect(body.thinking).toEqual({ type: 'between_tools' });
+    expect(body.max_tokens).toBe(32_000);
+    expect(body.thinking).toEqual({ type: 'adaptive' });
     expect(body.output_config).toEqual({ effort: 'high' });
     expect(body.fallbacks).toBe('default');
     expect(body.stream).toBe(true);
@@ -407,7 +408,7 @@ describe('analyzeImage', () => {
       code: 'timeout',
       message: 'Request timed out. Please try again.',
     });
-    expect(timeoutSpy).toHaveBeenCalledWith(120_000);
+    expect(timeoutSpy).toHaveBeenCalledWith(240_000);
   });
 
   it('preserves a caller AbortError while consuming the response body', async () => {

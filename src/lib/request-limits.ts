@@ -3,9 +3,10 @@ import type { SnapScreenLimits } from './storage';
 
 export const MEGABYTE = 1_000_000;
 
-// Wall-clock limit for one Anthropic API request, including the whole
-// streamed answer (up to 4,096 tokens at high effort).
-export const API_REQUEST_TIMEOUT_MS = 120_000;
+// Wall-clock limit for one Anthropic API request, including adaptive thinking
+// and the whole streamed answer. It stays under the 5 minutes Chrome allows a
+// single service-worker event.
+export const API_REQUEST_TIMEOUT_MS = 240_000;
 
 export type RequestLimitCode =
   | 'input_empty'

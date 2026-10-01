@@ -152,6 +152,7 @@ export async function verifyApiKey(apiKey: string, signal?: AbortSignal): Promis
       {
         model: MODEL,
         max_tokens: 1,
+        // Key check only, so it skips thinking and stops after one token.
         thinking: { type: 'between_tools' },
         messages: [{ role: 'user', content: 'Hi' }],
       },
@@ -172,12 +173,14 @@ async function callApi(
       apiKey,
       {
         model: MODEL,
-        max_tokens: 4096,
-        // Thinking off: fast answers, and the token budget goes entirely to
-        // the visible response. Sonnet 5.5 rejects `disabled`; `between_tools`
-        // is its no-extended-thinking setting (effort must stay `high` or
-        // below, and no other `thinking` fields are allowed).
-        thinking: { type: 'between_tools' },
+        // Thinking counts toward max_tokens, so the budget covers reasoning
+        // plus the visible answer.
+        max_tokens: 32_000,
+        // Adaptive thinking: the model reasons before answering, which is what
+        // math, logic, and test-style questions need. Thinking text is omitted
+        // by default and the stream reader skips thinking blocks, so history
+        // keeps only answer text and never replays thinking.
+        thinking: { type: 'adaptive' },
         output_config: { effort: 'high' },
         fallbacks: 'default',
         stream: true,

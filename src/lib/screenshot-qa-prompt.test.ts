@@ -10,20 +10,20 @@ describe('screenshot QA prompt', () => {
     expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('Identify the main question');
     expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('Ignore irrelevant UI');
     expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('briefly explain why');
-    expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('multiple questions are visible');
+    expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('answer each one in order');
     expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('unclear, unreadable, cropped');
     expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('Do not guess');
-    expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('solve the problem carefully internally');
-    expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('Do not reveal hidden reasoning');
-    expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('Stream only the final answer text');
-    expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('chain-of-thought');
-    expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('scratchpad notes');
-    expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('internal analysis');
+    expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('solve the problem carefully');
     expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('rather than using Markdown for styling');
+    expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('rather than LaTeX');
     expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('whenever they are part of the correct answer');
     expect(SCREENSHOT_QA_SYSTEM_PROMPT).not.toContain(
       'no asterisks, hashtags, underscores, backticks',
     );
+  });
+
+  it('leaves reasoning to adaptive thinking instead of rules about hiding it', () => {
+    expect(SCREENSHOT_QA_SYSTEM_PROMPT).not.toMatch(/chain-of-thought|hidden reasoning|internally/i);
   });
 
   it('includes follow-up rules so first answers and follow-ups share one prompt', () => {
