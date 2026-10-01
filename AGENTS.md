@@ -11,6 +11,7 @@ hand-written in `src/lib/anthropic.ts`).
 ```bash
 npm install                          # npm only (package-lock.json); CI uses Node 22
 npx playwright install chromium      # once, for test:browser
+git config core.hooksPath .githooks  # once per clone: pre-push check for stale branches
 npm run lint                         # ESLint (eslint.config.js); zero warnings allowed
 npm run typecheck                    # tsc --noEmit
 npm test                             # Vitest: every co-located *.test.ts
@@ -51,6 +52,11 @@ trailing commas).
   `vi.stubGlobal('chrome', …)`.
 - Commits use Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`). Branch as
   `<type>/<topic>` and land on `main` via PR.
+- Branch from the remote tip, never from local `main`, which falls behind because PRs merge on
+  GitHub: `git fetch origin && git switch --no-track -c <type>/<topic> origin/main`. A stale
+  base conflicts with whatever merged since (most PRs edit this file), and `main` only merges
+  up-to-date PRs. If `main` moves before yours merges, `git fetch origin && git merge
+  origin/main` and rerun the checks. `.githooks/pre-push` blocks pushing a branch that's behind.
 
 ## Security invariants — do not regress
 
