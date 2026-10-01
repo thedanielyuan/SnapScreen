@@ -20,6 +20,8 @@ SnapScreen when it is no longer needed.
 ## Screenshots
 
 Screenshots are sent directly to Anthropic for analysis and are not persisted by SnapScreen.
+Anthropic retains API inputs and outputs under its own
+[data-retention policy](https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data).
 Answer requests use Anthropic's prompt caching, so Anthropic keeps the conversation, including
 the screenshot, cached for about 5 minutes after its last use; this makes follow-up questions
 cheaper. A fallback screenshot remains only in memory: the background holds it until the exact

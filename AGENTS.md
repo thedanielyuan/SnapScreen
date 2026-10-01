@@ -11,6 +11,7 @@ hand-written in `src/lib/anthropic.ts`).
 ```bash
 npm install                          # npm only (package-lock.json); CI uses Node 22
 npx playwright install chromium      # once, for test:browser
+npm run lint                         # ESLint (eslint.config.js); zero warnings allowed
 npm run typecheck                    # tsc --noEmit
 npm test                             # Vitest: every co-located *.test.ts
 npx vitest run src/lib/crop.test.ts  # one file; add -t "<test name>" for one test
@@ -18,11 +19,11 @@ npm run build                        # tsc --noEmit && vite build → dist/ (nev
 npm run test:browser                 # Playwright smoke test of dist/; mocked API, no key needed
 ```
 
-Before finishing any change, run typecheck, test, build, then test:browser (under 10 s in
+Before finishing any change, run lint, typecheck, test, build, then test:browser (under 10 s in
 total). The smoke test runs whatever is in `dist/`, so it needs a fresh build. CI
 (`.github/workflows/ci.yml`) runs the same steps plus `npm audit --audit-level=moderate`. There
-is no lint script or formatter; match the surrounding style (2-space indent, single quotes,
-semicolons, trailing commas).
+is no formatter; match the surrounding style (2-space indent, single quotes, semicolons,
+trailing commas).
 
 ## Layout
 

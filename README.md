@@ -46,8 +46,9 @@ Right-click the SnapScreen icon and choose **Options** to:
 ## Privacy
 
 - **No SnapScreen servers.** SnapScreen sends your screenshots and questions straight from your
-  browser to its AI provider to generate answers, and never saves them. The provider may keep
-  a conversation cached for about 5 minutes to speed up follow-up questions.
+  browser to its AI provider to generate answers, and never saves them. The provider keeps them
+  under its own data-retention policy, and may also cache a conversation for about 5 minutes to
+  speed up follow-up questions.
 - **Your API key stays on your device.** It's sent only to that provider, and websites can't
   read it. It isn't encrypted, though, so anyone with access to your Chrome profile could
   find it.
