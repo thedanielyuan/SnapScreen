@@ -1,92 +1,97 @@
 # AGENTS.md
 
-SnapScreen is a Chrome extension (Manifest V3) that captures a selected region of the current
-tab and answers questions about it via the Anthropic API (`claude-sonnet-5-5`, streamed SSE).
-TypeScript (strict), built by Vite 8 + @crxjs/vite-plugin from `src/manifest.json`. No UI
-framework and no runtime npm dependencies — shipped code is plain DOM + `fetch`; everything in
-`package.json` is a devDependency.
-
-## Setup
-
-```bash
-npm install                      # npm is the package manager (package-lock.json)
-npx playwright install chromium  # one-time, only needed for `npm run test:browser`
-```
-
-CI uses Node 22; Node 24 verified locally. No `.nvmrc` or `engines` field.
+SnapScreen is a Chrome Manifest V3 extension: snip a region of the current tab, then ask Claude
+(`claude-sonnet-5-5`, streamed SSE) about it. Strict TypeScript, built by Vite 8 +
+`@crxjs/vite-plugin` from `src/manifest.json`. Shipped code is plain DOM + `fetch`: keep
+`package.json` devDependencies-only, and don't add `@anthropic-ai/sdk` (the API client is
+hand-written in `src/lib/anthropic.ts`).
 
 ## Commands
 
-All verified; timings from a warm local run.
-
 ```bash
-npm run lint          # ESLint flat config, zero warnings tolerated   (~1 s)
-npm run typecheck     # tsc --noEmit                                  (~1 s)
-npm test              # Vitest, full co-located suite                 (~2 s)
-npx vitest run src/lib/crop.test.ts    # one test file
-npm run build         # tsc --noEmit && vite build → dist/            (~1 s)
-npm run test:browser  # Playwright smoke test; run `npm run build` first
-npm run dev           # watch build; load dist/ unpacked, reload extension after changes
+npm install                          # npm only (package-lock.json); CI uses Node 22
+npx playwright install chromium      # once, for test:browser
+npm run typecheck                    # tsc --noEmit
+npm test                             # Vitest: every co-located *.test.ts
+npx vitest run src/lib/crop.test.ts  # one file; add -t "<test name>" for one test
+npm run build                        # tsc --noEmit && vite build → dist/ (never hand-edit)
+npm run test:browser                 # Playwright smoke test of dist/; mocked API, no key needed
 ```
 
-The whole battery (lint, typecheck, test, build, test:browser) takes under 10 s — run all of
-it before finishing any change. CI (`.github/workflows/ci.yml`) runs exactly that plus
-`npm audit --audit-level=moderate`.
+Before finishing any change, run typecheck, test, build, then test:browser (under 10 s in
+total). The smoke test runs whatever is in `dist/`, so it needs a fresh build. CI
+(`.github/workflows/ci.yml`) runs the same steps plus `npm audit --audit-level=moderate`. There
+is no lint script or formatter; match the surrounding style (2-space indent, single quotes,
+semicolons, trailing commas).
 
 ## Layout
 
-- `src/manifest.json` — source MV3 manifest; the crx plugin generates `dist/manifest.json` from it
-- `src/background/` — service worker: capture flow, generation + UI-capability registries, API dispatch
-- `src/content/` — isolated-world content script: snip overlay, conversation state, UI-frame host
-- `src/ui/` — `result-frame.html`/`.ts`/`.css`: extension-origin iframe that renders all injected UI
-- `src/workspace/` — extension-tab fallback that shows the capture when a page rejects injection
-- `src/options/` — options page: API key, default prompt, request limits
-- `src/lib/` — shared logic: Anthropic client, crop math, storage, request limits, typed protocols
-- `scripts/extension-smoke.mjs` — the `test:browser` script
-- `docs/archive/` — historical audit notes; explicitly not current
-- `dist/` — generated output (gitignored); never hand-edit
+- `src/background/` — service worker: capture flow, UI/workspace session registries, API calls
+- `src/content/` — content script, injected on demand: snip flow, conversation state, UI-frame host
+- `src/ui/` — extension-origin iframe that renders all injected UI
+- `src/workspace/` — extension tab that shows the capture when a page rejects injection
+- `src/lib/` — shared: Anthropic client, system prompt, crop math, storage, limits, protocols
 
 ## Conventions
 
-- No formatter is configured. Match surrounding style by hand: 2-space indent, single quotes,
-  semicolons, trailing commas.
-- Tests are co-located (`foo.test.ts` beside `foo.ts`). Vitest runs with no config file; the
-  default environment is Node, and DOM tests declare `// @vitest-environment happy-dom` on line 1.
-- Cross-context messages are discriminated unions: `src/lib/messages.ts` (content ↔ background)
-  and `src/lib/ui-protocol.ts` (content ↔ UI frame). Extend those types; no ad-hoc message objects.
-- User-facing failures are `AnthropicError(code, message)` with friendly text; provider/API text
-  is sanitized (key redaction, control-char strip, length cap) before it can reach the UI.
+- Cross-context messages are discriminated unions in `src/lib/`: `messages.ts` (content ↔
+  background), `ui-protocol.ts` (content ↔ UI frame), `workspace-protocol.ts` (workspace ↔
+  background). Extend them; never send ad-hoc message objects.
+- `ui-protocol.ts` and `workspace-protocol.ts` also hold hand-written `is…Message` validators.
+  Their `switch` returns `false` by default, and receivers silently drop any message that fails.
+  Add a validator case for every new variant, because tsc won't flag a missing one.
+  `workspace-protocol.ts` also re-validates the `messages.ts` types that the workspace relays,
+  so new `messages.ts` variants need a case there too.
+- Surface failures as `AnthropicError(code, friendlyMessage)`. Provider/API text must pass
+  through the sanitizer in `src/lib/anthropic.ts` (key redaction, control-char strip, length
+  cap) before it can reach the UI.
+- Tests sit beside their source (`foo.test.ts`). Vitest defaults to Node; DOM tests start with
+  `// @vitest-environment happy-dom` on line 1. Stub `chrome` per file with
+  `vi.stubGlobal('chrome', …)`.
+- Commits use Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`). Branch as
+  `<type>/<topic>` and land on `main` via PR.
 
 ## Security invariants — do not regress
 
-- Content scripts never receive or read the API key. Only the background worker and the options
-  page call the API; `chrome.storage.local` is set to `TRUSTED_CONTEXTS` access level.
+- Only the background worker and the options page read the API key or call the API. Content
+  scripts, the UI frame, and the workspace never receive it. `chrome.storage.local` is
+  restricted to `TRUSTED_CONTEXTS`.
 - All injected UI renders inside the extension-origin iframe in a closed shadow host. Content ↔
-  frame traffic goes over a capability-attested `MessageChannel` — never plain
-  `window.postMessage`, DOM events, or attributes.
-- `npm run test:browser` enforces parts of this (a hostile-page probe checks that answer/composer
-  text and key events never reach the host DOM). `docs/security.md` documents the full contract.
+  frame traffic uses the capability-attested `MessageChannel`, never `window.postMessage`, DOM
+  events, or attributes.
+- `src/workspace/workspace.html` must never be web-accessible. It gets its capture by claiming
+  a one-time capability over a runtime port.
+- `npm run test:browser` enforces parts of this (hostile-page probe, closed shadow root,
+  non-web-accessible workspace). `docs/security.md` is the full contract; update it when you
+  change a boundary.
 
 ## Gotchas
 
-- `src/ui/result-frame.html` must stay an explicit `rolldownOptions.input` in `vite.config.ts`;
-  being a web_accessible_resource alone would not get its TS/CSS bundled.
-- Model settings in `src/lib/anthropic.ts` (thinking off, effort high, `max_tokens: 4096`)
-  are a deliberate product choice; don't change them casually.
-  Sonnet 5.5 returns 400 for `thinking: {type: 'disabled'}`, so "off" is
-  `{type: 'between_tools'}`. It must be the only field in `thinking`, and effort must stay
-  `high` or lower.
+- The content script isn't declared in the manifest. `service-worker.ts` imports
+  `../content/index.ts?script&iife` and injects it with `chrome.scripting.executeScript`. It
+  must build to a synchronous IIFE, so nothing it imports may use dynamic `import()`; the smoke
+  test fails otherwise.
+- `src/ui/result-frame.html` and `src/workspace/workspace.html` must stay in
+  `rolldownOptions.input` in `vite.config.ts`, and any new extension page belongs there too.
+  Without that entry the build still passes, but the frame ships unbundled and the workspace
+  isn't emitted at all.
+- Model settings in `src/lib/anthropic.ts` (thinking off, effort `high`, `max_tokens: 4096`) are
+  a deliberate product choice; don't change them casually. Sonnet 5.5 returns 400 for
+  `thinking: {type: 'disabled'}`, so "off" is `{type: 'between_tools'}`. It must be the only
+  `thinking` field, and effort must stay `high` or lower.
 - Answer requests send `fallbacks: 'default'` with the `server-side-fallback-2026-07-01` beta
-  header. A refusal from the cyber or frontier-LLM classifier then continues on Anthropic's
-  fallback model in the same SSE stream. The switch is marked by a `fallback` content block,
-  which the stream reader ignores. Other refusal categories still end in the `refusal` error.
+  header. A `cyber` or `frontier_llm` refusal then continues on Claude Sonnet 5 in the same SSE
+  stream. The switch is marked by a `fallback` content block, which the stream reader ignores.
+  Other refusal categories still end in the `refusal` error.
 - Answer requests use automatic prompt caching (top-level `cache_control`). First answers and
   follow-ups must send the same `system` prompt and resend earlier messages unchanged, or
-  follow-ups silently miss the cache and pay full input price. That is why the follow-up rules
-  live in the shared system prompt, not in a separate prompt or a mid-conversation `system`
-  message (Sonnet 5, the fallback model, isn't documented to accept those).
-- CI's `npm audit --audit-level=moderate` gate can turn red from a new upstream advisory with no
-  code change in the PR.
-- The smoke test reads `dist/` — a stale build tests stale code. Build first, always.
-- Manual run: build, then chrome://extensions → Developer mode → Load unpacked → `dist/`. The
-  options page auto-opens on first install; real analysis needs an Anthropic API key.
+  follow-ups silently miss the cache. That's why follow-up rules live in the shared prompt in
+  `src/lib/screenshot-qa-prompt.ts`. Don't move them to a separate prompt or a mid-conversation
+  `system` message, which Sonnet 5 (the fallback model) rejects.
+- `npm run dev` doesn't work. The manifest's strict CSP blocks the crxjs dev server, so
+  extension pages hang on its loading screen. It also leaves a dev build in `dist/` that makes
+  `test:browser` time out after 30 s.
+- CI's `npm audit` gate can turn red from a new upstream advisory with no code change.
+- Manual run: `npm run build`, then chrome://extensions → Developer mode → Load unpacked →
+  `dist/`. Reload the extension after each rebuild. Real answers need an Anthropic API key,
+  which you enter on the options page.
