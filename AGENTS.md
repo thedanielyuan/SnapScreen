@@ -17,6 +17,7 @@ npm test                             # Vitest: every co-located *.test.ts
 npx vitest run src/lib/crop.test.ts  # one file; add -t "<test name>" for one test
 npm run build                        # tsc --noEmit && vite build → dist/ (never hand-edit)
 npm run test:browser                 # Playwright smoke test of dist/; mocked API, no key needed
+npm run package                      # zip the built dist/ into release/ for the Chrome Web Store
 ```
 
 Before finishing any change, run lint, typecheck, test, build, then test:browser (under 10 s in
@@ -24,6 +25,9 @@ total). The smoke test runs whatever is in `dist/`, so it needs a fresh build. C
 (`.github/workflows/ci.yml`) runs the same steps plus `npm audit --audit-level=moderate`. There
 is no formatter; match the surrounding style (2-space indent, single quotes, semicolons,
 trailing commas).
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`: the same checks, then `npm run package`,
+then a GitHub release with the zip. The tag must match the `package.json` version.
 
 ## Layout
 
@@ -108,6 +112,9 @@ trailing commas).
 - `npm run dev` doesn't work. The manifest's strict CSP blocks the crxjs dev server, so
   extension pages hang on its loading screen. It also leaves a dev build in `dist/` that makes
   `test:browser` time out after 30 s.
+- The extension version lives only in `package.json`; `vite.config.ts` writes it into the built
+  manifest, so `src/manifest.json` has no `version`. Bump it with
+  `npm version <x.y.z> --no-git-tag-version`.
 - CI's `npm audit` gate can turn red from a new upstream advisory with no code change.
 - Manual run: `npm run build`, then chrome://extensions → Developer mode → Load unpacked →
   `dist/`. Reload the extension after each rebuild. Real answers need an Anthropic API key,
