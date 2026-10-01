@@ -85,6 +85,15 @@ it before finishing any change. CI (`.github/workflows/ci.yml`) runs exactly tha
   follow-ups silently miss the cache and pay full input price. That is why the follow-up rules
   live in the shared system prompt, not in a separate prompt or a mid-conversation `system`
   message (Sonnet 5, the fallback model, isn't documented to accept those).
+- Answers are plain text except fenced code blocks: the system prompt asks for fences,
+  `src/lib/code-blocks.ts` parses them, and the result panel gives each block its own Copy
+  button. Change the prompt's formatting rules and the parser together.
+- In the injected frame, the host page's permissions policy blocks `navigator.clipboard`, so
+  Copy buttons work through the `execCommand('copy')` fallback, which needs a real click.
+- Smoke test: the hostile-page probe must stay limited to the top frame; init scripts also run
+  in the extension frame, where the probe would cancel the frame's own clicks. In headless
+  Chromium, clicks in the bottom ~90 px of the viewport never reach the extension frame, so
+  the composer-focus check passes through auto-focus, not the click.
 - CI's `npm audit --audit-level=moderate` gate can turn red from a new upstream advisory with no
   code change in the PR.
 - The smoke test reads `dist/` — a stale build tests stale code. Build first, always.

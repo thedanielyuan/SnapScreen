@@ -1,4 +1,5 @@
 import { clampToViewport, VIEWPORT_MARGIN } from '../lib/clamp-to-viewport';
+import { splitAnswerSegments, type AnswerSegment } from '../lib/code-blocks';
 import { countTextCharacters } from '../lib/request-limits';
 import { getComposerButtonState } from './composer-button-state';
 import {
@@ -20,6 +21,22 @@ const COPY_ICON_SVG = `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidd
 const CHECK_ICON_SVG = `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>`;
 const SEND_ICON_SVG = `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>`;
 const STOP_ICON_SVG = `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="currentColor"><circle cx="12" cy="12" r="9" opacity="0.22"/><rect x="8" y="8" width="8" height="8" rx="1.5"/></svg>`;
+
+interface CopyButtonConfig {
+  className: string;
+  label: string;
+  idleHtml: string;
+  copiedHtml: string;
+  failureMessage: string;
+}
+
+const ANSWER_COPY_BUTTON: CopyButtonConfig = {
+  className: 'snapscreen-copy-btn',
+  label: 'Copy answer',
+  idleHtml: COPY_ICON_SVG,
+  copiedHtml: CHECK_ICON_SVG,
+  failureMessage: 'Could not copy the answer.',
+};
 
 let panelPosition: { top: number; left: number } | null = null;
 let panelPositioningAbort: AbortController | null = null;
@@ -197,6 +214,7 @@ export function showResultPanel(options: ResultPanelOptions): void {
     }
   }
   let fatalFocusTarget: HTMLElement | null = null;
+  let hasCode = false;
 
   if (isFatalError) {
     fatalFocusTarget = appendError(
@@ -215,7 +233,11 @@ export function showResultPanel(options: ResultPanelOptions): void {
         const bubble = document.createElement('div');
         bubble.className = `snapscreen-msg snapscreen-msg-${msg.role}`;
         bubble.classList.toggle('snapscreen-msg-failed', msg.status === 'failed');
-        bubble.textContent = msg.content;
+        if (msg.role === 'assistant' && msg.status !== 'failed') {
+          hasCode = renderAnswerContent(bubble, msg.content, true) || hasCode;
+        } else {
+          bubble.textContent = msg.content;
+        }
         if (msg.status === 'failed') {
           bubble.setAttribute('aria-label', `Failed response: ${msg.content}`);
           if (index === latestFailedMessageIndex) {
@@ -226,7 +248,7 @@ export function showResultPanel(options: ResultPanelOptions): void {
         if (msg.role === 'assistant') {
           const wrap = document.createElement('div');
           wrap.className = 'snapscreen-msg-assistant-wrap';
-          wrap.append(bubble, createCopyButton(msg.content));
+          wrap.append(bubble, createCopyButton(msg.content, ANSWER_COPY_BUTTON));
           if (
             index === latestFailedMessageIndex
             && options.failedFollowUpActions
@@ -261,6 +283,7 @@ export function showResultPanel(options: ResultPanelOptions): void {
     });
   }
 
+  root.classList.toggle('snapscreen-panel-has-code', hasCode);
   root.append(body);
 
   const footer = document.createElement('div');
@@ -407,61 +430,125 @@ function createPendingIndicator(): HTMLElement {
   return pending;
 }
 
-function createCopyButton(text: string): HTMLButtonElement {
+/**
+ * Renders answer text into a message bubble. Fenced code becomes a code block,
+ * with its own Copy button when `copyable`; everything else stays plain text.
+ * Returns whether any code block was rendered.
+ */
+function renderAnswerContent(
+  bubble: Element,
+  text: string,
+  copyable: boolean,
+): boolean {
+  const segments = splitAnswerSegments(text);
+  const hasCode = segments.some((segment) => segment.type === 'code');
+  bubble.classList.toggle('snapscreen-msg-has-code', hasCode);
+  if (!hasCode) {
+    bubble.textContent = text;
+    return false;
+  }
+
+  bubble.replaceChildren(...segments.map((segment) => {
+    if (segment.type === 'code') return createCodeBlock(segment, copyable);
+    const prose = document.createElement('div');
+    prose.className = 'snapscreen-msg-text';
+    prose.textContent = segment.text;
+    return prose;
+  }));
+  return true;
+}
+
+function createCodeBlock(
+  segment: Extract<AnswerSegment, { type: 'code' }>,
+  copyable: boolean,
+): HTMLElement {
+  const block = document.createElement('div');
+  block.className = 'snapscreen-code-block';
+
+  const header = document.createElement('div');
+  header.className = 'snapscreen-code-header';
+
+  const language = document.createElement('span');
+  language.className = 'snapscreen-code-language';
+  language.textContent = segment.language || 'code';
+  header.append(language);
+
+  // Streaming blocks are rebuilt on every delta, so the button only appears
+  // once the answer is final.
+  if (copyable) {
+    const label = segment.language ? `Copy ${segment.language} code` : 'Copy code';
+    header.append(createCopyButton(segment.code, {
+      className: 'snapscreen-code-copy-btn',
+      label,
+      idleHtml: `${COPY_ICON_SVG}<span>Copy</span>`,
+      copiedHtml: `${CHECK_ICON_SVG}<span>Copied</span>`,
+      failureMessage: 'Could not copy the code.',
+    }));
+  }
+
+  const pre = document.createElement('pre');
+  pre.className = 'snapscreen-code';
+  const code = document.createElement('code');
+  code.textContent = segment.code;
+  pre.append(code);
+
+  block.append(header, pre);
+  return block;
+}
+
+function createCopyButton(text: string, config: CopyButtonConfig): HTMLButtonElement {
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.className = 'snapscreen-copy-btn';
-  btn.setAttribute('aria-label', 'Copy answer');
-  btn.title = 'Copy answer';
-  btn.innerHTML = COPY_ICON_SVG;
+  btn.className = config.className;
+  btn.setAttribute('aria-label', config.label);
+  btn.title = config.label;
+  btn.innerHTML = config.idleHtml;
 
   btn.addEventListener('click', async () => {
-    let copied = false;
-
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-        copied = true;
-      }
-    } catch {
-      // Clipboard API can be unavailable (e.g. insecure contexts) — fall back.
-    }
-
-    if (!copied) {
-      const helper = document.createElement('textarea');
-      helper.value = text;
-      helper.style.position = 'fixed';
-      helper.style.opacity = '0';
-      try {
-        getUiRoot().append(helper);
-        helper.select();
-        copied =
-          typeof document.execCommand === 'function' &&
-          document.execCommand('copy');
-      } catch {
-        copied = false;
-      } finally {
-        helper.remove();
-        btn.focus({ preventScroll: true });
-      }
-    }
-
-    if (!copied) {
-      showErrorToast('Could not copy the answer.');
+    if (!await copyToClipboard(text, btn)) {
+      showErrorToast(config.failureMessage);
       return;
     }
 
-    btn.innerHTML = CHECK_ICON_SVG;
+    btn.innerHTML = config.copiedHtml;
     btn.setAttribute('aria-label', 'Copied');
     btn.classList.add('snapscreen-copy-btn-copied');
     setTimeout(() => {
-      btn.innerHTML = COPY_ICON_SVG;
-      btn.setAttribute('aria-label', 'Copy answer');
+      btn.innerHTML = config.idleHtml;
+      btn.setAttribute('aria-label', config.label);
       btn.classList.remove('snapscreen-copy-btn-copied');
     }, 1500);
   });
 
   return btn;
+}
+
+async function copyToClipboard(text: string, returnFocus: HTMLElement): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // The Clipboard API can be unavailable (e.g. insecure contexts, or a host
+    // page permissions policy that blocks the injected frame) — fall back.
+  }
+
+  const helper = document.createElement('textarea');
+  helper.value = text;
+  helper.style.position = 'fixed';
+  helper.style.opacity = '0';
+  try {
+    getUiRoot().append(helper);
+    helper.select();
+    return typeof document.execCommand === 'function'
+      && document.execCommand('copy');
+  } catch {
+    return false;
+  } finally {
+    helper.remove();
+    returnFocus.focus({ preventScroll: true });
+  }
 }
 
 function createFailedFollowUpActions(
@@ -882,7 +969,9 @@ export function updateStreamingAnswer(text: string): void {
     thread.append(bubble);
   }
 
-  bubble.textContent = text;
+  if (renderAnswerContent(bubble, text, false)) {
+    root?.classList.add('snapscreen-panel-has-code');
+  }
   body.scrollTop = body.scrollHeight;
 }
 

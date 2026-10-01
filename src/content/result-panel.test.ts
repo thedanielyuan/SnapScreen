@@ -312,6 +312,171 @@ describe('copy feedback', () => {
   });
 });
 
+describe('code blocks', () => {
+  const codeAnswer = [
+    'Here is the function:',
+    '',
+    '```python',
+    'def add(a, b):',
+    '    return a + b',
+    '```',
+    '',
+    'It returns the sum.',
+  ].join('\n');
+
+  it('renders fenced code as a labeled block between plain-text prose', () => {
+    showResultPanel(options({ messages: [{ role: 'assistant', content: codeAnswer }] }));
+
+    const bubble = uiQuery('.snapscreen-msg-assistant')!;
+    expect(bubble.classList.contains('snapscreen-msg-has-code')).toBe(true);
+    expect(uiQueryAll('.snapscreen-msg-text').map((element) => element.textContent)).toEqual([
+      'Here is the function:',
+      'It returns the sum.',
+    ]);
+    expect(uiQuery('.snapscreen-code-language')?.textContent).toBe('python');
+    expect(uiQuery('.snapscreen-code code')?.textContent).toBe(
+      'def add(a, b):\n    return a + b',
+    );
+    expect(bubble.textContent).not.toContain('```');
+    expect(uiQuery('.snapscreen-panel')?.classList.contains('snapscreen-panel-has-code'))
+      .toBe(true);
+    // The whole-answer copy button is still offered alongside the code button.
+    expect(uiQuery('.snapscreen-copy-btn')?.getAttribute('aria-label')).toBe('Copy answer');
+  });
+
+  it('copies exactly the code, without fences or prose, and confirms it', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    showResultPanel(options({ messages: [{ role: 'assistant', content: codeAnswer }] }));
+    const copy = uiQuery<HTMLButtonElement>('.snapscreen-code-copy-btn')!;
+    expect(copy.getAttribute('aria-label')).toBe('Copy python code');
+    expect(copy.textContent).toBe('Copy');
+
+    copy.click();
+    await flushAsyncListener();
+
+    expect(writeText).toHaveBeenCalledWith('def add(a, b):\n    return a + b');
+    expect(copy.getAttribute('aria-label')).toBe('Copied');
+    expect(copy.textContent).toBe('Copied');
+    expect(copy.classList.contains('snapscreen-copy-btn-copied')).toBe(true);
+  });
+
+  it('gives each block its own copy button and falls back to execCommand', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: undefined,
+    });
+    const copied: string[] = [];
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: vi.fn(() => {
+        const helper = getUiRootForTesting()?.querySelector<HTMLTextAreaElement>(
+          'textarea:not(.snapscreen-input)',
+        );
+        copied.push(helper?.value ?? '');
+        return true;
+      }),
+    });
+    showResultPanel(options({
+      messages: [{
+        role: 'assistant',
+        content: '```html\n<p>Hi</p>\n```\nThen:\n```\nrun()\n```',
+      }],
+    }));
+    const buttons = uiQueryAll('.snapscreen-code-copy-btn') as HTMLButtonElement[];
+    expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
+      'Copy html code',
+      'Copy code',
+    ]);
+    expect(uiQueryAll('.snapscreen-code-language').map((element) => element.textContent))
+      .toEqual(['html', 'code']);
+
+    buttons[1].click();
+    await flushAsyncListener();
+
+    expect(copied).toEqual(['run()']);
+    expect(getUiRootForTesting()?.activeElement).toBe(buttons[1]);
+  });
+
+  it('reports a code-specific failure when copying is blocked', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
+    });
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: vi.fn().mockReturnValue(false),
+    });
+    showResultPanel(options({ messages: [{ role: 'assistant', content: codeAnswer }] }));
+    const copy = uiQuery<HTMLButtonElement>('.snapscreen-code-copy-btn')!;
+
+    copy.click();
+    await flushAsyncListener();
+
+    expect(copy.getAttribute('aria-label')).toBe('Copy python code');
+    expect(uiQuery('#snapscreen-toast-root')?.textContent).toBe('Could not copy the code.');
+  });
+
+  it('streams code into a block and adds copy buttons only to the final answer', () => {
+    showResultPanel(options({ messages: [], pending: true, onStop: vi.fn() }));
+    expect(uiQuery('.snapscreen-panel')?.classList.contains('snapscreen-panel-has-code'))
+      .toBe(false);
+
+    updateStreamingAnswer('Sure:\n```js\nconst x');
+    expect(uiQuery('.snapscreen-msg-streaming .snapscreen-code code')?.textContent)
+      .toBe('const x');
+    expect(uiQuery('.snapscreen-code-copy-btn')).toBeNull();
+    expect(uiQuery('.snapscreen-panel')?.classList.contains('snapscreen-panel-has-code'))
+      .toBe(true);
+
+    updateStreamingAnswer('Sure:\n```js\nconst x = 1;\n```\nDone.');
+    expect(uiQueryAll('.snapscreen-msg-streaming .snapscreen-code-block')).toHaveLength(1);
+    expect(uiQuery('.snapscreen-msg-streaming')?.textContent).toContain('Done.');
+
+    showResultPanel(options({
+      messages: [{ role: 'assistant', content: 'Sure:\n```js\nconst x = 1;\n```\nDone.' }],
+    }));
+    expect(uiQueryAll('.snapscreen-code-copy-btn')).toHaveLength(1);
+  });
+
+  it('keeps plain answers, user questions, and failures as literal text', () => {
+    showResultPanel(options({
+      messages: [
+        { role: 'assistant', content: 'Use `len(s)`; **not** a block.' },
+        { role: 'user', content: '```\nmy pasted code\n```' },
+        { role: 'assistant', content: '```\nnot code\n```', status: 'failed' },
+      ],
+    }));
+
+    const messages = uiQueryAll('.snapscreen-msg');
+    expect(messages.map((message) => message.textContent)).toEqual([
+      'Use `len(s)`; **not** a block.',
+      '```\nmy pasted code\n```',
+      '```\nnot code\n```',
+    ]);
+    expect(uiQuery('.snapscreen-code-block')).toBeNull();
+    expect(uiQuery('.snapscreen-panel')?.classList.contains('snapscreen-panel-has-code'))
+      .toBe(false);
+  });
+
+  it('renders markup inside code as inert text', () => {
+    showResultPanel(options({
+      messages: [{
+        role: 'assistant',
+        content: '```html\n<img src="x" onerror="alert(1)">\n```',
+      }],
+    }));
+
+    expect(uiQuery('.snapscreen-code code')?.textContent).toBe(
+      '<img src="x" onerror="alert(1)">',
+    );
+    expect(uiQuery('.snapscreen-code img')).toBeNull();
+  });
+});
+
 describe('follow-up validation and recovery', () => {
   it('retains an over-limit Unicode question and shows inline feedback', () => {
     const onFollowUp = vi.fn();

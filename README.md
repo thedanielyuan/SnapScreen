@@ -9,6 +9,8 @@ answer appears in a panel right beside it.
 
 - **Snip with mouse or keyboard** — drag a box, or place and adjust one with the arrow keys
 - **Streaming answers** — watch the reply as it's written, then ask follow-up questions
+- **Code answers** — snip a coding question to get simple code in the language it asks for,
+  with a **Copy** button on every code block
 - **Answer controls** — stop, retry, copy, view the full-size capture, or start a new snip
 - **Works almost everywhere** — including browser pages, the Chrome Web Store, PDFs, and local
   files
@@ -22,6 +24,10 @@ answer appears in a panel right beside it.
 
 **Keyboard selection:** press **Enter** to place a box, move it with the **arrow keys**, resize
 it with **Shift + arrow keys**, and press **Enter** again to confirm.
+
+**Coding questions:** if the question doesn't say which programming language to use, SnapScreen
+asks you; reply in the follow-up box. To skip the question, add your language to the default
+prompt in Settings, for example "Write any code in Python."
 
 On protected pages, such as the Chrome Web Store, your capture opens in a separate SnapScreen
 tab.

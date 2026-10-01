@@ -268,6 +268,20 @@ describe('analyzeImage', () => {
     expect(result.text).toContain('cut off');
   });
 
+  it('closes a code block interrupted by max_tokens before the cut-off notice', async () => {
+    stubStream([
+      textDelta('```python\ndef add(a, b):\n    return a'),
+      messageDelta('max_tokens'),
+      messageStop(),
+    ]);
+    const result = await analyzeImage('key', 'data:image/png;base64,QUJD');
+
+    expect(result.text).toBe(
+      '```python\ndef add(a, b):\n    return a\n```\n\n'
+        + '(Answer was cut off — ask a follow-up to continue.)',
+    );
+  });
+
   it('rejects a whitespace-only completed response', async () => {
     stubStream([textDelta(' \n\t '), messageDelta('end_turn'), messageStop()]);
 
