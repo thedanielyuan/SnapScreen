@@ -71,11 +71,17 @@ it before finishing any change. CI (`.github/workflows/ci.yml`) runs exactly tha
 
 - `src/ui/result-frame.html` must stay an explicit `rolldownOptions.input` in `vite.config.ts`;
   being a web_accessible_resource alone would not get its TS/CSS bundled.
-- Model settings in `src/lib/anthropic.ts` (thinking off, effort high, `max_tokens: 4096`)
-  are a deliberate product choice; don't change them casually.
-  Sonnet 5.5 returns 400 for `thinking: {type: 'disabled'}`, so "off" is
-  `{type: 'between_tools'}`. It must be the only field in `thinking`, and effort must stay
-  `high` or lower.
+- Model settings in `src/lib/anthropic.ts` (adaptive thinking, effort high,
+  `max_tokens: 32_000`) are a deliberate choice for answer quality; don't change them casually.
+  Thinking counts toward `max_tokens`. The stream reader skips thinking blocks and history
+  stores only answer text, so thinking is never sent back and turn pruning can't trip Sonnet
+  5.5's history-editing check on replayed thinking. Sonnet 5.5 returns 400 for
+  `thinking: {type: 'disabled'}`; "off" is `{type: 'between_tools'}` (the only field allowed in
+  `thinking`, effort `high` or lower), which `verifyApiKey`'s one-token key check still uses.
+- A thinking answer can stream no text for over 30 s, and Chrome may stop an idle service
+  worker even mid-fetch. `keepAliveUntilSettled` (`src/background/worker-keepalive.ts`) calls
+  an extension API every 25 s while a request runs. The 240 s request timeout
+  (`API_REQUEST_TIMEOUT_MS`) stays under Chrome's 5-minute cap on one service-worker event.
 - Answer requests send `fallbacks: 'default'` with the `server-side-fallback-2026-07-01` beta
   header. A refusal from the cyber or frontier-LLM classifier then continues on Anthropic's
   fallback model in the same SSE stream. The switch is marked by a `fallback` content block,

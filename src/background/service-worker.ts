@@ -32,6 +32,7 @@ import {
 import { GenerationRegistry, type ActiveGeneration } from './generation-registry';
 import { getDocumentMessageOptions, type DocumentTarget } from './document-target';
 import { UiCapabilityRegistry } from './ui-capability-registry';
+import { keepAliveUntilSettled } from './worker-keepalive';
 
 const generations = new GenerationRegistry();
 const uiCapabilities = new UiCapabilityRegistry();
@@ -1074,7 +1075,7 @@ async function handleControllerMessage(
             message.sessionSettings,
             settings,
           );
-          const result = await analyzeImage(
+          const result = await keepAliveUntilSettled(analyzeImage(
             settings.apiKey,
             message.dataUrl,
             {
@@ -1084,7 +1085,7 @@ async function handleControllerMessage(
               onDelta: makeDeltaRelay(endpoint, ids, generation),
               limits: sessionSettings.limits,
             },
-          );
+          ));
 
           if (!generations.isCurrent(ownerTabId, message.requestId)) {
             return { ok: false, aborted: true };
@@ -1130,7 +1131,7 @@ async function handleControllerMessage(
             message.sessionSettings,
             settings,
           );
-          const result = await followUp(
+          const result = await keepAliveUntilSettled(followUp(
             settings.apiKey,
             message.text,
             message.history,
@@ -1140,7 +1141,7 @@ async function handleControllerMessage(
               sessionInstruction: sessionSettings.defaultPrompt,
               limits: sessionSettings.limits,
             },
-          );
+          ));
 
           if (!generations.isCurrent(ownerTabId, message.requestId)) {
             return { ok: false, aborted: true };
