@@ -76,10 +76,17 @@ trailing commas).
   `rolldownOptions.input` in `vite.config.ts`, and any new extension page belongs there too.
   Without that entry the build still passes, but the frame ships unbundled and the workspace
   isn't emitted at all.
-- Model settings in `src/lib/anthropic.ts` (thinking off, effort `high`, `max_tokens: 4096`) are
-  a deliberate product choice; don't change them casually. Sonnet 5.5 returns 400 for
-  `thinking: {type: 'disabled'}`, so "off" is `{type: 'between_tools'}`. It must be the only
-  `thinking` field, and effort must stay `high` or lower.
+- Model settings in `src/lib/anthropic.ts` (adaptive thinking, effort `high`,
+  `max_tokens: 32_000`) are a deliberate choice for answer quality; don't change them casually.
+  Thinking counts toward `max_tokens`. The stream reader skips thinking blocks and history
+  stores only answer text, so thinking is never sent back and turn pruning can't trip Sonnet
+  5.5's history-editing check on replayed thinking. Sonnet 5.5 returns 400 for
+  `thinking: {type: 'disabled'}`; "off" is `{type: 'between_tools'}` (the only `thinking` field
+  allowed, effort `high` or lower), which `verifyApiKey`'s one-token key check still uses.
+- A thinking answer can stream no text for over 30 s, and Chrome may stop an idle service
+  worker even mid-fetch. `keepAliveUntilSettled` (`src/background/worker-keepalive.ts`) calls
+  an extension API every 25 s while a request runs. The 240 s request timeout
+  (`API_REQUEST_TIMEOUT_MS`) stays under Chrome's 5-minute cap on one service-worker event.
 - Answer requests send `fallbacks: 'default'` with the `server-side-fallback-2026-07-01` beta
   header. A `cyber` or `frontier_llm` refusal then continues on Claude Sonnet 5 in the same SSE
   stream. The switch is marked by a `fallback` content block, which the stream reader ignores.
