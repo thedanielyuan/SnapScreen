@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "SnapScreen",
   "description": "Turn any on-screen question into an instant answer",
+  "homepage_url": "https://github.com/thedanielyuan/SnapScreen",
   "minimum_chrome_version": "116",
   "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": ["https://api.anthropic.com/*"],
