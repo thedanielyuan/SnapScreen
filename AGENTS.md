@@ -43,7 +43,7 @@ it before finishing any change. CI (`.github/workflows/ci.yml`) runs exactly tha
 - `src/options/` — options page: API key, default prompt, request limits
 - `src/lib/` — shared logic: Anthropic client, crop math, storage, request limits, typed protocols
 - `scripts/extension-smoke.mjs` — the `test:browser` script
-- `docs/archive/` — historical audit notes; explicitly not current
+- `docs/security.md` — the full security model behind the invariants below
 - `dist/` — generated output (gitignored); never hand-edit
 
 ## Conventions
