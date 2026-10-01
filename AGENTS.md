@@ -96,6 +96,15 @@ trailing commas).
   follow-ups silently miss the cache. That's why follow-up rules live in the shared prompt in
   `src/lib/screenshot-qa-prompt.ts`. Don't move them to a separate prompt or a mid-conversation
   `system` message, which Sonnet 5 (the fallback model) rejects.
+- Answers are plain text except fenced code blocks: the prompt asks for fences,
+  `src/lib/code-blocks.ts` parses them, and the result panel gives each block its own Copy
+  button. Change the prompt's formatting rules and the parser together.
+- In the injected frame, the host page's permissions policy blocks `navigator.clipboard`, so
+  Copy buttons work through the `execCommand('copy')` fallback, which needs a real click.
+- The smoke test's hostile-page probe must stay limited to the top frame: init scripts also run
+  in the extension frame, where the probe would cancel the frame's own clicks. In headless
+  Chromium, clicks in the bottom ~90 px of the viewport never reach the extension frame, so
+  the composer-focus check passes through auto-focus, not the click.
 - `npm run dev` doesn't work. The manifest's strict CSP blocks the crxjs dev server, so
   extension pages hang on its loading screen. It also leaves a dev build in `dist/` that makes
   `test:browser` time out after 30 s.

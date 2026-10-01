@@ -32,6 +32,34 @@ describe('screenshot QA prompt', () => {
     expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('Do not re-summarize or re-describe the screenshot');
   });
 
+  it('fences copyable code with its language and nothing else', () => {
+    expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('fenced code block');
+    expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('```python');
+    expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('put only code inside it');
+    expect(SCREENSHOT_QA_SYSTEM_PROMPT).not.toContain('code fences solely for presentation');
+  });
+
+  it('writes simple code in the required language and asks when the language is unclear', () => {
+    expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('Coding rules');
+    expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('programming language the task requires');
+    expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('a language the user names');
+    expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('a language the screenshot clearly implies');
+    expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('do not guess and do not write any code yet');
+    expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('Which language should I use');
+    expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('Keep the code simple');
+    expect(SCREENSHOT_QA_SYSTEM_PROMPT).toContain('Match any given starter code');
+  });
+
+  it('lets follow-ups that settle the language return full code despite the brevity rule', () => {
+    const followUpRules = SCREENSHOT_QA_SYSTEM_PROMPT.slice(
+      SCREENSHOT_QA_SYSTEM_PROMPT.indexOf('Follow-up rules'),
+    );
+
+    expect(followUpRules).toContain('Code is the exception');
+    expect(followUpRules).toContain('which language to use');
+    expect(followUpRules).toContain('reply with the complete code');
+  });
+
   it('appends saved default prompt as hidden extra guidance', () => {
     const prompt = buildScreenshotQaSystemPrompt('Prefer concise answers.');
 

@@ -1,3 +1,4 @@
+import { closeOpenCodeFence } from './code-blocks';
 import type { AnthropicMessage } from './messages';
 import { normalizePlainText } from './plain-text';
 import { buildScreenshotQaSystemPrompt } from './screenshot-qa-prompt';
@@ -207,7 +208,9 @@ async function callApi(
       throw new AnthropicError('api', 'No response text received from the API.');
     }
     if (stopReason === 'max_tokens') {
-      return `${cleaned}\n\n(Answer was cut off — ask a follow-up to continue.)`;
+      // A cut-off can land inside a code block; close it so the notice is not
+      // rendered, or copied, as part of the code.
+      return `${closeOpenCodeFence(cleaned)}\n\n(Answer was cut off — ask a follow-up to continue.)`;
     }
     return cleaned;
   });

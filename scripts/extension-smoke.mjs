@@ -12,6 +12,9 @@ const UI_FRAME_PATH = '/src/ui/result-frame.html';
 const WORKSPACE_PATH = '/src/workspace/workspace.html';
 const ANSWER_SENTINEL = 'SNAPSCREEN_SMOKE_ANSWER_7C91F2';
 const COMPOSER_SENTINEL = 'SNAPSCREEN_SMOKE_COMPOSER_4A8DE6';
+const CODE_SENTINEL = 'SNAPSCREEN_SMOKE_CODE_5B3E9D';
+const SMOKE_CODE = `def answer():\n    return "${CODE_SENTINEL}"`;
+const SMOKE_ANSWER = `${ANSWER_SENTINEL}\n\n\`\`\`python\n${SMOKE_CODE}\n\`\`\``;
 const HIDDEN_PROMPT = 'What does this show? Answer accurately and concisely.';
 const TEST_API_KEY = 'sk-ant-snapscreen-smoke-only-93C57A';
 const REQUIRED_SNIP_INSTRUCTION = 'Drag to select a region. Click to cancel';
@@ -187,6 +190,35 @@ async function verifySnipInstruction(frame, flow) {
   }
 }
 
+async function verifyCodeBlockCopy(page, frame) {
+  const codeBlocks = frame.locator('.snapscreen-code-block');
+  if (await codeBlocks.count() !== 1) {
+    throw new Error('The completed answer did not render exactly one code block.');
+  }
+  const language = await codeBlocks.locator('.snapscreen-code-language').textContent();
+  const code = await codeBlocks.locator('.snapscreen-code code').textContent();
+  if (language !== 'python' || code !== SMOKE_CODE) {
+    throw new Error(
+      `The code block rendered the wrong content (language=${JSON.stringify(language)}, code=${JSON.stringify(code)}).`,
+    );
+  }
+
+  await codeBlocks.locator('.snapscreen-code-copy-btn').click();
+  await frame.locator('.snapscreen-code-copy-btn[aria-label="Copied"]').waitFor({
+    state: 'attached',
+    timeout: TEST_TIMEOUT_MS,
+  });
+  // Reading needs a focused page and a granted permission; the extension frame
+  // itself only ever writes.
+  await page.bringToFront();
+  const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
+  if (clipboardText !== SMOKE_CODE) {
+    throw new Error(
+      `Copy code wrote ${JSON.stringify(clipboardText)} instead of the code block.`,
+    );
+  }
+}
+
 function answerSse(answer) {
   const events = [
     {
@@ -245,8 +277,12 @@ function answerSse(answer) {
 
 async function installHostProbe(page) {
   await page.addInitScript(
-    ({ answerSentinel, composerSentinel }) => {
-      const sentinels = [answerSentinel, composerSentinel];
+    ({ answerSentinel, codeSentinel, composerSentinel }) => {
+      // Init scripts also run in child frames. The probe models the hostile
+      // host page, which cannot run script inside the extension frame; there
+      // it would cancel the frame's own clicks.
+      if (window !== window.top) return;
+      const sentinels = [answerSentinel, codeSentinel, composerSentinel];
       const probe = { events: [], exposures: [] };
       Object.defineProperty(window, '__snapscreenSmokeHostProbe', {
         configurable: false,
@@ -327,7 +363,11 @@ async function installHostProbe(page) {
         recordExposure('message', value);
       });
     },
-    { answerSentinel: ANSWER_SENTINEL, composerSentinel: COMPOSER_SENTINEL },
+    {
+      answerSentinel: ANSWER_SENTINEL,
+      codeSentinel: CODE_SENTINEL,
+      composerSentinel: COMPOSER_SENTINEL,
+    },
   );
 }
 
@@ -406,7 +446,7 @@ async function injectAndStartSnip(worker, contentLoader, { apiKey, hasApiKey }) 
 
 async function assertHostPageIsolation(page) {
   const observation = await page.evaluate(
-    ({ answerSentinel, composerSentinel, framePath }) => {
+    ({ answerSentinel, codeSentinel, composerSentinel, framePath }) => {
       const probe = window.__snapscreenSmokeHostProbe;
       const bodyText = document.body?.textContent ?? '';
       const queriedElements = Array.from(document.querySelectorAll('body *'));
@@ -420,22 +460,26 @@ async function assertHostPageIsolation(page) {
         .join('\n');
       return {
         bodyContainsAnswer: bodyText.includes(answerSentinel),
+        bodyContainsCode: bodyText.includes(codeSentinel),
         bodyContainsComposer: bodyText.includes(composerSentinel),
         events: probe?.events ?? null,
         exposures: probe?.exposures ?? null,
         queryContainsAnswer: queriedText.includes(answerSentinel),
+        queryContainsCode: queriedText.includes(codeSentinel),
         queryContainsComposer: queriedText.includes(composerSentinel),
         queryFoundFrame: document.querySelector(`iframe[src*="${framePath}"]`) !== null,
         queryFoundInternalUi: document.querySelector([
           '#snapscreen-overlay-root',
           '.snapscreen-panel',
           '.snapscreen-msg-assistant',
+          '.snapscreen-code-block',
           '.snapscreen-input',
         ].join(',')) !== null,
       };
     },
     {
       answerSentinel: ANSWER_SENTINEL,
+      codeSentinel: CODE_SENTINEL,
       composerSentinel: COMPOSER_SENTINEL,
       framePath: UI_FRAME_PATH,
     },
@@ -470,8 +514,10 @@ async function assertHostPageIsolation(page) {
   }
   if (
     observation.bodyContainsAnswer
+    || observation.bodyContainsCode
     || observation.bodyContainsComposer
     || observation.queryContainsAnswer
+    || observation.queryContainsCode
     || observation.queryContainsComposer
     || observation.queryFoundFrame
     || observation.queryFoundInternalUi
@@ -543,8 +589,13 @@ try {
           headers: {
             'cache-control': 'no-cache',
           },
-          body: answerSse(ANSWER_SENTINEL),
+          body: answerSse(SMOKE_ANSWER),
         });
+      });
+
+      // Lets the smoke test read back what the frame's Copy button wrote.
+      await context.grantPermissions(['clipboard-read'], {
+        origin: new URL(FIXTURE_URL).origin,
       });
 
       const worker = await waitForExtensionWorker(context);
@@ -674,13 +725,15 @@ try {
         throw new Error('The model request did not retain the hidden prompt and screenshot.');
       }
 
+      await verifyCodeBlockCopy(page, uiFrame);
+
       await sleep(50);
       await assertHostPageIsolation(page);
       await verifyEscapeClose(page, uiFrame, composer, 'Result-panel close');
       await assertHostPageIsolation(page);
 
       process.stdout.write(
-        'Unpacked-extension smoke test passed: exact keyed/no-key instruction, strict-CSP extension-frame crop, answer, composer, Escape-release teardown, and host-page isolation verified.\n',
+        'Unpacked-extension smoke test passed: exact keyed/no-key instruction, strict-CSP extension-frame crop, answer, code-block copy, composer, Escape-release teardown, and host-page isolation verified.\n',
       );
     })(),
     timeoutFailure,
