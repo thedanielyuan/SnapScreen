@@ -28,6 +28,9 @@ const FORBIDDEN_SNIP_INSTRUCTIONS = [
 ];
 const TEST_CROP_DATA_URL =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+// Wider than the 2,576 px edge limit, like a full-width snip on a 2x screen.
+const OVERSIZE_CROP_SIZE = { width: 3_000, height: 48 };
+const DOWNSCALED_CROP_WIDTH = 2_576;
 const TEST_TIMEOUT_MS = 15_000;
 const OVERALL_TIMEOUT_MS = 30_000;
 
@@ -84,6 +87,24 @@ async function verifyBuild() {
   }
 
   return contentScript;
+}
+
+async function createOversizeCrop(worker) {
+  return worker.evaluate(async ({ width, height }) => {
+    const canvas = new OffscreenCanvas(width, height);
+    const context = canvas.getContext('2d');
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, width, height);
+    context.fillStyle = '#000000';
+    context.font = '32px sans-serif';
+    context.fillText('What is 2 + 2?', 16, 36);
+    const blob = await canvas.convertToBlob({ type: 'image/png' });
+    let binary = '';
+    for (const byte of new Uint8Array(await blob.arrayBuffer())) {
+      binary += String.fromCharCode(byte);
+    }
+    return `data:image/png;base64,${btoa(binary)}`;
+  }, OVERSIZE_CROP_SIZE);
 }
 
 async function waitForExtensionWorker(context) {
@@ -371,9 +392,21 @@ async function installHostProbe(page) {
   );
 }
 
-async function injectAndStartSnip(worker, contentLoader, { apiKey, hasApiKey }) {
+async function injectAndStartSnip(
+  worker,
+  contentLoader,
+  { apiKey, croppedDataUrl, hasApiKey },
+) {
   return worker.evaluate(
-    async ({ apiKey, croppedDataUrl, fixtureUrl, hasApiKey, hiddenPrompt, loader }) => {
+    async ({
+      apiKey,
+      croppedDataUrl,
+      fixtureUrl,
+      hasApiKey,
+      hiddenPrompt,
+      loader,
+      screenshotDataUrl,
+    }) => {
       const tab = (await chrome.tabs.query({})).find(
         (candidate) => candidate.url === fixtureUrl,
       );
@@ -416,7 +449,7 @@ async function injectAndStartSnip(worker, contentLoader, { apiKey, hasApiKey }) 
       const message = {
         type: 'START_SNIP',
         captureId: crypto.randomUUID(),
-        dataUrl: croppedDataUrl,
+        dataUrl: screenshotDataUrl,
         hasApiKey,
         defaultPrompt: hiddenPrompt,
         limits: {
@@ -435,11 +468,12 @@ async function injectAndStartSnip(worker, contentLoader, { apiKey, hasApiKey }) 
     },
     {
       apiKey,
-      croppedDataUrl: TEST_CROP_DATA_URL,
+      croppedDataUrl,
       fixtureUrl: FIXTURE_URL,
       hasApiKey,
       hiddenPrompt: HIDDEN_PROMPT,
       loader: contentLoader,
+      screenshotDataUrl: TEST_CROP_DATA_URL,
     },
   );
 }
@@ -603,12 +637,14 @@ try {
         throw new Error(`Unexpected extension service-worker URL: ${worker.url()}`);
       }
 
+      const oversizeCrop = await createOversizeCrop(worker);
       const page = await context.newPage();
       await installHostProbe(page);
       await page.goto(FIXTURE_URL, { waitUntil: 'domcontentloaded' });
       await page.bringToFront();
       await injectAndStartSnip(worker, contentLoader, {
         apiKey: '',
+        croppedDataUrl: oversizeCrop,
         hasApiKey: false,
       });
 
@@ -633,6 +669,7 @@ try {
 
       await injectAndStartSnip(worker, contentLoader, {
         apiKey: TEST_API_KEY,
+        croppedDataUrl: oversizeCrop,
         hasApiKey: true,
       });
       uiHost = page.locator(UI_HOST_SELECTOR);
@@ -724,6 +761,14 @@ try {
       if (!requestText.includes(HIDDEN_PROMPT) || !requestText.includes('"type":"image"')) {
         throw new Error('The model request did not retain the hidden prompt and screenshot.');
       }
+      const imageBlock = apiBody.messages[0]?.content?.find?.((block) => block.type === 'image');
+      const sentPng = Buffer.from(imageBlock?.source?.data ?? '', 'base64');
+      const sentWidth = sentPng.length >= 24 ? sentPng.readUInt32BE(16) : 0;
+      if (sentWidth !== DOWNSCALED_CROP_WIDTH) {
+        throw new Error(
+          `Expected the ${OVERSIZE_CROP_SIZE.width} px capture to be sent at ${DOWNSCALED_CROP_WIDTH} px wide, got ${sentWidth} px.`,
+        );
+      }
 
       await verifyCodeBlockCopy(page, uiFrame);
 
@@ -733,7 +778,7 @@ try {
       await assertHostPageIsolation(page);
 
       process.stdout.write(
-        'Unpacked-extension smoke test passed: exact keyed/no-key instruction, strict-CSP extension-frame crop, answer, code-block copy, composer, Escape-release teardown, and host-page isolation verified.\n',
+        'Unpacked-extension smoke test passed: exact keyed/no-key instruction, strict-CSP extension-frame crop, oversize-capture downscale, answer, code-block copy, composer, Escape-release teardown, and host-page isolation verified.\n',
       );
     })(),
     timeoutFailure,

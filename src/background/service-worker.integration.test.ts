@@ -15,6 +15,7 @@ import {
 const dependencies = vi.hoisted(() => ({
   analyzeImage: vi.fn(),
   cropImage: vi.fn(),
+  fitScreenshotToLimits: vi.fn(),
   followUp: vi.fn(),
   getSettings: vi.fn(),
   initializeStorageAccess: vi.fn(),
@@ -29,7 +30,10 @@ const testLimits = {
 
 vi.mock('../content/index.ts?script&iife', () => ({ default: 'content-script.js' }));
 vi.mock('../content/overlay.css?inline', () => ({ default: '/* content styles */' }));
-vi.mock('../lib/crop', () => ({ cropImage: dependencies.cropImage }));
+vi.mock('../lib/crop', () => ({
+  cropImage: dependencies.cropImage,
+  fitScreenshotToLimits: dependencies.fitScreenshotToLimits,
+}));
 vi.mock('../lib/storage', () => ({
   getSettings: dependencies.getSettings,
   initializeStorageAccess: dependencies.initializeStorageAccess,
@@ -441,6 +445,9 @@ beforeEach(() => {
   dependencies.cropImage.mockReset().mockResolvedValue(
     'data:image/png;base64,CROPPED',
   );
+  dependencies.fitScreenshotToLimits.mockReset().mockImplementation(
+    async (dataUrl: string) => dataUrl,
+  );
   dependencies.followUp.mockReset().mockResolvedValue({
     history: [],
     text: 'Follow-up answer',
@@ -519,6 +526,27 @@ describe('service worker message integration', () => {
       }),
     );
     expect(JSON.stringify(sessionSettings)).not.toContain('sk-ant-current-secret');
+  });
+
+  it('sends the screenshot fitted to the session limits', async () => {
+    const harness = await loadWorker();
+    dependencies.fitScreenshotToLimits.mockResolvedValueOnce('data:image/png;base64,FITTED');
+
+    await dispatch(harness, analyzeRequest(
+      'capture-fit',
+      'request-fit',
+      'data:image/png;base64,LARGE',
+    ));
+
+    expect(dependencies.fitScreenshotToLimits).toHaveBeenCalledWith(
+      'data:image/png;base64,LARGE',
+      testLimits,
+    );
+    expect(dependencies.analyzeImage).toHaveBeenCalledWith(
+      'sk-ant-test-secret',
+      'data:image/png;base64,FITTED',
+      expect.objectContaining({ limits: testLimits }),
+    );
   });
 
   it('correlates capture delivery to the initiating document', async () => {

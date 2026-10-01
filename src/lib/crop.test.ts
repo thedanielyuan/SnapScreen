@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cropImage, dataUrlToBase64 } from './crop';
+import { cropImage, dataUrlToBase64, fitScreenshotToLimits } from './crop';
 
 interface CropMocks {
   bitmap: { width: number; height: number; close: ReturnType<typeof vi.fn> };
@@ -11,6 +11,8 @@ interface CropMocks {
 
 function installCropMocks(options: {
   bitmapSize?: { width: number; height: number };
+  /** Byte sizes of successive encoded PNGs; the last one repeats. */
+  blobSizes?: number[];
   context?: boolean;
   convertError?: Error;
 } = {}): CropMocks {
@@ -20,9 +22,18 @@ function installCropMocks(options: {
     close: vi.fn(),
   };
   const drawImage = vi.fn();
+  const blobSizes = options.blobSizes ?? [];
+  let conversions = 0;
   const convertToBlob = options.convertError
     ? vi.fn(async () => Promise.reject(options.convertError))
-    : vi.fn(async () => new Blob(['cropped'], { type: 'image/png' }));
+    : vi.fn(async () => {
+        const size = blobSizes[Math.min(conversions, blobSizes.length - 1)];
+        conversions += 1;
+        return new Blob(
+          [size === undefined ? 'cropped' : new Uint8Array(size)],
+          { type: 'image/png' },
+        );
+      });
   const canvases: Array<{ width: number; height: number }> = [];
   const createBitmap = vi.fn(async () => bitmap);
 
@@ -69,6 +80,17 @@ function installCropMocks(options: {
     drawImage,
     canvases,
   };
+}
+
+function pngDataUrl(width: number, height: number, bytes = 24): string {
+  const data = new Uint8Array(Math.max(bytes, 24));
+  data.set([137, 80, 78, 71, 13, 10, 26, 10], 0);
+  data.set([0, 0, 0, 13, 73, 72, 68, 82], 8);
+  new DataView(data.buffer).setUint32(16, width);
+  new DataView(data.buffer).setUint32(20, height);
+  let binary = '';
+  for (const byte of data) binary += String.fromCharCode(byte);
+  return `data:image/png;base64,${btoa(binary)}`;
 }
 
 afterEach(() => {
@@ -178,6 +200,81 @@ describe('cropImage', () => {
       'data:image/png;base64,U09VUkNF',
       { x: 0.9, y: 0.1, width: 0.2, height: 0.2 },
     )).rejects.toBeInstanceOf(RangeError);
+    expect(mocks.createImageBitmap).not.toHaveBeenCalled();
+  });
+});
+
+describe('fitScreenshotToLimits', () => {
+  const limits = { maxScreenshotBytes: 5_000_000, maxScreenshotDimension: 2_576 };
+
+  it('returns a screenshot within both limits without decoding it', async () => {
+    const mocks = installCropMocks();
+    const dataUrl = pngDataUrl(2_576, 1_000, 1_000);
+
+    await expect(fitScreenshotToLimits(dataUrl, limits)).resolves.toBe(dataUrl);
+    expect(mocks.createImageBitmap).not.toHaveBeenCalled();
+  });
+
+  it('downscales a 2x capture whose long edge exceeds the limit', async () => {
+    const mocks = installCropMocks({ bitmapSize: { width: 2_880, height: 1_800 } });
+
+    const result = await fitScreenshotToLimits(pngDataUrl(2_880, 1_800, 1_000), limits);
+
+    expect(result).toBe('data:image/png;base64,Q1JPUEVERA==');
+    expect(mocks.canvases).toEqual([{ width: 2_576, height: 1_610 }]);
+    expect(mocks.drawImage).toHaveBeenCalledWith(mocks.bitmap, 0, 0, 2_576, 1_610);
+    expect(mocks.bitmap.close).toHaveBeenCalledOnce();
+  });
+
+  it('shrinks again until the encoded PNG fits the byte limit', async () => {
+    const mocks = installCropMocks({
+      bitmapSize: { width: 2_000, height: 1_000 },
+      blobSizes: [1_500, 800],
+    });
+
+    const result = await fitScreenshotToLimits(
+      pngDataUrl(2_000, 1_000, 4_000),
+      { maxScreenshotBytes: 1_000, maxScreenshotDimension: 2_576 },
+    );
+
+    expect(result).toBe('data:image/png;base64,Q1JPUEVERA==');
+    expect(mocks.canvases).toEqual([
+      { width: 900, height: 450 },
+      { width: 661, height: 331 },
+    ]);
+  });
+
+  it('returns the original when it cannot get under the byte limit', async () => {
+    const mocks = installCropMocks({
+      bitmapSize: { width: 2_000, height: 1_000 },
+      blobSizes: [5_000],
+    });
+    const dataUrl = pngDataUrl(2_000, 1_000, 4_000);
+
+    await expect(fitScreenshotToLimits(
+      dataUrl,
+      { maxScreenshotBytes: 1_000, maxScreenshotDimension: 2_576 },
+    )).resolves.toBe(dataUrl);
+    expect(mocks.canvases).toHaveLength(4);
+    expect(mocks.bitmap.close).toHaveBeenCalledOnce();
+  });
+
+  it('returns the original when the screenshot cannot be redrawn', async () => {
+    const mocks = installCropMocks({
+      bitmapSize: { width: 2_880, height: 1_800 },
+      context: false,
+    });
+    const dataUrl = pngDataUrl(2_880, 1_800, 1_000);
+
+    await expect(fitScreenshotToLimits(dataUrl, limits)).resolves.toBe(dataUrl);
+    expect(mocks.bitmap.close).toHaveBeenCalledOnce();
+  });
+
+  it('leaves data that is not a PNG for request validation to reject', async () => {
+    const mocks = installCropMocks();
+
+    await expect(fitScreenshotToLimits('data:image/png;base64,U09VUkNF', limits))
+      .resolves.toBe('data:image/png;base64,U09VUkNF');
     expect(mocks.createImageBitmap).not.toHaveBeenCalled();
   });
 });

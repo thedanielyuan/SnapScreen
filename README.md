@@ -16,6 +16,14 @@ answer appears in a panel right beside it.
   files
 - **Light and dark themes** — follows your system setting
 
+## Install
+
+1. Download `snapscreen-<version>.zip` from the latest
+   [release](https://github.com/thedanielyuan/SnapScreen/releases) and unzip it.
+2. Open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and choose
+   the unzipped folder.
+3. Add your Anthropic API key on the Settings page that opens.
+
 ## How to use
 
 1. Click the SnapScreen icon or press `Alt+Shift+S` (`Option+Shift+S` on Mac).
@@ -61,6 +69,8 @@ Right-click the SnapScreen icon and choose **Options** to:
 - **Websites can't see your conversation.** Pages can't read what's in SnapScreen's panel. A
   malicious page could still hide the panel or show a fake one, so be careful with unexpected
   SnapScreen-looking prompts.
+
+The [privacy policy](PRIVACY.md) has the full details.
 
 ## License
 
