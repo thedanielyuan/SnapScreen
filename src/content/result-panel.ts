@@ -14,6 +14,8 @@ const BACKDROP_ID = 'snapscreen-panel-backdrop';
 const TOAST_ID = 'snapscreen-toast-root';
 const LIGHTBOX_ID = 'snapscreen-lightbox-root';
 const MARGIN = VIEWPORT_MARGIN;
+// A reader this close to the end of the answer still has new text followed.
+const FOLLOW_END_THRESHOLD_PX = 24;
 
 const CLOSE_ICON_SVG = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>`;
 const RESNIP_ICON_SVG = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/></svg>`;
@@ -116,6 +118,13 @@ export function showResultPanel(options: ResultPanelOptions): void {
     const rect = root.getBoundingClientRect();
     panelPosition = { top: rect.top, left: rect.left };
   }
+
+  const previousBody = root.querySelector('.snapscreen-panel-body');
+  const previousScroll = previousBody && {
+    top: previousBody.scrollTop,
+    followsEnd: isScrolledToEnd(previousBody),
+    questionCount: previousBody.querySelectorAll('.snapscreen-msg-user').length,
+  };
 
   root.className = 'snapscreen-panel';
   root.setAttribute('role', 'dialog');
@@ -282,8 +291,16 @@ export function showResultPanel(options: ResultPanelOptions): void {
       );
     }
 
+    // A reader who scrolled up keeps their place, unless they just asked a
+    // question, which should come into view.
+    const questionCount = messages.filter((message) => message.role === 'user').length;
+    const keptTop = previousScroll
+      && !previousScroll.followsEnd
+      && questionCount <= previousScroll.questionCount
+      ? previousScroll.top
+      : null;
     schedulePanelFrame(() => {
-      body.scrollTop = body.scrollHeight;
+      body.scrollTop = keptTop ?? body.scrollHeight;
     });
   }
 
@@ -422,6 +439,11 @@ export function showResultPanel(options: ResultPanelOptions): void {
         ? fatalFocusTarget ?? closeBtn
         : closeBtn;
   focusTarget.focus({ preventScroll: true });
+}
+
+function isScrolledToEnd(element: Element): boolean {
+  return element.scrollHeight - element.clientHeight - element.scrollTop
+    <= FOLLOW_END_THRESHOLD_PX;
 }
 
 function createPendingIndicator(): HTMLElement {
@@ -982,6 +1004,9 @@ export function updateStreamingAnswer(text: string): void {
   const root = queryUiElement(`#${PANEL_ID}`);
   const body = root?.querySelector('.snapscreen-panel-body');
   if (!body) return;
+  // Follow new text only while the reader is at the end, so one who scrolled
+  // up to read stays put.
+  const followsEnd = isScrolledToEnd(body);
 
   let thread = body.querySelector('.snapscreen-chat-thread');
   if (!thread) {
@@ -1000,7 +1025,7 @@ export function updateStreamingAnswer(text: string): void {
   if (renderAnswerContent(bubble, text, false)) {
     root?.classList.add('snapscreen-panel-has-code');
   }
-  body.scrollTop = body.scrollHeight;
+  if (followsEnd) body.scrollTop = body.scrollHeight;
 }
 
 export function showErrorToast(message: string): void {

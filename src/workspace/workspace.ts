@@ -221,7 +221,7 @@ if (!bootstrap) {
       if (explicitlyClosed || reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
         showFatalError({
           code: 'capture_expired',
-          message: 'SnapScreen lost its background connection. Reload this tab or capture again.',
+          message: 'SnapScreen lost its background connection. Close this tab and snip again from the source tab.',
         });
         return;
       }

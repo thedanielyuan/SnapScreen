@@ -597,6 +597,88 @@ describe('follow-up validation and recovery', () => {
   });
 });
 
+describe('scrolling', () => {
+  const longAnswer = 'A line of the answer. '.repeat(20);
+
+  // happy-dom doesn't lay out, so make the panel body as tall as its text.
+  function fakeBodyLayout(): void {
+    vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockImplementation(
+      function (this: Element) {
+        return this.classList.contains('snapscreen-panel-body')
+          ? (this.textContent?.length ?? 0) * 10
+          : 0;
+      },
+    );
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(
+      function (this: HTMLElement) {
+        return this.classList.contains('snapscreen-panel-body') ? 280 : 0;
+      },
+    );
+  }
+
+  function panelBody(): HTMLElement {
+    return uiQuery<HTMLElement>('.snapscreen-panel-body')!;
+  }
+
+  function nextFrame(): Promise<void> {
+    return new Promise((resolve) => {
+      requestAnimationFrame(() => resolve());
+    });
+  }
+
+  it('follows streamed text while the reader stays at the end', async () => {
+    fakeBodyLayout();
+    showResultPanel(options({ messages: [], pending: true, onStop: vi.fn() }));
+    await nextFrame();
+
+    updateStreamingAnswer(longAnswer);
+    expect(panelBody().scrollTop).toBe(panelBody().scrollHeight);
+    updateStreamingAnswer(`${longAnswer}More.`);
+    expect(panelBody().scrollTop).toBe(panelBody().scrollHeight);
+
+    showResultPanel(options({
+      messages: [{ role: 'assistant', content: `${longAnswer}More.` }],
+    }));
+    await nextFrame();
+    expect(panelBody().scrollTop).toBe(panelBody().scrollHeight);
+  });
+
+  it('keeps a reader who scrolled up in place through the end of the answer', async () => {
+    fakeBodyLayout();
+    showResultPanel(options({ messages: [], pending: true, onStop: vi.fn() }));
+    await nextFrame();
+    updateStreamingAnswer(longAnswer);
+
+    panelBody().scrollTop = 100;
+    updateStreamingAnswer(`${longAnswer}More.`);
+    expect(panelBody().scrollTop).toBe(100);
+
+    showResultPanel(options({
+      messages: [{ role: 'assistant', content: `${longAnswer}More.` }],
+    }));
+    await nextFrame();
+    expect(panelBody().scrollTop).toBe(100);
+  });
+
+  it('brings a new question into view', async () => {
+    fakeBodyLayout();
+    showResultPanel(options({ messages: [{ role: 'assistant', content: longAnswer }] }));
+    await nextFrame();
+    panelBody().scrollTop = 100;
+
+    showResultPanel(options({
+      messages: [
+        { role: 'assistant', content: longAnswer },
+        { role: 'user', content: 'Why?' },
+      ],
+      pending: true,
+      onStop: vi.fn(),
+    }));
+    await nextFrame();
+    expect(panelBody().scrollTop).toBe(panelBody().scrollHeight);
+  });
+});
+
 describe('result UI lifecycle', () => {
   it('replaces an existing toast', () => {
     showErrorToast('First');

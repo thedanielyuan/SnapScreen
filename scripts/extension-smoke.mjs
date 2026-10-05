@@ -19,6 +19,10 @@ const PARTIAL_SENTINELS = [
   'SNAPSCREEN_SMOKE_PARTIAL_8F2C17',
 ];
 const FOLLOW_UP_SENTINEL = 'SNAPSCREEN_SMOKE_FOLLOW_UP_3E57B9';
+const LONG_ANSWER_SENTINELS = [
+  'SNAPSCREEN_SMOKE_LONG_ANSWER_6B1E04',
+  'SNAPSCREEN_SMOKE_LONG_ANSWER_2D9C51',
+];
 const SMOKE_CODE = `def answer():\n    return "${CODE_SENTINEL}"`;
 const SMOKE_ANSWER = `${ANSWER_SENTINEL}\n\n\`\`\`python\n${SMOKE_CODE}\n\`\`\``;
 const HIDDEN_PROMPT = 'What does this show? Answer accurately and concisely.';
@@ -413,6 +417,80 @@ function answerSse(answer, { interrupted = false } = {}) {
   return (interrupted ? events.slice(0, 3) : events)
     .map(({ event, data }) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
     .join('');
+}
+
+// Answers long enough to scroll the panel body.
+function longAnswer(sentinel) {
+  const lines = Array.from({ length: 40 }, (_, index) => `Line ${index + 1} of a long answer.`);
+  return [...lines, sentinel].join('\n');
+}
+
+async function readBodyScroll(frame) {
+  // Let the panel apply any scroll it scheduled for the next frame.
+  await frame.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
+  return frame.locator('.snapscreen-panel-body').evaluate((body) => ({
+    max: body.scrollHeight - body.clientHeight,
+    top: body.scrollTop,
+  }));
+}
+
+async function scrollBodyTo(frame, top) {
+  await frame.locator('.snapscreen-panel-body').evaluate((body, value) => {
+    body.scrollTop = value;
+  }, top);
+}
+
+async function waitForFinishedAnswer(frame, sentinel) {
+  await frame.locator('.snapscreen-msg-assistant:not(.snapscreen-msg-streaming)')
+    .filter({ hasText: sentinel })
+    .waitFor({ state: 'attached', timeout: TEST_TIMEOUT_MS });
+}
+
+// The panel follows a streaming answer only while the reader is at its end.
+// Asking a question brings it into view, and a reader who scrolled up stays
+// put while the next answer streams and finishes.
+async function verifyScrollFollowing(frame, queuedApiBodies, apiGate) {
+  const [firstSentinel, followUpSentinel] = LONG_ANSWER_SENTINELS;
+  queuedApiBodies.push(answerSse(longAnswer(firstSentinel)));
+  const overlay = frame.locator('#snapscreen-overlay-root');
+  await overlay.waitFor({ state: 'visible', timeout: TEST_TIMEOUT_MS });
+  await overlay.press('Enter');
+  await overlay.press('Enter');
+
+  await waitForFinishedAnswer(frame, firstSentinel);
+  let scroll = await readBodyScroll(frame);
+  if (scroll.max <= 0) {
+    throw new Error('The long smoke answer did not overflow the panel body.');
+  }
+  if (scroll.top < scroll.max - 1) {
+    throw new Error(`The panel stopped following an answer the reader stayed at the end of (scrollTop ${scroll.top} of ${scroll.max}).`);
+  }
+
+  await scrollBodyTo(frame, 0);
+  apiGate.hold();
+  queuedApiBodies.push(answerSse(longAnswer(followUpSentinel)));
+  const composer = frame.locator('.snapscreen-input');
+  await composer.fill('Tell me more.');
+  await composer.press('Enter');
+  await frame.locator('.snapscreen-pending').waitFor({
+    state: 'visible',
+    timeout: TEST_TIMEOUT_MS,
+  });
+  scroll = await readBodyScroll(frame);
+  if (scroll.top < scroll.max - 1) {
+    throw new Error(`Asking a question did not bring it into view (scrollTop ${scroll.top} of ${scroll.max}).`);
+  }
+
+  await scrollBodyTo(frame, 40);
+  apiGate.release();
+  await waitForFinishedAnswer(frame, followUpSentinel);
+  scroll = await readBodyScroll(frame);
+  if (Math.abs(scroll.top - 40) > 1) {
+    throw new Error(`The panel moved a reader who scrolled up (scrollTop ${scroll.top}, expected 40).`);
+  }
+  return composer;
 }
 
 // A first answer that fails partway keeps its text and offers Try again, which
@@ -1005,8 +1083,21 @@ try {
       );
       await verifyEscapeClose(page, uiFrame, interruptedComposer, 'Interrupted-answer close');
 
+      await injectAndStartSnip(worker, contentLoader, {
+        apiKey: TEST_API_KEY,
+        croppedDataUrl: oversizeCrop,
+      });
+      uiHost = page.locator(UI_HOST_SELECTOR);
+      await uiHost.waitFor({ state: 'attached', timeout: TEST_TIMEOUT_MS });
+      uiFrame = await waitForUiFrame(page);
+      const scrollComposer = await verifyScrollFollowing(uiFrame, queuedApiBodies, {
+        hold: holdApiResponses,
+        release: () => releaseApiResponse(),
+      });
+      await verifyEscapeClose(page, uiFrame, scrollComposer, 'Scroll-following close');
+
       process.stdout.write(
-        'Unpacked-extension smoke test passed: exact keyed/no-key instruction, no-key Open Settings and Try again, collapsed-limit validation, strict-CSP extension-frame crop, oversize-capture downscale, answer, code-block copy, composer, Escape-release teardown, host-page isolation, and interrupted-first-answer Try again and follow-up verified.\n',
+        'Unpacked-extension smoke test passed: exact keyed/no-key instruction, no-key Open Settings and Try again, collapsed-limit validation, strict-CSP extension-frame crop, oversize-capture downscale, answer, code-block copy, composer, Escape-release teardown, host-page isolation, interrupted-first-answer Try again and follow-up, and streaming scroll-following verified.\n',
       );
     })(),
     timeoutFailure,
