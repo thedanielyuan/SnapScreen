@@ -37,41 +37,6 @@ it with **Shift + arrow keys**, and press **Enter** again to confirm.
 asks you; reply in the follow-up box. To skip the question, add your language to the default
 prompt in Settings, for example "Write any code in Python."
 
-On protected pages, such as the Chrome Web Store, your capture opens in a separate SnapScreen
-tab.
-
-## Settings
-
-Right-click the SnapScreen icon and choose **Options** to:
-
-- Manage your API key
-- Change the default prompt that's sent with each new capture
-- Set limits on question length, conversation length, and screenshot size
-- Change the keyboard shortcut, for example if another extension already uses it
-
-## Limitations
-
-- Captures only the visible part of the tab, not the full scrolling page.
-- Chrome may blank out browser menus, permission prompts, system dialogs, and DRM-protected
-  video.
-- Local `file://` pages also need **Allow access to file URLs**, which you can turn on in
-  SnapScreen's details at `chrome://extensions`.
-
-## Privacy
-
-- **No SnapScreen servers.** SnapScreen sends your screenshots and questions straight from your
-  browser to its AI provider to generate answers, and never saves them. The provider keeps them
-  under its own data-retention policy, and may also cache a conversation for about 5 minutes to
-  speed up follow-up questions.
-- **Your API key stays on your device.** It's sent only to that provider, and websites can't
-  read it. It isn't encrypted, though, so anyone with access to your Chrome profile could
-  find it.
-- **Websites can't see your conversation.** Pages can't read what's in SnapScreen's panel. A
-  malicious page could still hide the panel or show a fake one, so be careful with unexpected
-  SnapScreen-looking prompts.
-
-The [privacy policy](PRIVACY.md) has the full details.
-
 ## License
 
 [MIT](LICENSE)
