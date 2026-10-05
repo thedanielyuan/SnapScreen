@@ -21,6 +21,7 @@ export async function initializeOptionsPage(doc: Document = document): Promise<v
   const maxScreenshotMegabytesInput = doc.getElementById('max-screenshot-megabytes') as HTMLInputElement;
   const maxScreenshotDimensionInput = doc.getElementById('max-screenshot-dimension') as HTMLInputElement;
   const maxConversationTurnsInput = doc.getElementById('max-conversation-turns') as HTMLInputElement;
+  const advancedSettings = doc.getElementById('advanced-settings') as HTMLDetailsElement;
   const status = doc.getElementById('status') as HTMLSpanElement;
   const shortcutDisplay = doc.getElementById('shortcut-display') as HTMLElement;
   const openShortcutsBtn = doc.getElementById('open-shortcuts') as HTMLButtonElement;
@@ -85,6 +86,13 @@ export async function initializeOptionsPage(doc: Document = document): Promise<v
       }, 3000);
     }
   }
+
+  // The limits sit in the collapsed Advanced section. Chrome can't focus an
+  // invalid control inside a closed <details>, so Save would silently do
+  // nothing; open the section before the browser reports the problem.
+  form.addEventListener('invalid', (event) => {
+    if (advancedSettings.contains(event.target as Node)) advancedSettings.open = true;
+  }, true);
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -258,6 +266,7 @@ export async function initializeOptionsPage(doc: Document = document): Promise<v
         `${label} must be a whole number from ${constraints.min.toLocaleString()} to ${constraints.max.toLocaleString()}.`,
         true,
       );
+      advancedSettings.open = true;
       input.focus();
       return null;
     }

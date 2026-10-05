@@ -946,7 +946,6 @@ describe('service worker message integration', () => {
         expect.objectContaining({
           type: 'START_SNIP',
           dataUrl: 'data:image/png;base64,FULL',
-          hasApiKey: true,
           defaultPrompt: 'Answer the question.',
           limits: testLimits,
         }),

@@ -42,33 +42,36 @@
           placeholder="Answer the question shown in this screenshot."
         ></textarea>
 
-        <fieldset class="limits-section">
-          <legend>Request limits</legend>
-          <p class="hint limits-intro">
-            Keep requests predictable and within Anthropic's image and request limits.
-          </p>
-          <div class="limits-grid">
-            <label for="max-input-characters">
-              Question characters
-              <input type="number" id="max-input-characters" min="100" max="50000" step="100" required />
-            </label>
-            <label for="max-conversation-turns">
-              Conversation turns
-              <input type="number" id="max-conversation-turns" min="2" max="50" step="1" required />
-            </label>
-            <label for="max-screenshot-megabytes">
-              Screenshot size (MB)
-              <input type="number" id="max-screenshot-megabytes" min="1" max="10" step="1" required />
-            </label>
-            <label for="max-screenshot-dimension">
-              Screenshot edge (px)
-              <input type="number" id="max-screenshot-dimension" min="512" max="8000" step="1" required />
-            </label>
-          </div>
-          <p class="hint limits-note">
-            Defaults: 4,000 characters, 12 turns, 5 MB, and 2,576 px. The API ceilings are 10 MB and 8,000 px.
-          </p>
-        </fieldset>
+        <details id="advanced-settings" class="advanced-section">
+          <summary>Advanced</summary>
+          <fieldset class="limits-section">
+            <legend>Request limits</legend>
+            <p class="hint limits-intro">
+              Keep requests predictable and within Anthropic's image and request limits.
+            </p>
+            <div class="limits-grid">
+              <label for="max-input-characters">
+                Question characters
+                <input type="number" id="max-input-characters" min="100" max="50000" step="100" required />
+              </label>
+              <label for="max-conversation-turns">
+                Conversation turns
+                <input type="number" id="max-conversation-turns" min="2" max="50" step="1" required />
+              </label>
+              <label for="max-screenshot-megabytes">
+                Screenshot size (MB)
+                <input type="number" id="max-screenshot-megabytes" min="1" max="10" step="1" required />
+              </label>
+              <label for="max-screenshot-dimension">
+                Screenshot edge (px)
+                <input type="number" id="max-screenshot-dimension" min="512" max="8000" step="1" required />
+              </label>
+            </div>
+            <p class="hint limits-note">
+              Defaults: 4,000 characters, 12 turns, 5 MB, and 2,576 px. The API ceilings are 10 MB and 8,000 px.
+            </p>
+          </fieldset>
+        </details>
 
         <div class="actions">
           <button type="submit" id="save-settings" class="btn-primary">Save</button>

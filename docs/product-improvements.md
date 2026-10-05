@@ -3,21 +3,21 @@
 Reviewed on 5 October 2026 against `4dd698e` (version 1.1.0); line links are as of that commit.
 Every problem below was checked in the code, and the Open Settings bug in 1.1 was reproduced in
 Chromium. Priorities are judgment calls: there's no usage data, and this wasn't a hands-on
-usability or accessibility review. Nothing here is implemented yet.
+usability or accessibility review.
 
 Section 1 fixes behavior that's broken or misleading today and is small enough to ship before
 launch. Section 2 should follow the launch work in [REMEDIATION_PLAN.md](../REMEDIATION_PLAN.md).
 
 Effort includes tests and doc updates. **S**: a day or less. **M**: a few days.
 
-| #   | Item                                                     | Effort |
-| --- | -------------------------------------------------------- | ------ |
-| 1.1 | Fix the missing-API-key flow                             | S      |
-| 1.2 | Keep a first answer's text when it fails mid-stream      | S      |
-| 1.3 | Stop pulling the reader to the bottom while streaming    | S      |
-| 1.4 | Fix the workspace's "reload this tab" advice             | S      |
-| 2.1 | Show that a slow answer is still working                 | S      |
-| 2.2 | Measure answer quality before changing prompts or models | M      |
+| #   | Item                                                     | Effort | Status |
+| --- | -------------------------------------------------------- | ------ | ------ |
+| 1.1 | Fix the missing-API-key flow                             | S      | Done   |
+| 1.2 | Keep a first answer's text when it fails mid-stream      | S      | To do  |
+| 1.3 | Stop pulling the reader to the bottom while streaming    | S      | To do  |
+| 1.4 | Fix the workspace's "reload this tab" advice             | S      | To do  |
+| 2.1 | Show that a slow answer is still working                 | S      | To do  |
+| 2.2 | Measure answer quality before changing prompts or models | M      | To do  |
 
 ## 1. Fix first
 

@@ -38,7 +38,6 @@ export type BgToCsMessage =
       type: 'START_SNIP';
       captureId: string;
       dataUrl: string;
-      hasApiKey: boolean;
       defaultPrompt: string;
       limits: SnapScreenLimits;
     }

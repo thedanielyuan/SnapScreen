@@ -809,7 +809,6 @@ async function startSnip(
       type: 'START_SNIP',
       captureId,
       dataUrl,
-      hasApiKey: Boolean(storedSettings.apiKey),
       defaultPrompt: settings.defaultPrompt,
       limits: settings.limits,
     };
@@ -955,7 +954,6 @@ async function recaptureWorkspace(
       type: 'START_SNIP',
       captureId: crypto.randomUUID(),
       dataUrl,
-      hasApiKey: Boolean(storedSettings.apiKey),
       defaultPrompt: settings.defaultPrompt,
       limits: settings.limits,
     };
@@ -1066,7 +1064,7 @@ async function handleControllerMessage(
             await sendToEndpoint(endpoint, {
               type: 'ANALYZE_ERROR',
               code: 'no_api_key',
-              message: 'No API key configured. Open Settings to add your Anthropic API key.',
+              message: 'No API key configured. Add your Anthropic API key in Settings, then try again.',
               ...ids,
             });
             return { ok: false };
@@ -1127,7 +1125,7 @@ async function handleControllerMessage(
             await sendToEndpoint(endpoint, {
               type: 'ANALYZE_ERROR',
               code: 'no_api_key',
-              message: 'No API key configured. Open Settings to add your Anthropic API key.',
+              message: 'No API key configured. Add your Anthropic API key in Settings, then try again.',
               ...ids,
             });
             return { ok: false };

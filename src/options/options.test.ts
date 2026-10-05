@@ -10,10 +10,13 @@ const OPTIONS_MARKUP = `
     <button type="button" id="test-key">Test key</button>
     <button type="button" id="remove-key" disabled>Remove key</button>
     <textarea id="default-prompt"></textarea>
-    <input id="max-input-characters" type="number" />
-    <input id="max-screenshot-megabytes" type="number" />
-    <input id="max-screenshot-dimension" type="number" />
-    <input id="max-conversation-turns" type="number" />
+    <details id="advanced-settings">
+      <summary>Advanced</summary>
+      <input id="max-input-characters" type="number" />
+      <input id="max-screenshot-megabytes" type="number" />
+      <input id="max-screenshot-dimension" type="number" />
+      <input id="max-conversation-turns" type="number" />
+    </details>
     <button type="submit" id="save-settings">Save</button>
     <span id="status" role="status" aria-live="polite" hidden></span>
   </form>
@@ -199,6 +202,25 @@ describe('options API-key controls', () => {
     expect(document.getElementById('status')?.textContent).toContain('2 to 50');
     expect(document.getElementById('status')?.getAttribute('role')).toBe('alert');
     expect(document.getElementById('status')?.getAttribute('aria-live')).toBe('assertive');
+    expect(document.activeElement).toBe(turns);
+  });
+
+  it('opens the collapsed Advanced section to show an invalid limit', async () => {
+    await initializeOptionsPage(document);
+    const advanced = document.getElementById('advanced-settings') as HTMLDetailsElement;
+    const turns = document.getElementById('max-conversation-turns') as HTMLInputElement;
+    expect(advanced.open).toBe(false);
+
+    // Chrome's own form validation fires this before it tries to focus the field.
+    turns.dispatchEvent(new Event('invalid', { cancelable: true }));
+    expect(advanced.open).toBe(true);
+
+    advanced.open = false;
+    turns.value = '1';
+    document.getElementById('settings-form')!.dispatchEvent(
+      new Event('submit', { bubbles: true, cancelable: true }),
+    );
+    expect(advanced.open).toBe(true);
     expect(document.activeElement).toBe(turns);
   });
 

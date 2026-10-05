@@ -586,32 +586,48 @@ function appendError(
   err.className = 'snapscreen-error';
   err.setAttribute('role', 'alert');
   err.textContent = message;
-  let action: HTMLButtonElement | null = null;
+  const actions: HTMLButtonElement[] = [];
 
   if (errorCode === 'no_api_key') {
-    const btn = document.createElement('button');
-    btn.className = 'snapscreen-btn snapscreen-btn-primary';
-    btn.textContent = 'Open Settings';
-    btn.addEventListener('click', () => {
+    actions.push(createErrorAction('Open Settings', 'primary', () => {
       if (onOpenSettings) {
         onOpenSettings();
       } else {
         void chrome.runtime.openOptionsPage();
       }
-    });
-    err.append(btn);
-    action = btn;
-  } else if (onRetry && errorCode !== 'refusal') {
-    const btn = document.createElement('button');
-    btn.className = 'snapscreen-btn snapscreen-btn-primary';
-    btn.textContent = 'Try again';
-    btn.addEventListener('click', onRetry);
-    err.append(btn);
-    action = btn;
+    }));
+  }
+  // After saving a key, Try again answers the same capture without a new snip.
+  if (onRetry && errorCode !== 'refusal') {
+    actions.push(createErrorAction(
+      'Try again',
+      actions.length === 0 ? 'primary' : 'secondary',
+      onRetry,
+    ));
+  }
+
+  if (actions.length > 0) {
+    const actionRow = document.createElement('div');
+    actionRow.className = 'snapscreen-error-actions';
+    actionRow.append(...actions);
+    err.append(actionRow);
   }
 
   body.append(err);
-  return action;
+  return actions[0] ?? null;
+}
+
+function createErrorAction(
+  label: string,
+  variant: 'primary' | 'secondary',
+  onClick: () => void,
+): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = `snapscreen-btn snapscreen-btn-${variant}`;
+  btn.textContent = label;
+  btn.addEventListener('click', onClick);
+  return btn;
 }
 
 function resetPanelCursor(): void {

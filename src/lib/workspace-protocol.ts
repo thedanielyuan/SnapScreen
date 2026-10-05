@@ -153,7 +153,6 @@ function isInitialMessage(value: unknown): value is WorkspaceInitialMessage {
     && value.type === 'START_SNIP'
     && isId(value.captureId)
     && isImageDataUrl(value.dataUrl)
-    && typeof value.hasApiKey === 'boolean'
     && typeof value.defaultPrompt === 'string'
     && isLimits(value.limits);
 }

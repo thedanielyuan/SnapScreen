@@ -140,6 +140,28 @@ describe('result panel isolation and focus', () => {
     expect(chrome.runtime.openOptionsPage).not.toHaveBeenCalled();
   });
 
+  it('offers Try again next to Open Settings when the API key is missing', () => {
+    const onOpenSettings = vi.fn();
+    const onRetry = vi.fn();
+    showResultPanel(options({
+      error: 'No API key configured.',
+      errorCode: 'no_api_key',
+      onOpenSettings,
+      onRetry,
+    }));
+
+    const buttons = uiQueryAll('.snapscreen-error button') as HTMLButtonElement[];
+    expect(buttons.map((button) => button.textContent)).toEqual(['Open Settings', 'Try again']);
+    const [openSettings, tryAgain] = buttons;
+    expect(openSettings.classList.contains('snapscreen-btn-primary')).toBe(true);
+    expect(tryAgain.classList.contains('snapscreen-btn-secondary')).toBe(true);
+    expect(getUiRootForTesting()?.activeElement).toBe(openSettings);
+
+    tryAgain.click();
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(onOpenSettings).not.toHaveBeenCalled();
+  });
+
   it('focuses Close when a fatal error has no recovery action', () => {
     showResultPanel(
       options({ error: 'Request refused.', errorCode: 'refusal' }),

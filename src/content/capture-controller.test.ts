@@ -49,7 +49,6 @@ function startAndSelect(harness: ControllerHarness, captureId = 'capture-1'): vo
     type: 'START_SNIP',
     captureId,
     dataUrl: 'data:image/png;base64,FROZEN',
-    hasApiKey: true,
     defaultPrompt: 'Keep the diagram context.',
     limits: DEFAULT_LIMITS,
   });
@@ -136,6 +135,43 @@ describe.each(adapters)('shared capture controller — $label', ({ imageFit }) =
         limits: DEFAULT_LIMITS,
       },
     });
+  });
+
+  it('retries the same capture after a missing API key is added', async () => {
+    const harness = createHarness(imageFit);
+    startAndSelect(harness);
+    const initial = await deliverCrop(harness);
+    harness.controller.handleMessage({
+      type: 'ANALYZE_ERROR',
+      captureId: initial.captureId,
+      requestId: initial.requestId,
+      screenshotId: initial.screenshotId,
+      code: 'no_api_key',
+      message: 'No API key configured.',
+    });
+
+    const failed = harness.panels.at(-1)!;
+    expect(failed).toEqual(expect.objectContaining({
+      error: 'No API key configured.',
+      errorCode: 'no_api_key',
+      pending: false,
+    }));
+    failed.onRetry!();
+
+    expect(harness.panels.at(-1)).toEqual(expect.objectContaining({
+      error: undefined,
+      pending: true,
+    }));
+    const analyzeRequests = harness.sendMessage.mock.calls
+      .map(([message]) => message)
+      .filter((message): message is Extract<CsToBgMessage, { type: 'ANALYZE' }> => (
+        message.type === 'ANALYZE'
+      ));
+    expect(analyzeRequests).toHaveLength(2);
+    const { requestId: retryRequestId, ...retry } = analyzeRequests[1];
+    const { requestId: initialRequestId, ...original } = initial;
+    expect(retry).toEqual(original);
+    expect(retryRequestId).not.toBe(initialRequestId);
   });
 
   it('keeps the conversation but removes New snip when the source expires', async () => {
