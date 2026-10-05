@@ -1,7 +1,7 @@
 # AGENTS.md
 
 SnapScreen is a Chrome Manifest V3 extension (Chrome 116+): snip a region of the current tab,
-then ask Claude (`claude-sonnet-5-5`, streamed SSE) about it. Strict TypeScript, built by
+then ask Claude (`claude-opus-5-5`, streamed SSE) about it. Strict TypeScript, built by
 Vite 8 + `@crxjs/vite-plugin` from `src/manifest.json`. Shipped code is plain DOM + `fetch`:
 keep `package.json` devDependencies-only, and don't add `@anthropic-ai/sdk` (the API client is
 hand-written in `src/lib/anthropic.ts`).
@@ -101,24 +101,27 @@ daily check from the repo's Actions tab.
   isn't emitted at all.
 - Model settings in `src/lib/anthropic.ts` (adaptive thinking, effort `high`,
   `max_tokens: 32_000`) are a deliberate choice for answer quality; don't change them casually.
-  The stream reader skips thinking blocks and history stores only answer text, so thinking is
-  never sent back and turn pruning can't trip Sonnet 5.5's history-editing check on replayed
-  thinking. Sonnet 5.5 returns 400 for `thinking: {type: 'disabled'}`; to turn thinking off,
-  send `{type: 'between_tools'}` with no other `thinking` field at effort `high` or lower, as
-  `verifyApiKey`'s one-token key check does.
+  Keep effort explicit, because Opus 5.5 defaults to `medium`. The stream reader skips thinking
+  blocks and history stores only answer text, so thinking is never sent back and turn pruning
+  can't trip Opus 5.5's history-editing check on replayed thinking. Opus 5.5 always thinks:
+  any `thinking.type` other than `'adaptive'` returns 400, including `'between_tools'`, so
+  `verifyApiKey`'s one-token key check sends no `thinking` field (`max_tokens: 1` caps
+  thinking and text together).
 - A thinking answer can stream no text for over 30 s, and Chrome may stop an idle service
   worker even mid-fetch. `keepAliveUntilSettled` (`src/background/worker-keepalive.ts`) calls
   an extension API every 25 s while a request runs. The 240 s request timeout
   (`API_REQUEST_TIMEOUT_MS`) stays under Chrome's 5-minute cap on one service-worker event.
 - Answer requests send `fallbacks: 'default'` with the `server-side-fallback-2026-07-01` beta
-  header. A `cyber` or `frontier_llm` refusal then continues on Claude Sonnet 5 in the same SSE
-  stream. The switch is marked by a `fallback` content block, which the stream reader ignores.
-  Other refusal categories still end in the `refusal` error.
+  header. A refused answer then continues in the same SSE stream on the model Anthropic
+  recommends for the refusal's category, which Anthropic chooses server-side. The switch is
+  marked by a `fallback` content block, which the stream reader ignores. Categories with no
+  recommended fallback, such as `reasoning_extraction`, still end in the `refusal` error.
 - Answer requests use automatic prompt caching (top-level `cache_control`). First answers and
   follow-ups must send the same `system` prompt and resend earlier messages unchanged, or
   follow-ups silently miss the cache. That's why follow-up rules live in the shared prompt in
   `src/lib/screenshot-qa-prompt.ts`. Don't move them to a separate prompt or a mid-conversation
-  `system` message, which Sonnet 5 (the fallback model) rejects.
+  `system` message: the refusal fallback reruns the request on a model Anthropic picks, and not
+  every model accepts one.
 - Answers are plain text except fenced code blocks: the prompt asks for fences,
   `src/lib/code-blocks.ts` parses them, and the result panel gives each block its own Copy
   button. Change the prompt's formatting rules and the parser together.

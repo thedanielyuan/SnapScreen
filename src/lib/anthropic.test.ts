@@ -140,7 +140,7 @@ describe('analyzeImage', () => {
     expect(JSON.stringify(body.messages)).toContain(hiddenInstruction);
     expect(body.system).toContain(SCREENSHOT_QA_SYSTEM_PROMPT);
     expect(body.system).not.toContain(hiddenInstruction);
-    expect(body.model).toBe('claude-sonnet-5-5');
+    expect(body.model).toBe('claude-opus-5-5');
     expect(body.max_tokens).toBe(32_000);
     expect(body.thinking).toEqual({ type: 'adaptive' });
     expect(body.output_config).toEqual({ effort: 'high' });
@@ -284,8 +284,8 @@ describe('analyzeImage', () => {
         index: 1,
         content_block: {
           type: 'fallback',
-          from: { model: 'claude-sonnet-5-5' },
-          to: { model: 'claude-sonnet-5' },
+          from: { model: 'claude-opus-5-5' },
+          to: { model: 'claude-opus-4-8' },
         },
       },
       { type: 'content_block_stop', index: 1 },
@@ -697,9 +697,9 @@ describe('verifyApiKey', () => {
     const mock = stubFetch({ content: [{ type: 'text', text: 'Hi' }] });
     await expect(verifyApiKey('key')).resolves.toBeUndefined();
     const body = lastRequestBody(mock);
-    expect(body.model).toBe('claude-sonnet-5-5');
+    expect(body.model).toBe('claude-opus-5-5');
     expect(body.max_tokens).toBe(1);
-    expect(body.thinking).toEqual({ type: 'between_tools' });
+    expect(body.thinking).toBeUndefined();
     expect(body.stream).toBeUndefined();
     expect(lastRequestHeaders(mock)['anthropic-beta']).toBeUndefined();
     const response = await mock.mock.results[0].value as Response;
