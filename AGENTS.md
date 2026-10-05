@@ -1,15 +1,15 @@
 # AGENTS.md
 
-SnapScreen is a Chrome Manifest V3 extension: snip a region of the current tab, then ask Claude
-(`claude-sonnet-5-5`, streamed SSE) about it. Strict TypeScript, built by Vite 8 +
-`@crxjs/vite-plugin` from `src/manifest.json`. Shipped code is plain DOM + `fetch`: keep
-`package.json` devDependencies-only, and don't add `@anthropic-ai/sdk` (the API client is
+SnapScreen is a Chrome Manifest V3 extension (Chrome 116+): snip a region of the current tab,
+then ask Claude (`claude-sonnet-5-5`, streamed SSE) about it. Strict TypeScript, built by
+Vite 8 + `@crxjs/vite-plugin` from `src/manifest.json`. Shipped code is plain DOM + `fetch`:
+keep `package.json` devDependencies-only, and don't add `@anthropic-ai/sdk` (the API client is
 hand-written in `src/lib/anthropic.ts`).
 
 ## Commands
 
 ```bash
-npm install                          # npm only (package-lock.json); CI uses Node 22
+npm ci                               # npm only (package-lock.json); CI uses Node 22
 npx playwright install chromium      # once, for test:browser
 git config core.hooksPath .githooks  # once per clone: pre-push check for stale branches
 npm run lint                         # ESLint (eslint.config.js); zero warnings allowed
@@ -23,21 +23,29 @@ npm run package                      # zip the built dist/ into release/ for the
 
 Before finishing any change, run lint, typecheck, test, build, then test:browser (under 10 s in
 total). The smoke test runs whatever is in `dist/`, so it needs a fresh build. CI
-(`.github/workflows/ci.yml`) runs the same steps plus `npm audit --audit-level=moderate`. There
-is no formatter; match the surrounding style (2-space indent, single quotes, semicolons,
-trailing commas).
+(`.github/workflows/ci.yml`) runs the same steps plus `npm audit --audit-level=moderate`, which
+can turn red from a new upstream advisory with no code change. There is no formatter; match the
+surrounding style (2-space indent, single quotes, semicolons, trailing commas).
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`: the same checks, then `npm run package`,
-then a GitHub release with the zip. The tag must match the `package.json` version.
-`.github/workflows/live-api.yml` runs `src/lib/anthropic.live.test.ts` against the real API
-daily with the `SNAPSCREEN_LIVE_API_KEY` secret; without that variable the test is skipped.
+Unit and smoke tests mock the API, so only `src/lib/anthropic.live.test.ts` catches the real API
+rejecting a model, beta header, or request field. `npm test` skips it unless
+`SNAPSCREEN_LIVE_API_KEY` is set; `.github/workflows/live-api.yml` runs it daily with that repo
+secret. After changing any of those, ask the user before running the check on your pushed
+branch (`gh workflow run live-api.yml --ref <branch>`), since it spends API credit. GitHub
+disables scheduled workflows in a public repo after 60 days without activity; re-enable the
+daily check from the repo's Actions tab.
 
 ## Layout
 
 - `src/background/` — service worker: capture flow, UI/workspace session registries, API calls
-- `src/content/` — content script, injected on demand: snip flow, conversation state, UI-frame host
+- `src/content/` — content script (`index.ts`, injected on demand): snip flow, conversation
+  state, UI-frame host. The rendering code (`result-panel.ts`, `snip-overlay.ts` and their
+  helpers, `overlay.css`) runs in the UI frame and the workspace, never in the page; the content
+  script reaches it through `ui-proxy.ts`.
 - `src/ui/` — extension-origin iframe that renders all injected UI
-- `src/workspace/` — extension tab that shows the capture when a page rejects injection
+- `src/workspace/` — extension tab that shows the capture when a page rejects injection; reuses
+  the content script's capture controller and rendering code
+- `src/options/` — options page: API key, default prompt, limits
 - `src/lib/` — shared: Anthropic client, system prompt, crop math, storage, limits, protocols
 
 ## Conventions
@@ -47,24 +55,25 @@ daily with the `SNAPSCREEN_LIVE_API_KEY` secret; without that variable the test 
   background). Extend them; never send ad-hoc message objects.
 - `ui-protocol.ts` and `workspace-protocol.ts` also hold hand-written `is…Message` validators.
   Their `switch` returns `false` by default, and receivers silently drop any message that fails.
-  Add a validator case for every new variant, because tsc won't flag a missing one.
-  `workspace-protocol.ts` also re-validates the `messages.ts` types that the workspace relays,
-  so new `messages.ts` variants need a case there too.
+  Add a validator case for every new variant, because tsc won't flag a missing one. The
+  workspace relays `messages.ts` traffic, so new variants there also need a case in
+  `workspace-protocol.ts`: `isControllerMessage` (`CsToBgMessage`) or `isControllerEvent`
+  (`BgToCsMessage`).
 - Surface failures as `AnthropicError(code, friendlyMessage)`. Provider/API text must pass
-  through the sanitizer in `src/lib/anthropic.ts` (key redaction, control-char strip, length
-  cap) before it can reach the UI.
+  through `sanitizeProviderMessage` in `src/lib/anthropic.ts` (key redaction, control-char
+  strip, length cap) before it can reach the UI.
 - Tests sit beside their source (`foo.test.ts`). Vitest defaults to Node; DOM tests start with
   `// @vitest-environment happy-dom` on line 1. Stub `chrome` per file with
   `vi.stubGlobal('chrome', …)`.
 - Commits use Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`). Branch as
   `<type>/<topic>` and land on `main` via PR.
 - Branch from the remote tip, never from local `main`, which falls behind because PRs merge on
-  GitHub: `git fetch origin && git switch --no-track -c <type>/<topic> origin/main`. A stale
-  base conflicts with whatever merged since (most PRs edit this file), and `main` only merges
-  up-to-date PRs. If `main` moves before yours merges, `git fetch origin && git merge
-  origin/main` and rerun the checks. `.githooks/pre-push` blocks pushing a branch that's behind.
+  GitHub: `git fetch origin && git switch --no-track -c <type>/<topic> origin/main`. `main`
+  only merges up-to-date PRs, so if it moves before yours merges, `git fetch origin && git
+  merge origin/main` and rerun the checks. `.githooks/pre-push` blocks pushing a branch that's
+  behind.
 
-## Security invariants — do not regress
+## Security and privacy — do not regress
 
 - Only the background worker and the options page read the API key or call the API. Content
   scripts, the UI frame, and the workspace never receive it. `chrome.storage.local` is
@@ -77,6 +86,8 @@ daily with the `SNAPSCREEN_LIVE_API_KEY` secret; without that variable the test 
 - `npm run test:browser` enforces parts of this (hostile-page probe, closed shadow root,
   non-web-accessible workspace). `docs/security.md` is the full contract; update it when you
   change a boundary.
+- When permissions or data handling change, also update `PRIVACY.md` and
+  `docs/chrome-web-store.md`, whose answers the user pastes into the store dashboard.
 
 ## Gotchas
 
@@ -90,11 +101,11 @@ daily with the `SNAPSCREEN_LIVE_API_KEY` secret; without that variable the test 
   isn't emitted at all.
 - Model settings in `src/lib/anthropic.ts` (adaptive thinking, effort `high`,
   `max_tokens: 32_000`) are a deliberate choice for answer quality; don't change them casually.
-  Thinking counts toward `max_tokens`. The stream reader skips thinking blocks and history
-  stores only answer text, so thinking is never sent back and turn pruning can't trip Sonnet
-  5.5's history-editing check on replayed thinking. Sonnet 5.5 returns 400 for
-  `thinking: {type: 'disabled'}`; "off" is `{type: 'between_tools'}` (the only `thinking` field
-  allowed, effort `high` or lower), which `verifyApiKey`'s one-token key check still uses.
+  The stream reader skips thinking blocks and history stores only answer text, so thinking is
+  never sent back and turn pruning can't trip Sonnet 5.5's history-editing check on replayed
+  thinking. Sonnet 5.5 returns 400 for `thinking: {type: 'disabled'}`; to turn thinking off,
+  send `{type: 'between_tools'}` with no other `thinking` field at effort `high` or lower, as
+  `verifyApiKey`'s one-token key check does.
 - A thinking answer can stream no text for over 30 s, and Chrome may stop an idle service
   worker even mid-fetch. `keepAliveUntilSettled` (`src/background/worker-keepalive.ts`) calls
   an extension API every 25 s while a request runs. The 240 s request timeout
@@ -111,21 +122,16 @@ daily with the `SNAPSCREEN_LIVE_API_KEY` secret; without that variable the test 
 - Answers are plain text except fenced code blocks: the prompt asks for fences,
   `src/lib/code-blocks.ts` parses them, and the result panel gives each block its own Copy
   button. Change the prompt's formatting rules and the parser together.
-- In the injected frame, the host page's permissions policy blocks `navigator.clipboard`, so
-  Copy buttons work through the `execCommand('copy')` fallback, which needs a real click.
-- The smoke test's hostile-page probe must stay limited to the top frame: init scripts also run
-  in the extension frame, where the probe would cancel the frame's own clicks. In headless
-  Chromium, clicks in the bottom ~90 px of the viewport never reach the extension frame, so
-  the composer-focus check passes through auto-focus, not the click.
 - `npm run dev` doesn't work. The manifest's strict CSP blocks the crxjs dev server, so
-  extension pages hang on its loading screen. It also leaves a dev build in `dist/` that makes
-  `test:browser` time out after 30 s.
-- The extension version lives only in `package.json`; `vite.config.ts` writes it into the built
-  manifest, so `src/manifest.json` has no `version`. Bump it with
-  `npm version <x.y.z> --no-git-tag-version`.
-- GitHub turns off scheduled workflows in a public repo after 60 days without activity, which
-  stops the daily live API check. Re-enable it from the repo's Actions tab.
-- CI's `npm audit` gate can turn red from a new upstream advisory with no code change.
+  extension pages hang on its loading screen. It also overwrites `dist/` with a dev build that
+  fails `test:browser` until you run `npm run build` again.
 - Manual run: `npm run build`, then chrome://extensions → Developer mode → Load unpacked →
   `dist/`. Reload the extension after each rebuild. Real answers need an Anthropic API key,
   which you enter on the options page.
+
+## Releases
+
+The version lives only in `package.json`; `vite.config.ts` writes it into the built manifest,
+so `src/manifest.json` has no `version`. Bump it with `npm version <x.y.z> --no-git-tag-version`.
+Pushing a `v<x.y.z>` tag runs `.github/workflows/release.yml`: the CI checks, then
+`npm run package`, then a GitHub release with the zip. The tag must match `package.json`.
