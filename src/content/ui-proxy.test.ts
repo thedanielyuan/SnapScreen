@@ -150,4 +150,26 @@ describe('isolated UI proxy lifecycle', () => {
 
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({ type: 'OPEN_SETTINGS' });
   });
+
+  it('offers a failed first answer Try again but not Remove', () => {
+    const onRetry = vi.fn();
+    showResultPanel({
+      messages: [{ role: 'assistant', content: 'Partial', status: 'failed' }],
+      failedAnswerActions: { onRetry },
+      onClose: vi.fn(),
+      onFollowUp: vi.fn(),
+    });
+
+    const [host] = mockState.instances;
+    expect(host.send).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'SNAPSCREEN_UI_RENDER_RESULT',
+      state: expect.objectContaining({
+        canRemoveFailedAnswer: false,
+        canRetryFailedAnswer: true,
+      }),
+    }));
+    host.emit({ type: 'SNAPSCREEN_UI_ACTION', sessionId: 'session', action: 'remove_failed' });
+    host.emit({ type: 'SNAPSCREEN_UI_ACTION', sessionId: 'session', action: 'retry_failed' });
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
 });

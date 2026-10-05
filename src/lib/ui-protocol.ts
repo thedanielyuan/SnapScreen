@@ -22,13 +22,14 @@ export type UiPanelAction =
 
 export interface SerializedResultPanelState {
   anchorRect?: Rect;
+  canRemoveFailedAnswer: boolean;
   canResnip: boolean;
   canRetry: boolean;
+  canRetryFailedAnswer: boolean;
   canStop: boolean;
   dataUrl?: string;
   error?: string;
   errorCode?: string;
-  hasFailedFollowUpActions: boolean;
   maxInputCharacters?: number;
   messages: DisplayMessage[];
   pending: boolean;
@@ -180,7 +181,8 @@ function isSerializedResultPanelState(value: unknown): value is SerializedResult
     && typeof value.canStop === 'boolean'
     && typeof value.canRetry === 'boolean'
     && typeof value.canResnip === 'boolean'
-    && typeof value.hasFailedFollowUpActions === 'boolean'
+    && typeof value.canRetryFailedAnswer === 'boolean'
+    && typeof value.canRemoveFailedAnswer === 'boolean'
     && isOptionalBoundedString(value.dataUrl, 16_000_000)
     && isOptionalBoundedString(value.error, 10_000)
     && isOptionalBoundedString(value.errorCode, 200)

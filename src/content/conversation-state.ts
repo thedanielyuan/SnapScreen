@@ -165,6 +165,43 @@ export function settleStoppedConversation(
   return { displayMessages, conversationHistory };
 }
 
+function failedAnswerText(partialAnswer: string, errorMessage: string): string {
+  const partial = partialAnswer.trim();
+  const failure = errorMessage.trim() || 'The response could not be completed.';
+  return partial
+    ? `${partial}\n\nResponse interrupted: ${failure}`
+    : `Response failed: ${failure}`;
+}
+
+export interface FailedFirstAnswerInput {
+  partialAnswer: string;
+  errorMessage: string;
+  dataUrl: string;
+  sessionInstruction?: string;
+}
+
+/**
+ * Keeps the text a first answer streamed before it failed, marked as
+ * interrupted the same way as a failed follow-up, so follow-ups can still build
+ * on it. Without streamed text there is nothing to keep.
+ */
+export function settleFailedFirstAnswer(
+  input: FailedFirstAnswerInput,
+): StoppedConversationState {
+  if (!input.partialAnswer.trim()) return clearIncompleteInitialFailure();
+
+  const assistantText = failedAnswerText(input.partialAnswer, input.errorMessage);
+  return {
+    displayMessages: [{ role: 'assistant', content: assistantText, status: 'failed' }],
+    conversationHistory: buildImageTurn(
+      input.dataUrl,
+      input.sessionInstruction,
+      undefined,
+      assistantText,
+    ),
+  };
+}
+
 export interface FailedFollowUpInput {
   baseDisplayMessages: DisplayMessage[];
   baseHistory: AnthropicMessage[];
@@ -185,11 +222,7 @@ export function settleFailedFollowUp(
   input: FailedFollowUpInput,
 ): FailedFollowUpState {
   const userText = input.userText.trim();
-  const partial = input.partialAnswer.trim();
-  const failure = input.errorMessage.trim() || 'The response could not be completed.';
-  const assistantText = partial
-    ? `${partial}\n\nResponse interrupted: ${failure}`
-    : `Response failed: ${failure}`;
+  const assistantText = failedAnswerText(input.partialAnswer, input.errorMessage);
 
   const displayMessages: DisplayMessage[] = [
     ...input.baseDisplayMessages,
