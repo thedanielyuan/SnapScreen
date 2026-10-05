@@ -166,6 +166,7 @@ async function saveKeyFromMissingKeyError(context, page, frame) {
   await optionsPage.waitForURL((url) => url.pathname === OPTIONS_PATH, {
     timeout: TEST_TIMEOUT_MS,
   });
+  await verifyCollapsedLimitValidation(optionsPage);
   await optionsPage.locator('#api-key').fill(TEST_API_KEY);
   await optionsPage.locator('#save-settings').click();
   await optionsPage.locator('#status').filter({ hasText: 'Settings saved.' }).waitFor({
@@ -178,6 +179,41 @@ async function saveKeyFromMissingKeyError(context, page, frame) {
   const tryAgain = error.getByRole('button', { name: 'Try again' });
   await tryAgain.waitFor({ state: 'visible', timeout: TEST_TIMEOUT_MS });
   return tryAgain;
+}
+
+// Chrome can't focus an invalid field inside a closed <details>, so unless the
+// options page opens the Advanced section first, Save does nothing visible.
+async function verifyCollapsedLimitValidation(optionsPage) {
+  const advanced = optionsPage.locator('#advanced-settings');
+  const summary = advanced.locator('summary');
+  const turns = optionsPage.locator('#max-conversation-turns');
+  if (await advanced.evaluate((details) => details.open)) {
+    throw new Error('Settings opened with the Advanced section expanded.');
+  }
+
+  await summary.click();
+  const savedTurns = await turns.inputValue();
+  await turns.fill('1');
+  await summary.click();
+  await optionsPage.locator('#save-settings').click();
+  try {
+    await optionsPage.waitForFunction(
+      () => document.getElementById('advanced-settings')?.open === true
+        && document.activeElement?.id === 'max-conversation-turns',
+      undefined,
+      { timeout: TEST_TIMEOUT_MS },
+    );
+  } catch (error) {
+    throw new Error('Save did not reveal an invalid limit in the collapsed Advanced section.', {
+      cause: error,
+    });
+  }
+  if (!await optionsPage.locator('#status').isHidden()) {
+    throw new Error('Settings saved an invalid limit.');
+  }
+
+  await turns.fill(savedTurns);
+  await summary.click();
 }
 
 // Reads the PNG header of the screenshot an answer request sent.
@@ -881,7 +917,7 @@ try {
       await assertHostPageIsolation(page);
 
       process.stdout.write(
-        'Unpacked-extension smoke test passed: exact keyed/no-key instruction, no-key Open Settings and Try again, strict-CSP extension-frame crop, oversize-capture downscale, answer, code-block copy, composer, Escape-release teardown, and host-page isolation verified.\n',
+        'Unpacked-extension smoke test passed: exact keyed/no-key instruction, no-key Open Settings and Try again, collapsed-limit validation, strict-CSP extension-frame crop, oversize-capture downscale, answer, code-block copy, composer, Escape-release teardown, and host-page isolation verified.\n',
       );
     })(),
     timeoutFailure,

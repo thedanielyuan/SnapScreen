@@ -56,6 +56,20 @@ textarea {
   color: inherit;
 }
 
+.advanced-section {
+  margin-top: 10px;
+}
+
+.advanced-section summary {
+  width: fit-content;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.advanced-section .limits-section {
+  margin-top: 12px;
+}
+
 .limits-section {
   margin: 18px 0 0;
   padding: 16px;
