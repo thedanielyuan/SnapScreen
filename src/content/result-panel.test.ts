@@ -5,6 +5,7 @@ import {
   disposeResultPanel,
   showErrorToast,
   showResultPanel,
+  showThinking,
   updateStreamingAnswer,
 } from './result-panel';
 import type { ResultPanelOptions } from './result-panel';
@@ -676,6 +677,96 @@ describe('scrolling', () => {
     }));
     await nextFrame();
     expect(panelBody().scrollTop).toBe(panelBody().scrollHeight);
+  });
+});
+
+describe('pending status', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function statusLabel(): HTMLElement | null {
+    return uiQuery('.snapscreen-pending-label');
+  }
+
+  function statusTime(): HTMLElement | null {
+    return uiQuery('.snapscreen-pending-time');
+  }
+
+  it('shows how long a slow answer has taken, while Stop keeps working', () => {
+    const onStop = vi.fn();
+    showResultPanel(options({ messages: [], pending: true, onStop }));
+
+    vi.advanceTimersByTime(4_000);
+    expect(statusLabel()?.textContent).toBe('');
+    expect(statusTime()?.textContent).toBe('');
+
+    vi.advanceTimersByTime(1_000);
+    expect(statusLabel()?.textContent).toBe('Waiting for the answer…');
+    expect(statusTime()?.textContent).toBe('0:05');
+
+    vi.advanceTimersByTime(25_000);
+    expect(statusTime()?.textContent).toBe('0:30');
+    const stop = uiQuery<HTMLButtonElement>('[aria-label="Stop generating"]')!;
+    expect(stop.disabled).toBe(false);
+    stop.click();
+    expect(onStop).toHaveBeenCalledOnce();
+  });
+
+  it('says Thinking once the model starts, and announces each label once', () => {
+    showResultPanel(options({ messages: [], pending: true, onStop: vi.fn() }));
+    const label = statusLabel()!;
+    expect(label.getAttribute('role')).toBe('status');
+    expect(statusTime()?.getAttribute('aria-hidden')).toBe('true');
+    const changes = new MutationObserver(() => undefined);
+    changes.observe(label, { characterData: true, childList: true, subtree: true });
+
+    vi.advanceTimersByTime(10_000);
+    expect(label.textContent).toBe('Waiting for the answer…');
+    showThinking();
+    expect(label.textContent).toBe('Thinking…');
+    vi.advanceTimersByTime(80_000);
+    expect(statusTime()?.textContent).toBe('1:30');
+
+    // One write per label: Waiting, then Thinking.
+    const writes = changes.takeRecords().filter((record) => record.addedNodes.length > 0);
+    expect(writes).toHaveLength(2);
+    changes.disconnect();
+  });
+
+  it('counts from when the request started, across redraws', () => {
+    showResultPanel(options({
+      messages: [],
+      pending: true,
+      pendingSince: Date.now() - 12_000,
+      thinking: true,
+      onStop: vi.fn(),
+    }));
+
+    expect(statusLabel()?.textContent).toBe('Thinking…');
+    expect(statusTime()?.textContent).toBe('0:12');
+  });
+
+  it('stops once answer text streams in or the panel goes away', () => {
+    showResultPanel(options({ messages: [], pending: true, onStop: vi.fn() }));
+    vi.advanceTimersByTime(6_000);
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+    updateStreamingAnswer('The answer');
+    showThinking();
+    expect(statusLabel()).toBeNull();
+    expect(statusTime()).toBeNull();
+    vi.runOnlyPendingTimers();
+    expect(vi.getTimerCount()).toBe(0);
+
+    showResultPanel(options({ messages: [], pending: true, onStop: vi.fn() }));
+    disposeResultPanel();
+    vi.runOnlyPendingTimers();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 

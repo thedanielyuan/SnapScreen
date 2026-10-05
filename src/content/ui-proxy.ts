@@ -205,8 +205,14 @@ export function showResultPanel(options: ResultPanelOptions): void {
     maxInputCharacters: options.maxInputCharacters,
     messages: options.messages ? [...options.messages] : [],
     pending: !!options.pending,
+    pendingSince: options.pendingSince,
+    thinking: !!options.thinking,
   };
   host.send({ type: 'SNAPSCREEN_UI_RENDER_RESULT', state });
+}
+
+export function showThinking(): void {
+  activeHost?.send({ type: 'SNAPSCREEN_UI_SHOW_THINKING' });
 }
 
 export function updateStreamingAnswer(text: string): void {

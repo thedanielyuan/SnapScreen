@@ -41,17 +41,21 @@ export class AnthropicError extends Error {
 
 export type DeltaHandler = (textSoFar: string) => void;
 
-export interface AnalyzeImageOptions {
+export interface StreamHandlers {
+  onDelta?: DeltaHandler;
+  /** Called once, when the stream starts the first thinking block. */
+  onThinking?: () => void;
+}
+
+export interface AnalyzeImageOptions extends StreamHandlers {
   hiddenInstruction?: string;
   userQuestion?: string;
   signal?: AbortSignal;
-  onDelta?: DeltaHandler;
   limits?: SnapScreenLimits;
 }
 
-export interface FollowUpOptions {
+export interface FollowUpOptions extends StreamHandlers {
   signal?: AbortSignal;
-  onDelta?: DeltaHandler;
   sessionInstruction?: string;
   limits?: SnapScreenLimits;
 }
@@ -90,7 +94,7 @@ export async function analyzeImage(
   );
 
   const messages: AnthropicMessage[] = [{ role: 'user', content: userContent }];
-  const text = await callApi(apiKey, messages, options.signal, options.onDelta);
+  const text = await callApi(apiKey, messages, options.signal, options);
 
   return {
     text,
@@ -130,7 +134,7 @@ export async function followUp(
     { role: 'user', content: text },
   ];
 
-  const answer = await callApi(apiKey, messages, options.signal, options.onDelta);
+  const answer = await callApi(apiKey, messages, options.signal, options);
 
   return {
     text: answer,
@@ -166,7 +170,7 @@ async function callApi(
   apiKey: string,
   messages: AnthropicMessage[],
   signal?: AbortSignal,
-  onDelta?: DeltaHandler,
+  handlers: StreamHandlers = {},
 ): Promise<string> {
   return withRequestTimeout(signal, async (requestSignal) => {
     const response = await postToApi(
@@ -197,7 +201,7 @@ async function callApi(
       [REFUSAL_FALLBACK_BETA],
     );
 
-    const { text, stopReason } = await readSseStream(response, onDelta, requestSignal);
+    const { text, stopReason } = await readSseStream(response, handlers, requestSignal);
 
     if (stopReason === 'refusal') {
       throw new AnthropicError('refusal', 'Claude declined to answer this question.');
@@ -218,7 +222,7 @@ async function callApi(
 
 async function readSseStream(
   response: Response,
-  onDelta?: DeltaHandler,
+  { onDelta, onThinking }: StreamHandlers,
   signal?: AbortSignal,
 ): Promise<{ text: string; stopReason?: string }> {
   const reader = response.body?.getReader();
@@ -231,6 +235,7 @@ async function readSseStream(
   let text = '';
   let stopReason: string | undefined;
   let sawMessageStop = false;
+  let sawThinking = false;
 
   const handleEvent = (rawEvent: string): void => {
     const dataLines: string[] = [];
@@ -263,6 +268,16 @@ async function readSseStream(
 
     const type = typeof data.type === 'string' ? data.type : eventName;
     switch (type) {
+      case 'content_block_start': {
+        // Thinking text is omitted, but its blocks still stream, so their
+        // start shows that the model is thinking before it answers.
+        const blockType = isRecord(data.content_block) ? data.content_block.type : undefined;
+        if (!sawThinking && (blockType === 'thinking' || blockType === 'redacted_thinking')) {
+          sawThinking = true;
+          onThinking?.();
+        }
+        break;
+      }
       case 'content_block_delta':
         if (!isRecord(data.delta)) {
           throw streamError('The API returned malformed streaming data. Please try again.');

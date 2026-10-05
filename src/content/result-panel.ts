@@ -16,6 +16,9 @@ const LIGHTBOX_ID = 'snapscreen-lightbox-root';
 const MARGIN = VIEWPORT_MARGIN;
 // A reader this close to the end of the answer still has new text followed.
 const FOLLOW_END_THRESHOLD_PX = 24;
+// Quick answers show only the spinner. After this long without answer text,
+// the panel says what it's waiting for and for how long.
+const PENDING_STATUS_DELAY_MS = 5_000;
 
 const CLOSE_ICON_SVG = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>`;
 const RESNIP_ICON_SVG = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/></svg>`;
@@ -52,6 +55,13 @@ let draggingPanel: HTMLElement | null = null;
 let lightboxBackgroundPanel: HTMLElement | null = null;
 let lightboxBackgroundAriaHidden: string | null = null;
 const panelAnimationFrames = new Set<number>();
+let pendingStatus: {
+  label: HTMLElement;
+  since: number;
+  thinking: boolean;
+  time: HTMLElement;
+  timer: ReturnType<typeof setInterval>;
+} | null = null;
 
 function schedulePanelFrame(callback: FrameRequestCallback): number {
   const frame = requestAnimationFrame((time) => {
@@ -73,6 +83,10 @@ export interface ResultPanelOptions {
   error?: string;
   errorCode?: string;
   pending?: boolean;
+  /** When the pending request started. Defaults to when the panel shows it. */
+  pendingSince?: number;
+  /** The model has started thinking about the pending request. */
+  thinking?: boolean;
   anchorRect?: Rect;
   onClose: () => void;
   onFollowUp: (text: string) => void;
@@ -93,6 +107,7 @@ export interface ResultPanelOptions {
 
 export function showResultPanel(options: ResultPanelOptions): void {
   cancelPanelFrames();
+  stopPendingStatus();
   queryUiElement('#snapscreen-overlay-root')?.remove();
   closeScreenshotLightbox();
   const uiRoot = getUiRoot();
@@ -278,7 +293,10 @@ export function showResultPanel(options: ResultPanelOptions): void {
     }
 
     if (options.pending) {
-      body.append(createPendingIndicator());
+      body.append(createPendingIndicator(
+        options.pendingSince ?? Date.now(),
+        !!options.thinking,
+      ));
     }
 
     if (options.error && hasMessages) {
@@ -446,14 +464,64 @@ function isScrolledToEnd(element: Element): boolean {
     <= FOLLOW_END_THRESHOLD_PX;
 }
 
-function createPendingIndicator(): HTMLElement {
+function createPendingIndicator(since: number, thinking: boolean): HTMLElement {
   const pending = document.createElement('div');
   pending.className = 'snapscreen-pending';
-  pending.setAttribute('role', 'status');
-  pending.setAttribute('aria-label', 'Loading');
-  pending.innerHTML = '<div class="snapscreen-spinner"></div>';
 
+  const spinner = document.createElement('div');
+  spinner.className = 'snapscreen-spinner';
+  spinner.setAttribute('role', 'img');
+  spinner.setAttribute('aria-label', 'Loading');
+
+  // Screen readers hear each new label once. The time stays outside the live
+  // region so it isn't read out every second.
+  const label = document.createElement('span');
+  label.className = 'snapscreen-pending-label';
+  label.setAttribute('role', 'status');
+
+  const time = document.createElement('span');
+  time.className = 'snapscreen-pending-time';
+  time.setAttribute('aria-hidden', 'true');
+
+  pending.append(spinner, label, time);
+  pendingStatus = {
+    label,
+    since,
+    thinking,
+    time,
+    timer: setInterval(updatePendingStatus, 1_000),
+  };
+  updatePendingStatus();
   return pending;
+}
+
+function updatePendingStatus(): void {
+  if (!pendingStatus) return;
+  const elapsed = Date.now() - pendingStatus.since;
+  if (elapsed < PENDING_STATUS_DELAY_MS) return;
+
+  const label = pendingStatus.thinking ? 'Thinking…' : 'Waiting for the answer…';
+  // Rewriting the same label would announce it again.
+  if (pendingStatus.label.textContent !== label) pendingStatus.label.textContent = label;
+  pendingStatus.time.textContent = formatElapsed(elapsed);
+}
+
+function formatElapsed(milliseconds: number): string {
+  const seconds = Math.floor(milliseconds / 1_000);
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+function stopPendingStatus(): void {
+  if (!pendingStatus) return;
+  clearInterval(pendingStatus.timer);
+  pendingStatus = null;
+}
+
+/** The model has started thinking, so the pending status can say so. */
+export function showThinking(): void {
+  if (!pendingStatus) return;
+  pendingStatus.thinking = true;
+  updatePendingStatus();
 }
 
 /**
@@ -672,6 +740,7 @@ function resetPanelCursor(): void {
 export function disposeResultPanel(): void {
   panelEscapePressed = false;
   cancelPanelFrames();
+  stopPendingStatus();
   panelPosition = null;
   panelPositioningAbort?.abort();
   panelPositioningAbort = null;
@@ -1007,6 +1076,12 @@ export function updateStreamingAnswer(text: string): void {
   // Follow new text only while the reader is at the end, so one who scrolled
   // up to read stays put.
   const followsEnd = isScrolledToEnd(body);
+  // Streaming text shows progress by itself.
+  if (pendingStatus) {
+    pendingStatus.label.remove();
+    pendingStatus.time.remove();
+    stopPendingStatus();
+  }
 
   let thread = body.querySelector('.snapscreen-chat-thread');
   if (!thread) {

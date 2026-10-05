@@ -33,6 +33,8 @@ export interface SerializedResultPanelState {
   maxInputCharacters?: number;
   messages: DisplayMessage[];
   pending: boolean;
+  pendingSince?: number;
+  thinking: boolean;
 }
 
 export type ControllerToFrameMessage =
@@ -53,6 +55,7 @@ export type ControllerToFrameMessage =
       sessionId: string;
       text: string;
     }
+  | { type: 'SNAPSCREEN_UI_SHOW_THINKING'; sessionId: string }
   | {
       type: 'SNAPSCREEN_UI_SHOW_TOAST';
       sessionId: string;
@@ -178,6 +181,11 @@ function isSerializedResultPanelState(value: unknown): value is SerializedResult
   return value.messages.length <= MAX_PROTOCOL_MESSAGES
     && value.messages.every(isDisplayMessage)
     && typeof value.pending === 'boolean'
+    && typeof value.thinking === 'boolean'
+    && (
+      value.pendingSince === undefined
+      || (isFiniteNumber(value.pendingSince) && value.pendingSince >= 0)
+    )
     && typeof value.canStop === 'boolean'
     && typeof value.canRetry === 'boolean'
     && typeof value.canResnip === 'boolean'
@@ -228,6 +236,7 @@ export function isControllerToFrameMessage(
     case 'SNAPSCREEN_UI_DISPOSE_SNIP':
     case 'SNAPSCREEN_UI_DISPOSE_RESULT':
     case 'SNAPSCREEN_UI_DISPOSE_ALL':
+    case 'SNAPSCREEN_UI_SHOW_THINKING':
       return true;
     case 'SNAPSCREEN_UI_START_SNIP':
       return isBoundedString(value.dataUrl, MAX_SCREENSHOT_DATA_URL)

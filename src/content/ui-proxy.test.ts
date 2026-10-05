@@ -57,6 +57,7 @@ vi.mock('./result-frame-host', () => ({
 import {
   disposeResultPanel,
   showResultPanel,
+  showThinking,
   startSnipOverlay as startSnipOverlayInternal,
 } from './ui-proxy';
 
@@ -149,6 +150,29 @@ describe('isolated UI proxy lifecycle', () => {
     });
 
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({ type: 'OPEN_SETTINGS' });
+  });
+
+  it('passes the pending status to the frame', () => {
+    showResultPanel({
+      pending: true,
+      pendingSince: 1_700_000_000_000,
+      thinking: false,
+      onClose: vi.fn(),
+      onFollowUp: vi.fn(),
+      onStop: vi.fn(),
+    });
+    showThinking();
+
+    const [host] = mockState.instances;
+    expect(host.send).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'SNAPSCREEN_UI_RENDER_RESULT',
+      state: expect.objectContaining({
+        pending: true,
+        pendingSince: 1_700_000_000_000,
+        thinking: false,
+      }),
+    }));
+    expect(host.send).toHaveBeenLastCalledWith({ type: 'SNAPSCREEN_UI_SHOW_THINKING' });
   });
 
   it('offers a failed first answer Try again but not Remove', () => {

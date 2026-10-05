@@ -13,6 +13,7 @@ interface ControllerHarness {
   panels: ResultPanelOptions[];
   selections: SnipOverlayOptions[];
   sendMessage: ReturnType<typeof vi.fn<(message: CsToBgMessage) => Promise<unknown>>>;
+  showThinking: ReturnType<typeof vi.fn>;
   streamUpdates: string[];
   toasts: string[];
 }
@@ -23,11 +24,13 @@ function createHarness(imageFit?: 'contain' | 'fill'): ControllerHarness {
   const streamUpdates: string[] = [];
   const toasts: string[] = [];
   const sendMessage = vi.fn(async () => ({ ok: true }));
+  const showThinking = vi.fn();
   const ui: CaptureControllerUi = {
     disposeResultPanel: vi.fn(),
     disposeSnipOverlay: vi.fn(),
     showErrorToast: (message) => toasts.push(message),
     showResultPanel: (options) => panels.push(options),
+    showThinking,
     startSnipOverlay: (options) => {
       selections.push(options);
       return vi.fn();
@@ -39,6 +42,7 @@ function createHarness(imageFit?: 'contain' | 'fill'): ControllerHarness {
     panels,
     selections,
     sendMessage,
+    showThinking,
     streamUpdates,
     toasts,
   };
@@ -325,6 +329,45 @@ describe.each(adapters)('shared capture controller — $label', ({ imageFit }) =
     harness.panels.at(-1)!.onFollowUp('Something else?');
     const [, next] = sentMessages(harness, 'FOLLOW_UP');
     expect(JSON.stringify(next.history)).not.toContain('Refused start');
+  });
+
+  it('shows that the model is thinking about the active request', async () => {
+    const harness = createHarness(imageFit);
+    startAndSelect(harness);
+    const initial = await deliverCrop(harness);
+    expect(harness.panels.at(-1)).toEqual(expect.objectContaining({
+      pending: true,
+      thinking: false,
+    }));
+
+    harness.controller.handleMessage({
+      type: 'ANALYZE_THINKING',
+      ...idsOf(initial),
+      requestId: 'stale-request',
+    });
+    expect(harness.showThinking).not.toHaveBeenCalled();
+    harness.controller.handleMessage({ type: 'ANALYZE_THINKING', ...idsOf(initial) });
+    expect(harness.showThinking).toHaveBeenCalledOnce();
+
+    // A redraw mid-request keeps the request's start time and thinking state.
+    harness.controller.handleMessage({
+      type: 'RESNIP_UNAVAILABLE',
+      message: 'The source tab was closed.',
+    });
+    const redrawn = harness.panels.at(-1)!;
+    expect(redrawn).toEqual(expect.objectContaining({ pending: true, thinking: true }));
+    expect(redrawn.pendingSince).toBeTypeOf('number');
+
+    harness.controller.handleMessage({
+      type: 'ANALYZE_RESULT',
+      ...idsOf(initial),
+      text: 'Answer',
+    });
+    expect(harness.panels.at(-1)).toEqual(expect.objectContaining({
+      pending: false,
+      pendingSince: undefined,
+      thinking: false,
+    }));
   });
 
   it('keeps the conversation but removes New snip when the source expires', async () => {

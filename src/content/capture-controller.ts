@@ -41,6 +41,7 @@ export interface CaptureControllerUi {
   disposeSnipOverlay: () => void;
   showErrorToast: (message: string) => void;
   showResultPanel: (options: ResultPanelOptions) => void;
+  showThinking: () => void;
   startSnipOverlay: (options: SnipOverlayOptions) => SnipOverlayDisposer;
   updateStreamingAnswer: (text: string) => void;
 }
@@ -59,6 +60,8 @@ interface ActiveGenerationState {
   kind: 'initial' | 'follow-up';
   requestId: string;
   screenshotId: string;
+  startedAt: number;
+  thinking: boolean;
   userText?: string;
   transport: 'analyze' | 'follow-up';
 }
@@ -179,6 +182,8 @@ export function createCaptureController(
       error: state.error,
       errorCode: state.errorCode,
       pending: state.pending,
+      pendingSince: state.pending ? activeGeneration?.startedAt : undefined,
+      thinking: state.pending && activeGeneration?.thinking === true,
       anchorRect: lastRect,
       onClose: () => endSession('close'),
       onFollowUp: handleFollowUp,
@@ -366,6 +371,8 @@ export function createCaptureController(
         kind: input.kind,
         requestId,
         screenshotId: sessionScreenshotId,
+        startedAt: Date.now(),
+        thinking: false,
         userText: input.userText,
         transport: input.transport,
       };
@@ -573,6 +580,12 @@ export function createCaptureController(
 
       case 'CAPTURE_ERROR':
         showCaptureFailure(message.captureId, message.message, message.code);
+        break;
+
+      case 'ANALYZE_THINKING':
+        if (!isActiveGeneration(message)) return;
+        activeGeneration!.thinking = true;
+        ui.showThinking();
         break;
 
       case 'ANALYZE_CHUNK':

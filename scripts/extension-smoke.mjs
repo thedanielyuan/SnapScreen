@@ -493,6 +493,108 @@ async function verifyScrollFollowing(frame, queuedApiBodies, apiGate) {
   return composer;
 }
 
+// Answers in the worker with a stream that starts a thinking block and then
+// stalls until the request is aborted. Playwright can only fulfill a route with
+// a complete body, so it can't hold a stream open.
+async function installStalledThinkingStream(worker) {
+  await worker.evaluate((apiUrl) => {
+    const realFetch = globalThis.fetch;
+    globalThis.__snapscreenSmokeRealFetch = realFetch;
+    globalThis.__snapscreenSmokeStreamAborted = false;
+    globalThis.fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (url !== apiUrl) return realFetch(input, init);
+
+      const encoder = new TextEncoder();
+      const events = [
+        {
+          type: 'message_start',
+          message: {
+            id: 'msg_snapscreen_smoke_thinking',
+            type: 'message',
+            role: 'assistant',
+            model: 'claude-sonnet-5-5',
+            content: [],
+            stop_reason: null,
+            stop_sequence: null,
+            usage: { input_tokens: 1, output_tokens: 0 },
+          },
+        },
+        {
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'thinking', thinking: '', signature: '' },
+        },
+      ];
+      const body = new ReadableStream({
+        start(controller) {
+          for (const event of events) {
+            controller.enqueue(encoder.encode(
+              `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+            ));
+          }
+          init?.signal?.addEventListener('abort', () => {
+            globalThis.__snapscreenSmokeStreamAborted = true;
+            controller.error(init.signal.reason);
+          }, { once: true });
+        },
+      });
+      return new Response(body, { headers: { 'content-type': 'text/event-stream' } });
+    };
+  }, API_URL);
+}
+
+async function restoreWorkerFetch(worker) {
+  await worker.evaluate(() => {
+    globalThis.fetch = globalThis.__snapscreenSmokeRealFetch;
+  });
+}
+
+// A slow answer says how long it has taken, says Thinking once the stream
+// starts a thinking block, and can still be stopped. The fake clock stands in
+// for a 30-second wait.
+async function verifySlowAnswerStatus(context, worker, frame) {
+  const overlay = frame.locator('#snapscreen-overlay-root');
+  await overlay.waitFor({ state: 'visible', timeout: TEST_TIMEOUT_MS });
+  await overlay.press('Enter');
+  await overlay.press('Enter');
+  await frame.locator('.snapscreen-pending').waitFor({
+    state: 'visible',
+    timeout: TEST_TIMEOUT_MS,
+  });
+
+  await context.clock.fastForward(30_000);
+  const label = frame.locator('.snapscreen-pending-label');
+  try {
+    await label.filter({ hasText: 'Thinking…' }).waitFor({
+      state: 'visible',
+      timeout: TEST_TIMEOUT_MS,
+    });
+  } catch (error) {
+    throw new Error(
+      `A slow answer did not say Thinking (status ${JSON.stringify(await label.textContent())}).`,
+      { cause: error },
+    );
+  }
+  const elapsed = await frame.locator('.snapscreen-pending-time').textContent();
+  if (!/^0:3\d$/.test(elapsed ?? '')) {
+    throw new Error(`A 30-second wait showed ${JSON.stringify(elapsed)} instead of a running timer.`);
+  }
+
+  await frame.getByRole('button', { name: 'Stop generating' }).click();
+  await frame.getByText('Generation stopped.').waitFor({
+    state: 'visible',
+    timeout: TEST_TIMEOUT_MS,
+  });
+  if (await frame.locator('.snapscreen-pending').count() !== 0) {
+    throw new Error('The pending status stayed after Stop.');
+  }
+  if (!await worker.evaluate(() => globalThis.__snapscreenSmokeStreamAborted)) {
+    throw new Error('Stop did not cancel the stalled request.');
+  }
+  return frame.locator('.snapscreen-input');
+}
+
 // A first answer that fails partway keeps its text and offers Try again, which
 // answers the same capture again. A follow-up can then build on the
 // interrupted answer, and must resend the oversize capture downscaled, like
@@ -1096,8 +1198,22 @@ try {
       });
       await verifyEscapeClose(page, uiFrame, scrollComposer, 'Scroll-following close');
 
+      // Last, because the fake clock stays installed for the rest of the run.
+      await installStalledThinkingStream(worker);
+      await context.clock.install();
+      await injectAndStartSnip(worker, contentLoader, {
+        apiKey: TEST_API_KEY,
+        croppedDataUrl: oversizeCrop,
+      });
+      uiHost = page.locator(UI_HOST_SELECTOR);
+      await uiHost.waitFor({ state: 'attached', timeout: TEST_TIMEOUT_MS });
+      uiFrame = await waitForUiFrame(page);
+      const slowComposer = await verifySlowAnswerStatus(context, worker, uiFrame);
+      await restoreWorkerFetch(worker);
+      await verifyEscapeClose(page, uiFrame, slowComposer, 'Slow-answer close');
+
       process.stdout.write(
-        'Unpacked-extension smoke test passed: exact keyed/no-key instruction, no-key Open Settings and Try again, collapsed-limit validation, strict-CSP extension-frame crop, oversize-capture downscale, answer, code-block copy, composer, Escape-release teardown, host-page isolation, interrupted-first-answer Try again and follow-up, and streaming scroll-following verified.\n',
+        'Unpacked-extension smoke test passed: exact keyed/no-key instruction, no-key Open Settings and Try again, collapsed-limit validation, strict-CSP extension-frame crop, oversize-capture downscale, answer, code-block copy, composer, Escape-release teardown, host-page isolation, interrupted-first-answer Try again and follow-up, streaming scroll-following, and slow-answer status and Stop verified.\n',
       );
     })(),
     timeoutFailure,

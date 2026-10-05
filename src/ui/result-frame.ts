@@ -2,6 +2,7 @@ import {
   disposeResultPanel,
   showErrorToast,
   showResultPanel,
+  showThinking,
   updateStreamingAnswer,
 } from '../content/result-panel';
 import { disposeSnipOverlay, startSnipOverlay } from '../content/snip-overlay';
@@ -97,9 +98,15 @@ if (bootstrap) {
           onRetry: state.canRetry ? () => postAction('retry') : undefined,
           onStop: state.canStop ? () => postAction('stop') : undefined,
           pending: state.pending,
+          pendingSince: state.pendingSince,
+          thinking: state.thinking,
         });
         break;
       }
+
+      case 'SNAPSCREEN_UI_SHOW_THINKING':
+        showThinking();
+        break;
 
       case 'SNAPSCREEN_UI_UPDATE_STREAM':
         updateStreamingAnswer(value.text);
