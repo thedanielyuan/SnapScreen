@@ -16,7 +16,7 @@ Effort includes tests and doc updates. **S**: a day or less. **M**: a few days.
 | 1.2 | Keep a first answer's text when it fails mid-stream      | S      | Done   |
 | 1.3 | Stop pulling the reader to the bottom while streaming    | S      | Done   |
 | 1.4 | Fix the workspace's "reload this tab" advice             | S      | Done   |
-| 2.1 | Show that a slow answer is still working                 | S      | To do  |
+| 2.1 | Show that a slow answer is still working                 | S      | Done   |
 | 2.2 | Measure answer quality before changing prompts or models | M      | To do  |
 
 ## 1. Fix first
