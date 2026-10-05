@@ -64,7 +64,7 @@ store.
 ### 1.3 Daily check against the real Anthropic API
 
 [src/lib/anthropic.ts](src/lib/anthropic.ts#L175-L195) hard-codes the model
-(`claude-sonnet-5-5`), a dated beta header (`server-side-fallback-2026-07-01`),
+(`claude-opus-5-5`), a dated beta header (`server-side-fallback-2026-07-01`),
 `fallbacks: 'default'`, adaptive thinking and effort. The smoke test fakes the API. If Anthropic
 retires the model or beta, or changes a parameter, every answer fails for every user while CI
 stays green, and the fix waits on store review.
@@ -145,8 +145,8 @@ page.
 
 ### 2.3 Cost guidance for users
 
-Users pay for every answer: usually cents, at most about $0.33 (32,000 output tokens at Claude
-Sonnet 5.5's $10 per million). The README doesn't mention cost, and the spend-limit advice is
+Users pay for every answer: usually cents, at most about $0.67 (32,000 output tokens at Claude
+Opus 5.5's $20 per million). The README doesn't mention cost, and the spend-limit advice is
 only in [docs/security.md](docs/security.md).
 
 - [ ] Add a short cost note to the README and the options page: typical cost per answer, and a

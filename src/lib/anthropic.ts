@@ -21,10 +21,10 @@ import {
 } from './session-history';
 
 const API_URL = 'https://api.anthropic.com/v1/messages';
-const MODEL = 'claude-sonnet-5-5';
-// Server-side refusal fallback: when a safety classifier declines (on Sonnet
-// 5.5, the cyber and frontier_llm categories), the API reruns the request on
-// Anthropic's recommended fallback model within the same stream.
+const MODEL = 'claude-opus-5-5';
+// Server-side refusal fallback: when a safety classifier declines, the API
+// reruns the request on the model Anthropic recommends for that refusal
+// category, within the same stream.
 const REFUSAL_FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 const MAX_PROVIDER_ERROR_BYTES = 16_384;
 const MAX_PROVIDER_ERROR_CHARACTERS = 240;
@@ -155,9 +155,9 @@ export async function verifyApiKey(apiKey: string, signal?: AbortSignal): Promis
       apiKey,
       {
         model: MODEL,
+        // Key check only, so it stops after one token. Opus 5.5 can't turn
+        // thinking off, and max_tokens caps thinking and text together.
         max_tokens: 1,
-        // Key check only, so it skips thinking and stops after one token.
-        thinking: { type: 'between_tools' },
         messages: [{ role: 'user', content: 'Hi' }],
       },
       requestSignal,
