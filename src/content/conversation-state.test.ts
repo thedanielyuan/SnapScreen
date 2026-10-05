@@ -5,6 +5,7 @@ import {
   appendUserMessage,
   settleStoppedGeneration,
   settleStoppedConversation,
+  settleFailedFirstAnswer,
   settleFailedFollowUp,
   restoreBeforeFailedFollowUp,
   settleSuccessfulConversation,
@@ -227,6 +228,63 @@ describe('stopped conversation state', () => {
       role: 'assistant',
       content: 'Partial answer',
     });
+  });
+});
+
+describe('failed first answer', () => {
+  function fail(partialAnswer: string) {
+    return settleFailedFirstAnswer({
+      partialAnswer,
+      errorMessage: 'Request timed out.',
+      dataUrl: 'data:image/png;base64,QUJD',
+      sessionInstruction: 'Answer the screenshot.',
+    });
+  }
+
+  it('keeps streamed text, marked interrupted, in both histories', () => {
+    const failed = fail('  Partial answer  ');
+    const assistantText = 'Partial answer\n\nResponse interrupted: Request timed out.';
+
+    expect(failed.displayMessages).toEqual([
+      { role: 'assistant', content: assistantText, status: 'failed' },
+    ]);
+    expect(failed.conversationHistory).toEqual([
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: { type: 'base64', media_type: 'image/png', data: 'QUJD' },
+          },
+          { type: 'text', text: 'Screenshot task guidance:\nAnswer the screenshot.' },
+        ],
+      },
+      { role: 'assistant', content: assistantText },
+    ]);
+  });
+
+  it('keeps nothing when no text streamed', () => {
+    expect(fail('  ')).toEqual({ displayMessages: [], conversationHistory: [] });
+  });
+
+  it('stays aligned for a follow-up', () => {
+    const failed = fail('Partial answer');
+    const followUpDisplay = settleSuccessfulFollowUp(
+      failed.displayMessages,
+      'Go on',
+      'The rest.',
+    );
+    const followUpHistory: AnthropicMessage[] = [
+      ...failed.conversationHistory,
+      { role: 'user', content: 'Go on' },
+      { role: 'assistant', content: 'The rest.' },
+    ];
+
+    expect(() => prepareAlignedConversationForNewestTurn(
+      followUpDisplay,
+      followUpHistory,
+      2,
+    )).not.toThrow();
   });
 });
 

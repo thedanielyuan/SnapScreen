@@ -79,9 +79,13 @@ export interface ResultPanelOptions {
   onRetry?: () => void;
   onResnip?: () => void;
   maxInputCharacters?: number;
-  failedFollowUpActions?: {
+  /**
+   * Buttons under the newest failed answer. A failed follow-up can be retried
+   * or removed; a failed first answer can only be tried again.
+   */
+  failedAnswerActions?: {
     onRetry: () => void;
-    onRemove: () => void;
+    onRemove?: () => void;
   };
 }
 
@@ -251,9 +255,9 @@ export function showResultPanel(options: ResultPanelOptions): void {
           wrap.append(bubble, createCopyButton(msg.content, ANSWER_COPY_BUTTON));
           if (
             index === latestFailedMessageIndex
-            && options.failedFollowUpActions
+            && options.failedAnswerActions
           ) {
-            wrap.append(createFailedFollowUpActions(options.failedFollowUpActions));
+            wrap.append(createFailedAnswerActions(options.failedAnswerActions));
           }
           thread.append(wrap);
         } else {
@@ -551,8 +555,8 @@ async function copyToClipboard(text: string, returnFocus: HTMLElement): Promise<
   }
 }
 
-function createFailedFollowUpActions(
-  actions: NonNullable<ResultPanelOptions['failedFollowUpActions']>,
+function createFailedAnswerActions(
+  actions: NonNullable<ResultPanelOptions['failedAnswerActions']>,
 ): HTMLElement {
   const actionRow = document.createElement('div');
   actionRow.className = 'snapscreen-failed-actions';
@@ -560,9 +564,17 @@ function createFailedFollowUpActions(
   const retryButton = document.createElement('button');
   retryButton.type = 'button';
   retryButton.className = 'snapscreen-failed-action';
+  retryButton.addEventListener('click', actions.onRetry);
+  actionRow.append(retryButton);
+
+  if (!actions.onRemove) {
+    // A first answer has no question to retry; it answers the capture again.
+    retryButton.textContent = 'Try again';
+    return actionRow;
+  }
+
   retryButton.textContent = 'Retry';
   retryButton.setAttribute('aria-label', 'Retry failed question');
-  retryButton.addEventListener('click', actions.onRetry);
 
   const removeButton = document.createElement('button');
   removeButton.type = 'button';
@@ -571,7 +583,7 @@ function createFailedFollowUpActions(
   removeButton.setAttribute('aria-label', 'Remove failed question and response');
   removeButton.addEventListener('click', actions.onRemove);
 
-  actionRow.append(retryButton, removeButton);
+  actionRow.append(removeButton);
   return actionRow;
 }
 

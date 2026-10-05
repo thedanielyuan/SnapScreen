@@ -553,7 +553,7 @@ describe('follow-up validation and recovery', () => {
           { role: 'user', content: 'Second question' },
           { role: 'assistant', content: 'Second failed', status: 'failed' },
         ],
-        failedFollowUpActions: { onRetry, onRemove },
+        failedAnswerActions: { onRetry, onRemove },
       }),
     );
 
@@ -572,6 +572,27 @@ describe('follow-up validation and recovery', () => {
       .click();
     expect(onRetry).toHaveBeenCalledTimes(1);
     expect(onRemove).toHaveBeenCalledTimes(1);
+    expect(uiQuery<HTMLTextAreaElement>('.snapscreen-input')?.disabled).toBe(false);
+  });
+
+  it('offers only Try again under an interrupted first answer', () => {
+    const onRetry = vi.fn();
+    showResultPanel(
+      options({
+        messages: [{
+          role: 'assistant',
+          content: 'Partial\n\nResponse interrupted: Request timed out.',
+          status: 'failed',
+        }],
+        failedAnswerActions: { onRetry },
+      }),
+    );
+
+    const actions = uiQueryAll('.snapscreen-failed-actions button');
+    expect(actions.map((button) => button.textContent)).toEqual(['Try again']);
+    (actions[0] as HTMLButtonElement).click();
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(uiQuery('.snapscreen-error')).toBeNull();
     expect(uiQuery<HTMLTextAreaElement>('.snapscreen-input')?.disabled).toBe(false);
   });
 });

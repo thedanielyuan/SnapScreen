@@ -13,7 +13,7 @@ Effort includes tests and doc updates. **S**: a day or less. **M**: a few days.
 | #   | Item                                                     | Effort | Status |
 | --- | -------------------------------------------------------- | ------ | ------ |
 | 1.1 | Fix the missing-API-key flow                             | S      | Done   |
-| 1.2 | Keep a first answer's text when it fails mid-stream      | S      | To do  |
+| 1.2 | Keep a first answer's text when it fails mid-stream      | S      | Done   |
 | 1.3 | Stop pulling the reader to the bottom while streaming    | S      | To do  |
 | 1.4 | Fix the workspace's "reload this tab" advice             | S      | To do  |
 | 2.1 | Show that a slow answer is still working                 | S      | To do  |

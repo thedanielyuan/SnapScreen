@@ -14,6 +14,11 @@ const OPTIONS_PATH = '/src/options/options.html';
 const ANSWER_SENTINEL = 'SNAPSCREEN_SMOKE_ANSWER_7C91F2';
 const COMPOSER_SENTINEL = 'SNAPSCREEN_SMOKE_COMPOSER_4A8DE6';
 const CODE_SENTINEL = 'SNAPSCREEN_SMOKE_CODE_5B3E9D';
+const PARTIAL_SENTINELS = [
+  'SNAPSCREEN_SMOKE_PARTIAL_1D6A40',
+  'SNAPSCREEN_SMOKE_PARTIAL_8F2C17',
+];
+const FOLLOW_UP_SENTINEL = 'SNAPSCREEN_SMOKE_FOLLOW_UP_3E57B9';
 const SMOKE_CODE = `def answer():\n    return "${CODE_SENTINEL}"`;
 const SMOKE_ANSWER = `${ANSWER_SENTINEL}\n\n\`\`\`python\n${SMOKE_CODE}\n\`\`\``;
 const HIDDEN_PROMPT = 'What does this show? Answer accurately and concisely.';
@@ -352,7 +357,9 @@ async function verifyCodeBlockCopy(page, frame) {
   }
 }
 
-function answerSse(answer) {
+// With `interrupted`, the stream ends after the first text, the way a dropped
+// connection does, so the answer fails partway through.
+function answerSse(answer, { interrupted = false } = {}) {
   const events = [
     {
       event: 'message_start',
@@ -403,9 +410,73 @@ function answerSse(answer) {
       data: { type: 'message_stop' },
     },
   ];
-  return events
+  return (interrupted ? events.slice(0, 3) : events)
     .map(({ event, data }) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
     .join('');
+}
+
+// A first answer that fails partway keeps its text and offers Try again, which
+// answers the same capture again. A follow-up can then build on the
+// interrupted answer, and must resend the oversize capture downscaled, like
+// the first request.
+async function verifyInterruptedFirstAnswer(frame, apiRequests, queuedApiBodies) {
+  const [firstPartial, secondPartial] = PARTIAL_SENTINELS;
+  queuedApiBodies.push(
+    answerSse(firstPartial, { interrupted: true }),
+    answerSse(secondPartial, { interrupted: true }),
+  );
+  const overlay = frame.locator('#snapscreen-overlay-root');
+  await overlay.waitFor({ state: 'visible', timeout: TEST_TIMEOUT_MS });
+  await overlay.press('Enter');
+  await overlay.press('Enter');
+
+  const failed = frame.locator('.snapscreen-msg-failed');
+  await failed.filter({ hasText: firstPartial }).waitFor({
+    state: 'visible',
+    timeout: TEST_TIMEOUT_MS,
+  });
+  if (!(await failed.textContent())?.includes('Response interrupted:')) {
+    throw new Error('The interrupted first answer was not marked as interrupted.');
+  }
+
+  await frame.getByRole('button', { name: 'Try again' }).click();
+  await failed.filter({ hasText: secondPartial }).waitFor({
+    state: 'visible',
+    timeout: TEST_TIMEOUT_MS,
+  });
+  if (await frame.locator('.snapscreen-msg').count() !== 1) {
+    throw new Error('Try again did not replace the interrupted first answer.');
+  }
+
+  const composer = frame.locator('.snapscreen-input');
+  await composer.fill(FOLLOW_UP_SENTINEL);
+  await composer.press('Enter');
+  await waitForAnswer(frame, apiRequests);
+
+  const requests = apiRequests.splice(0);
+  if (requests.length !== 3) {
+    throw new Error(`Expected 3 requests for the interrupted-answer flow, got ${requests.length}.`);
+  }
+  const [, retryRequest, followUpRequest] = requests;
+  const retryMessages = JSON.parse(retryRequest.postData ?? '{}').messages ?? [];
+  if (retryMessages.length !== 1 || readSentImageWidth(retryRequest) !== DOWNSCALED_CROP_WIDTH) {
+    throw new Error('Try again did not resend the capture as a new first answer.');
+  }
+  const followUpMessages = JSON.parse(followUpRequest.postData ?? '{}').messages ?? [];
+  if (
+    followUpMessages.length !== 3
+    || !String(followUpMessages[1]?.content).includes(`${secondPartial}\n\nResponse interrupted:`)
+    || followUpMessages[2]?.content !== FOLLOW_UP_SENTINEL
+  ) {
+    throw new Error('The follow-up did not build on the interrupted first answer.');
+  }
+  const followUpWidth = readSentImageWidth(followUpRequest);
+  if (followUpWidth !== DOWNSCALED_CROP_WIDTH) {
+    throw new Error(
+      `Expected the follow-up to resend the capture at ${DOWNSCALED_CROP_WIDTH} px wide, got ${followUpWidth} px.`,
+    );
+  }
+  return composer;
 }
 
 async function installHostProbe(page) {
@@ -704,6 +775,9 @@ try {
         });
       };
       holdApiResponses();
+      // Bodies queued here answer the next requests in order. Every other
+      // request gets the complete smoke answer.
+      const queuedApiBodies = [];
       context = await chromium.launchPersistentContext(profileDirectory, {
         channel: 'chromium',
         headless: true,
@@ -738,7 +812,7 @@ try {
           headers: {
             'cache-control': 'no-cache',
           },
-          body: answerSse(SMOKE_ANSWER),
+          body: queuedApiBodies.shift() ?? answerSse(SMOKE_ANSWER),
         });
       });
 
@@ -916,8 +990,23 @@ try {
       await verifyEscapeClose(page, uiFrame, composer, 'Result-panel close');
       await assertHostPageIsolation(page);
 
+      apiRequests.splice(0);
+      await injectAndStartSnip(worker, contentLoader, {
+        apiKey: TEST_API_KEY,
+        croppedDataUrl: oversizeCrop,
+      });
+      uiHost = page.locator(UI_HOST_SELECTOR);
+      await uiHost.waitFor({ state: 'attached', timeout: TEST_TIMEOUT_MS });
+      uiFrame = await waitForUiFrame(page);
+      const interruptedComposer = await verifyInterruptedFirstAnswer(
+        uiFrame,
+        apiRequests,
+        queuedApiBodies,
+      );
+      await verifyEscapeClose(page, uiFrame, interruptedComposer, 'Interrupted-answer close');
+
       process.stdout.write(
-        'Unpacked-extension smoke test passed: exact keyed/no-key instruction, no-key Open Settings and Try again, collapsed-limit validation, strict-CSP extension-frame crop, oversize-capture downscale, answer, code-block copy, composer, Escape-release teardown, and host-page isolation verified.\n',
+        'Unpacked-extension smoke test passed: exact keyed/no-key instruction, no-key Open Settings and Try again, collapsed-limit validation, strict-CSP extension-frame crop, oversize-capture downscale, answer, code-block copy, composer, Escape-release teardown, host-page isolation, and interrupted-first-answer Try again and follow-up verified.\n',
       );
     })(),
     timeoutFailure,

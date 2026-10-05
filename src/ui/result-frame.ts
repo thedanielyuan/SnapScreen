@@ -78,9 +78,11 @@ if (bootstrap) {
           dataUrl: state.dataUrl,
           error: state.error,
           errorCode: state.errorCode,
-          failedFollowUpActions: state.hasFailedFollowUpActions
+          failedAnswerActions: state.canRetryFailedAnswer
             ? {
-                onRemove: () => postAction('remove_failed'),
+                onRemove: state.canRemoveFailedAnswer
+                  ? () => postAction('remove_failed')
+                  : undefined,
                 onRetry: () => postAction('retry_failed'),
               }
             : undefined,

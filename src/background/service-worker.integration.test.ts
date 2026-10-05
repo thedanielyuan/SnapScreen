@@ -15,6 +15,7 @@ import {
 const dependencies = vi.hoisted(() => ({
   analyzeImage: vi.fn(),
   cropImage: vi.fn(),
+  fitHistoryScreenshotsToLimits: vi.fn(),
   fitScreenshotToLimits: vi.fn(),
   followUp: vi.fn(),
   getSettings: vi.fn(),
@@ -32,6 +33,7 @@ vi.mock('../content/index.ts?script&iife', () => ({ default: 'content-script.js'
 vi.mock('../content/overlay.css?inline', () => ({ default: '/* content styles */' }));
 vi.mock('../lib/crop', () => ({
   cropImage: dependencies.cropImage,
+  fitHistoryScreenshotsToLimits: dependencies.fitHistoryScreenshotsToLimits,
   fitScreenshotToLimits: dependencies.fitScreenshotToLimits,
 }));
 vi.mock('../lib/storage', () => ({
@@ -445,6 +447,9 @@ beforeEach(() => {
   dependencies.cropImage.mockReset().mockResolvedValue(
     'data:image/png;base64,CROPPED',
   );
+  dependencies.fitHistoryScreenshotsToLimits.mockReset().mockImplementation(
+    async (history: unknown) => history,
+  );
   dependencies.fitScreenshotToLimits.mockReset().mockImplementation(
     async (dataUrl: string) => dataUrl,
   );
@@ -545,6 +550,40 @@ describe('service worker message integration', () => {
     expect(dependencies.analyzeImage).toHaveBeenCalledWith(
       'sk-ant-test-secret',
       'data:image/png;base64,FITTED',
+      expect.objectContaining({ limits: testLimits }),
+    );
+  });
+
+  it('sends follow-up history with its screenshots fitted to the session limits', async () => {
+    const harness = await loadWorker();
+    const history = [
+      { role: 'user' as const, content: 'Full-size screenshot turn' },
+      { role: 'assistant' as const, content: 'Interrupted answer' },
+    ];
+    const fitted = [
+      { role: 'user' as const, content: 'Fitted screenshot turn' },
+      { role: 'assistant' as const, content: 'Interrupted answer' },
+    ];
+    dependencies.fitHistoryScreenshotsToLimits.mockResolvedValueOnce(fitted);
+
+    await dispatch(harness, {
+      type: 'FOLLOW_UP',
+      captureId: 'capture-fit',
+      history,
+      requestId: 'request-fit-follow-up',
+      screenshotId: 'screenshot-capture-fit',
+      sessionSettings: { defaultPrompt: 'Answer the question.', limits: testLimits },
+      text: 'Go on.',
+    });
+
+    expect(dependencies.fitHistoryScreenshotsToLimits).toHaveBeenCalledWith(
+      history,
+      testLimits,
+    );
+    expect(dependencies.followUp).toHaveBeenCalledWith(
+      'sk-ant-test-secret',
+      'Go on.',
+      fitted,
       expect.objectContaining({ limits: testLimits }),
     );
   });

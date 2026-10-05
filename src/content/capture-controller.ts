@@ -1,9 +1,9 @@
 import {
   appendUserMessage,
-  clearIncompleteInitialFailure,
   createInitialDisplay,
   prepareAlignedConversationForNewestTurn,
   restoreBeforeFailedFollowUp,
+  settleFailedFirstAnswer,
   settleFailedFollowUp,
   settleSuccessfulConversation,
   settleStoppedConversation,
@@ -100,6 +100,8 @@ export function createCaptureController(
   let sessionPrompt = DEFAULT_PROMPT;
   let sessionLimits: SnapScreenLimits = DEFAULT_LIMITS;
   let failedFollowUp: FailedGenerationState | null = null;
+  // Set while the panel shows a first answer that failed partway through.
+  let retryFailedFirstAnswer: (() => void) | null = null;
   let canResnip = true;
   const sessionDisposal = new SessionDisposalGuard();
 
@@ -118,6 +120,7 @@ export function createCaptureController(
     sessionPrompt = DEFAULT_PROMPT;
     sessionLimits = DEFAULT_LIMITS;
     failedFollowUp = null;
+    retryFailedFirstAnswer = null;
     canResnip = true;
   }
 
@@ -183,9 +186,11 @@ export function createCaptureController(
       onRetry: retryLastRequest ?? undefined,
       onResnip: canResnip ? () => requestNewSnip(resnipSettings) : undefined,
       maxInputCharacters: sessionLimits.maxInputCharacters,
-      failedFollowUpActions: failedFollowUp
+      failedAnswerActions: failedFollowUp
         ? { onRetry: retryFailedFollowUp, onRemove: removeFailedFollowUp }
-        : undefined,
+        : retryFailedFirstAnswer
+          ? { onRetry: retryFailedFirstAnswer }
+          : undefined,
     });
   }
 
@@ -269,7 +274,9 @@ export function createCaptureController(
     errorCode: string,
   ): void {
     activeGeneration = null;
-    const partialAnswer = currentStreamingText;
+    // Refused text is dropped, so it's never kept as an answer or sent back to
+    // the model with the next question.
+    const partialAnswer = errorCode === 'refusal' ? '' : currentStreamingText;
     currentStreamingText = '';
 
     if (generation.kind === 'follow-up' && generation.userText) {
@@ -290,11 +297,23 @@ export function createCaptureController(
       return;
     }
 
-    const cleared = clearIncompleteInitialFailure();
-    displayMessages = cleared.displayMessages;
-    conversationHistory = cleared.conversationHistory;
+    const failed = settleFailedFirstAnswer({
+      partialAnswer,
+      errorMessage: message,
+      dataUrl: currentDataUrl,
+      sessionInstruction: sessionPrompt,
+    });
+    displayMessages = failed.displayMessages;
+    conversationHistory = failed.conversationHistory;
     failedFollowUp = null;
-    renderPanel({ pending: false, error: message, errorCode });
+    if (displayMessages.length === 0) {
+      renderPanel({ pending: false, error: message, errorCode });
+      return;
+    }
+
+    // Try again answers the same capture again, replacing the partial answer.
+    retryFailedFirstAnswer = retryLastRequest;
+    renderPanel({ pending: false });
   }
 
   function retryFailedFollowUp(): void {
@@ -379,6 +398,7 @@ export function createCaptureController(
 
     retryLastRequest = () => {
       failedFollowUp = null;
+      retryFailedFirstAnswer = null;
       displayMessages = input.kind === 'follow-up' && input.userText
         ? appendUserMessage(input.baseDisplayMessages, input.userText)
         : [...input.baseDisplayMessages];
@@ -406,6 +426,7 @@ export function createCaptureController(
     let baseDisplayMessages = displayMessages;
     let baseHistory = conversationHistory;
     failedFollowUp = null;
+    retryFailedFirstAnswer = null;
     retryLastRequest = null;
 
     if (baseHistory.length > 0) {
@@ -567,6 +588,7 @@ export function createCaptureController(
         activeGeneration = null;
         currentStreamingText = '';
         failedFollowUp = null;
+        retryFailedFirstAnswer = null;
         const settled = settleSuccessfulConversation({
           kind: generation.kind,
           baseDisplayMessages: generation.baseDisplayMessages,

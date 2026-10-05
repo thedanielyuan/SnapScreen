@@ -144,10 +144,10 @@ function handlePanelAction(action: UiPanelAction): void {
       options.onStop?.();
       break;
     case 'retry_failed':
-      options.failedFollowUpActions?.onRetry();
+      options.failedAnswerActions?.onRetry();
       break;
     case 'remove_failed':
-      options.failedFollowUpActions?.onRemove();
+      options.failedAnswerActions?.onRemove?.();
       break;
   }
 }
@@ -194,13 +194,14 @@ export function showResultPanel(options: ResultPanelOptions): void {
 
   const state: SerializedResultPanelState = {
     anchorRect: options.anchorRect,
+    canRemoveFailedAnswer: typeof options.failedAnswerActions?.onRemove === 'function',
     canResnip: typeof options.onResnip === 'function',
     canRetry: typeof options.onRetry === 'function',
+    canRetryFailedAnswer: options.failedAnswerActions !== undefined,
     canStop: typeof options.onStop === 'function',
     dataUrl: options.dataUrl,
     error: options.error,
     errorCode: options.errorCode,
-    hasFailedFollowUpActions: options.failedFollowUpActions !== undefined,
     maxInputCharacters: options.maxInputCharacters,
     messages: options.messages ? [...options.messages] : [],
     pending: !!options.pending,

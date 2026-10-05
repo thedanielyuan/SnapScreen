@@ -110,7 +110,8 @@ describe('extension-frame protocol validation', () => {
         canStop: false,
         canRetry: false,
         canResnip: false,
-        hasFailedFollowUpActions: false,
+        canRetryFailedAnswer: false,
+        canRemoveFailedAnswer: false,
       },
     }, sessionId)).toBe(false);
     expect(isFrameToControllerMessage({

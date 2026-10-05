@@ -79,6 +79,44 @@ CsToBgMessage,
     ))!;
 }
 
+function sentMessages<T extends CsToBgMessage['type']>(
+  harness: ControllerHarness,
+  type: T,
+): Extract<CsToBgMessage, { type: T }>[] {
+  return harness.sendMessage.mock.calls
+    .map(([message]) => message)
+    .filter((message): message is Extract<CsToBgMessage, { type: T }> => (
+      message.type === type
+    ));
+}
+
+function idsOf(request: { captureId: string; requestId: string; screenshotId: string }) {
+  const { captureId, requestId, screenshotId } = request;
+  return { captureId, requestId, screenshotId };
+}
+
+const INTERRUPTED_ANSWER =
+  'Partial answer\n\nResponse interrupted: Request timed out. Please try again.';
+
+async function interruptFirstAnswer(
+  harness: ControllerHarness,
+): Promise<Extract<CsToBgMessage, { type: 'ANALYZE' }>> {
+  startAndSelect(harness);
+  const initial = await deliverCrop(harness);
+  harness.controller.handleMessage({
+    type: 'ANALYZE_CHUNK',
+    ...idsOf(initial),
+    text: 'Partial answer',
+  });
+  harness.controller.handleMessage({
+    type: 'ANALYZE_ERROR',
+    ...idsOf(initial),
+    code: 'timeout',
+    message: 'Request timed out. Please try again.',
+  });
+  return initial;
+}
+
 const adapters = [
   { label: 'in-page iframe adapter', imageFit: undefined },
   { label: 'trusted workspace adapter', imageFit: 'contain' as const },
@@ -172,6 +210,121 @@ describe.each(adapters)('shared capture controller — $label', ({ imageFit }) =
     const { requestId: initialRequestId, ...original } = initial;
     expect(retry).toEqual(original);
     expect(retryRequestId).not.toBe(initialRequestId);
+  });
+
+  it('keeps a first answer that fails partway and offers Try again', async () => {
+    const harness = createHarness(imageFit);
+    const initial = await interruptFirstAnswer(harness);
+
+    const failed = harness.panels.at(-1)!;
+    expect(failed).toEqual(expect.objectContaining({
+      error: undefined,
+      messages: [{ role: 'assistant', content: INTERRUPTED_ANSWER, status: 'failed' }],
+      pending: false,
+    }));
+    expect(failed.failedAnswerActions?.onRemove).toBeUndefined();
+
+    failed.failedAnswerActions!.onRetry();
+
+    expect(harness.panels.at(-1)).toEqual(expect.objectContaining({
+      failedAnswerActions: undefined,
+      messages: [],
+      pending: true,
+    }));
+    const analyzeRequests = sentMessages(harness, 'ANALYZE');
+    expect(analyzeRequests).toHaveLength(2);
+    const { requestId: retryRequestId, ...retry } = analyzeRequests[1];
+    const { requestId: initialRequestId, ...original } = initial;
+    expect(retry).toEqual(original);
+    expect(retryRequestId).not.toBe(initialRequestId);
+  });
+
+  it('builds a follow-up on an interrupted first answer', async () => {
+    const harness = createHarness(imageFit);
+    await interruptFirstAnswer(harness);
+
+    harness.panels.at(-1)!.onFollowUp('Go on.');
+
+    expect(harness.panels.at(-1)).toEqual(expect.objectContaining({
+      failedAnswerActions: undefined,
+      pending: true,
+    }));
+    const [followUp] = sentMessages(harness, 'FOLLOW_UP');
+    expect(followUp.text).toBe('Go on.');
+    expect(followUp.history).toEqual([
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: { type: 'base64', media_type: 'image/png', data: 'CROPPED' },
+          },
+          { type: 'text', text: 'Screenshot task guidance:\nKeep the diagram context.' },
+        ],
+      },
+      { role: 'assistant', content: INTERRUPTED_ANSWER },
+    ]);
+  });
+
+  it('drops text a refused first answer streamed', async () => {
+    const harness = createHarness(imageFit);
+    startAndSelect(harness);
+    const initial = await deliverCrop(harness);
+    harness.controller.handleMessage({
+      type: 'ANALYZE_CHUNK',
+      ...idsOf(initial),
+      text: 'Refused start',
+    });
+    harness.controller.handleMessage({
+      type: 'ANALYZE_ERROR',
+      ...idsOf(initial),
+      code: 'refusal',
+      message: 'Claude declined to answer this question.',
+    });
+
+    expect(harness.panels.at(-1)).toEqual(expect.objectContaining({
+      error: 'Claude declined to answer this question.',
+      errorCode: 'refusal',
+      failedAnswerActions: undefined,
+      messages: [],
+    }));
+  });
+
+  it('drops text a refused follow-up streamed from both histories', async () => {
+    const harness = createHarness(imageFit);
+    startAndSelect(harness);
+    const initial = await deliverCrop(harness);
+    harness.controller.handleMessage({
+      type: 'ANALYZE_RESULT',
+      ...idsOf(initial),
+      text: 'Answer',
+      history: [
+        { role: 'user', content: 'Screenshot' },
+        { role: 'assistant', content: 'Answer' },
+      ],
+    });
+    harness.panels.at(-1)!.onFollowUp('Why?');
+    const [refused] = sentMessages(harness, 'FOLLOW_UP');
+    harness.controller.handleMessage({
+      type: 'ANALYZE_CHUNK',
+      ...idsOf(refused),
+      text: 'Refused start',
+    });
+    harness.controller.handleMessage({
+      type: 'ANALYZE_ERROR',
+      ...idsOf(refused),
+      code: 'refusal',
+      message: 'Claude declined to answer this question.',
+    });
+
+    expect(harness.panels.at(-1)?.messages?.at(-1)).toEqual({
+      role: 'assistant',
+      content: 'Response failed: Claude declined to answer this question.',
+      status: 'failed',
+    });
+    harness.panels.at(-1)!.onFollowUp('Something else?');
+    const [, next] = sentMessages(harness, 'FOLLOW_UP');
+    expect(JSON.stringify(next.history)).not.toContain('Refused start');
   });
 
   it('keeps the conversation but removes New snip when the source expires', async () => {
