@@ -141,6 +141,7 @@ function isControllerMessage(value: unknown): boolean {
     case 'SNIP_CANCELLED':
       return isId(value.captureId);
     case 'UI_UNAVAILABLE':
+    case 'OPEN_SETTINGS':
       return true;
     default:
       return false;

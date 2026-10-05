@@ -1185,6 +1185,10 @@ async function handleControllerMessage(
           );
         }
         return { ok: true };
+
+      case 'OPEN_SETTINGS':
+        await chrome.runtime.openOptionsPage();
+        return { ok: true };
     }
   } catch (error) {
     if (isAbortError(error)) return { ok: false, aborted: true };

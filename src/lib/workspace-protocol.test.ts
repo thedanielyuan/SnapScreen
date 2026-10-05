@@ -67,6 +67,10 @@ describe('workspace protocol validation', () => {
       ...request,
       message: { type: 'EXECUTE', sourceTabId: 7 },
     })).toBe(false);
+    expect(isWorkspaceToBackgroundMessage({
+      ...request,
+      message: { type: 'OPEN_SETTINGS' },
+    })).toBe(true);
   });
 
   it('requires correlated ready and streaming envelopes to be well formed', () => {
