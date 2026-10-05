@@ -774,6 +774,29 @@ describe('service worker message integration', () => {
     );
   });
 
+  it('tells the originating document when the model starts thinking', async () => {
+    const harness = await loadWorker();
+    dependencies.analyzeImage.mockImplementationOnce(
+      async (_apiKey: string, _dataUrl: string, options: { onThinking?: () => void }) => {
+        options.onThinking?.();
+        return { history: [], text: 'Answer' };
+      },
+    );
+
+    await dispatch(harness, analyzeRequest('capture-1', 'request-thinking'));
+
+    expect(harness.tabs.sendMessage).toHaveBeenCalledWith(
+      7,
+      {
+        type: 'ANALYZE_THINKING',
+        captureId: 'capture-1',
+        requestId: 'request-thinking',
+        screenshotId: 'screenshot-capture-1',
+      },
+      { documentId: 'document-1' },
+    );
+  });
+
   it('stops generation when delivery to the originating document fails', async () => {
     const harness = await loadWorker();
     harness.tabs.sendMessage.mockRejectedValueOnce(new Error('Document is gone'));

@@ -95,6 +95,35 @@ describe('extension-frame protocol validation', () => {
     }, sessionId)).toBe(true);
   });
 
+  it('validates the pending status the panel shows', () => {
+    const state = {
+      messages: [],
+      pending: true,
+      pendingSince: 1_700_000_000_000,
+      thinking: true,
+      canStop: true,
+      canRetry: false,
+      canResnip: true,
+      canRetryFailedAnswer: false,
+      canRemoveFailedAnswer: false,
+    };
+    const render = (overrides: Record<string, unknown>) => isControllerToFrameMessage({
+      type: 'SNAPSCREEN_UI_RENDER_RESULT',
+      sessionId,
+      state: { ...state, ...overrides },
+    }, sessionId);
+
+    expect(render({})).toBe(true);
+    expect(render({ pendingSince: undefined })).toBe(true);
+    expect(render({ pendingSince: -1 })).toBe(false);
+    expect(render({ pendingSince: Number.NaN })).toBe(false);
+    expect(render({ thinking: 'yes' })).toBe(false);
+    expect(isControllerToFrameMessage({
+      type: 'SNAPSCREEN_UI_SHOW_THINKING',
+      sessionId,
+    }, sessionId)).toBe(true);
+  });
+
   it('rejects mismatched sessions and malformed sensitive payloads', () => {
     expect(isControllerToFrameMessage({
       type: 'SNAPSCREEN_UI_UPDATE_STREAM',

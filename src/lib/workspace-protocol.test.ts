@@ -102,5 +102,20 @@ describe('workspace protocol validation', () => {
       sessionId,
       message: { type: 'ANALYZE_CHUNK', text: 'uncorrelated' },
     })).toBe(false);
+    expect(isBackgroundToWorkspaceMessage({
+      type: 'SNAPSCREEN_WORKSPACE_EVENT',
+      sessionId,
+      message: {
+        type: 'ANALYZE_THINKING',
+        captureId: 'capture-1',
+        requestId: 'generation-1',
+        screenshotId: 'screenshot-1',
+      },
+    })).toBe(true);
+    expect(isBackgroundToWorkspaceMessage({
+      type: 'SNAPSCREEN_WORKSPACE_EVENT',
+      sessionId,
+      message: { type: 'ANALYZE_THINKING', captureId: 'capture-1' },
+    })).toBe(false);
   });
 });

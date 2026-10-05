@@ -169,6 +169,10 @@ function isControllerEvent(value: unknown): boolean {
       return isId(value.captureId)
         && typeof value.code === 'string'
         && typeof value.message === 'string';
+    case 'ANALYZE_THINKING':
+      return isId(value.captureId)
+        && isId(value.requestId)
+        && isId(value.screenshotId);
     case 'ANALYZE_CHUNK':
       return isId(value.captureId)
         && isId(value.requestId)

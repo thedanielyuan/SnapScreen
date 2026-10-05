@@ -235,6 +235,47 @@ describe('analyzeImage', () => {
     expect(seen).toEqual(['**Bold**', '**Bold** and `code_value`']);
   });
 
+  it('reports once, before any text, that the model started thinking', async () => {
+    stubStream([
+      { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } },
+      reasoningDelta('signature_delta', { signature: 'sig' }),
+      { type: 'content_block_stop', index: 0 },
+      { type: 'content_block_start', index: 1, content_block: { type: 'redacted_thinking', data: 'x' } },
+      { type: 'content_block_stop', index: 1 },
+      { type: 'content_block_start', index: 2, content_block: { type: 'text', text: '' } },
+      textDelta('Answer'),
+      messageDelta('end_turn'),
+      messageStop(),
+    ]);
+    const seen: string[] = [];
+
+    const result = await analyzeImage('key', 'data:image/png;base64,QUJD', {
+      onDelta: (text) => seen.push(text),
+      onThinking: () => seen.push('(thinking)'),
+    });
+
+    expect(result.text).toBe('Answer');
+    expect(seen).toEqual(['(thinking)', 'Answer']);
+  });
+
+  it('reports thinking from follow-ups, and not when there is none', async () => {
+    const history: AnthropicMessage[] = [
+      { role: 'user', content: 'Earlier question' },
+      { role: 'assistant', content: 'Earlier answer' },
+    ];
+    const onThinking = vi.fn();
+    stubStream(okEvents);
+    await followUp('key', 'And this?', history, { onThinking });
+    expect(onThinking).not.toHaveBeenCalled();
+
+    stubStream([
+      { type: 'content_block_start', index: 0, content_block: { type: 'redacted_thinking', data: 'x' } },
+      ...okEvents,
+    ]);
+    await followUp('key', 'And this?', history, { onThinking });
+    expect(onThinking).toHaveBeenCalledOnce();
+  });
+
   it('continues streamed text across a server-side refusal fallback boundary', async () => {
     stubStream([
       textDelta('Par'),

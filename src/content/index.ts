@@ -3,6 +3,7 @@ import {
   disposeSnipOverlay,
   showErrorToast,
   showResultPanel,
+  showThinking,
   startSnipOverlay,
   updateStreamingAnswer,
 } from './ui-proxy';
@@ -22,6 +23,7 @@ const controller = createCaptureController({
     disposeSnipOverlay,
     showErrorToast,
     showResultPanel,
+    showThinking,
     startSnipOverlay,
     updateStreamingAnswer,
   },

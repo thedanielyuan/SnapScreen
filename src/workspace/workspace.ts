@@ -3,6 +3,7 @@ import {
   disposeResultPanel,
   showErrorToast,
   showResultPanel,
+  showThinking,
   updateStreamingAnswer,
 } from '../content/result-panel';
 import {
@@ -137,6 +138,7 @@ if (!bootstrap) {
       disposeSnipOverlay,
       showErrorToast,
       showResultPanel,
+      showThinking,
       startSnipOverlay,
       updateStreamingAnswer,
     },

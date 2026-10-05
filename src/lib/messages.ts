@@ -44,6 +44,12 @@ export type BgToCsMessage =
   | { type: 'CROPPED_IMAGE'; dataUrl: string; captureId: string }
   | { type: 'CAPTURE_ERROR'; code: string; message: string; captureId: string }
   | {
+      type: 'ANALYZE_THINKING';
+      captureId: string;
+      requestId: string;
+      screenshotId: string;
+    }
+  | {
       type: 'ANALYZE_CHUNK';
       text: string;
       captureId: string;

@@ -361,6 +361,20 @@ function makeDeltaRelay(
   };
 }
 
+function makeThinkingRelay(
+  endpoint: SessionEndpoint,
+  ids: { captureId: string; requestId: string; screenshotId: string },
+  generation: ActiveGeneration,
+): () => void {
+  return () => {
+    if (!generations.isCurrent(endpoint.tabId, ids.requestId)) return;
+    sendToEndpoint(endpoint, { type: 'ANALYZE_THINKING', ...ids })
+      .catch(() => {
+        generations.cancel(endpoint.tabId, generation.requestId);
+      });
+  };
+}
+
 async function showActionBadge(tabId: number, message: string): Promise<void> {
   const feedbackVersion = ++nextActionFeedbackVersion;
   actionFeedbackVersionByTab.set(tabId, feedbackVersion);
@@ -1090,6 +1104,7 @@ async function handleControllerMessage(
               userQuestion: message.question,
               signal: generation.controller.signal,
               onDelta: makeDeltaRelay(endpoint, ids, generation),
+              onThinking: makeThinkingRelay(endpoint, ids, generation),
               limits: sessionSettings.limits,
             },
           ));
@@ -1151,6 +1166,7 @@ async function handleControllerMessage(
             {
               signal: generation.controller.signal,
               onDelta: makeDeltaRelay(endpoint, ids, generation),
+              onThinking: makeThinkingRelay(endpoint, ids, generation),
               sessionInstruction: sessionSettings.defaultPrompt,
               limits: sessionSettings.limits,
             },
