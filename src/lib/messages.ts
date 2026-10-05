@@ -98,6 +98,7 @@ export type CsToBgMessage =
     }
   | { type: 'CANCEL_GENERATION'; captureId: string; requestId: string }
   | { type: 'SNIP_CANCELLED'; captureId: string }
-  | { type: 'UI_UNAVAILABLE' };
+  | { type: 'UI_UNAVAILABLE' }
+  | { type: 'OPEN_SETTINGS' };
 
 export type RuntimeMessage = BgToCsMessage | CsToBgMessage;

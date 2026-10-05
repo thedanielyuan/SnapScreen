@@ -4,6 +4,7 @@ interface FakeHostOptions {
   onMessage: (message: {
     type: string;
     sessionId: string;
+    action?: string;
     selection?: {
       viewportRect: { x: number; y: number; width: number; height: number };
       normalizedRect: { x: number; y: number; width: number; height: number };
@@ -55,6 +56,7 @@ vi.mock('./result-frame-host', () => ({
 
 import {
   disposeResultPanel,
+  showResultPanel,
   startSnipOverlay as startSnipOverlayInternal,
 } from './ui-proxy';
 
@@ -72,9 +74,9 @@ function startSnipOverlay(options: {
 
 beforeEach(() => {
   mockState.instances.length = 0;
+  // Content scripts get only part of chrome.runtime; openOptionsPage isn't in it.
   vi.stubGlobal('chrome', {
     runtime: {
-      openOptionsPage: vi.fn(async () => undefined),
       sendMessage: vi.fn(async () => ({ ok: true })),
     },
   });
@@ -130,5 +132,22 @@ describe('isolated UI proxy lifecycle', () => {
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
       type: 'UI_UNAVAILABLE',
     });
+  });
+
+  it('asks the background to open Settings from the missing-key error', () => {
+    showResultPanel({
+      error: 'No API key configured.',
+      errorCode: 'no_api_key',
+      onClose: vi.fn(),
+      onFollowUp: vi.fn(),
+    });
+
+    mockState.instances[0].emit({
+      type: 'SNAPSCREEN_UI_ACTION',
+      sessionId: 'session',
+      action: 'open_settings',
+    });
+
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({ type: 'OPEN_SETTINGS' });
   });
 });

@@ -10,6 +10,7 @@ const API_URL = 'https://api.anthropic.com/v1/messages';
 const UI_HOST_SELECTOR = '#snapscreen-ui-host';
 const UI_FRAME_PATH = '/src/ui/result-frame.html';
 const WORKSPACE_PATH = '/src/workspace/workspace.html';
+const OPTIONS_PATH = '/src/options/options.html';
 const ANSWER_SENTINEL = 'SNAPSCREEN_SMOKE_ANSWER_7C91F2';
 const COMPOSER_SENTINEL = 'SNAPSCREEN_SMOKE_COMPOSER_4A8DE6';
 const CODE_SENTINEL = 'SNAPSCREEN_SMOKE_CODE_5B3E9D';
@@ -130,6 +131,44 @@ async function waitForUiFrame(page) {
   });
   await frame.waitForLoadState('domcontentloaded');
   return frame;
+}
+
+function isOptionsPage(page) {
+  try {
+    const url = new URL(page.url());
+    return url.protocol === 'chrome-extension:' && url.pathname === OPTIONS_PATH;
+  } catch {
+    return false;
+  }
+}
+
+// Unit tests stub chrome.runtime, so only a real browser shows whether the
+// in-page panel can open Settings.
+async function verifyOpenSettings(context, page, frame) {
+  const overlay = frame.locator('#snapscreen-overlay-root');
+  await overlay.waitFor({ state: 'visible', timeout: TEST_TIMEOUT_MS });
+  await overlay.press('Enter');
+  await overlay.press('Enter');
+
+  const openSettings = frame.locator('.snapscreen-error')
+    .getByRole('button', { name: 'Open Settings' });
+  await openSettings.waitFor({ state: 'visible', timeout: TEST_TIMEOUT_MS });
+
+  // Chrome may focus an open Settings tab instead of opening another, so close
+  // the one opened on install.
+  for (const existing of context.pages()) {
+    if (isOptionsPage(existing)) await existing.close();
+  }
+  const opened = context.waitForEvent('page', { timeout: TEST_TIMEOUT_MS });
+  await openSettings.click();
+  const optionsPage = await opened;
+  await optionsPage.waitForURL((url) => url.pathname === OPTIONS_PATH, {
+    timeout: TEST_TIMEOUT_MS,
+  });
+  await optionsPage.close();
+
+  await page.bringToFront();
+  await verifyEscapeClose(page, frame, openSettings, 'No-API-key error close');
 }
 
 async function verifyEscapeClose(page, frame, focusTarget, flow) {
@@ -668,6 +707,19 @@ try {
       );
 
       await injectAndStartSnip(worker, contentLoader, {
+        apiKey: '',
+        croppedDataUrl: oversizeCrop,
+        hasApiKey: false,
+      });
+      uiHost = page.locator(UI_HOST_SELECTOR);
+      await uiHost.waitFor({ state: 'attached', timeout: TEST_TIMEOUT_MS });
+      uiFrame = await waitForUiFrame(page);
+      await verifyOpenSettings(context, page, uiFrame);
+      if (apiRequests.length !== 0) {
+        throw new Error(`The no-API-key flow sent ${apiRequests.length} Anthropic request(s).`);
+      }
+
+      await injectAndStartSnip(worker, contentLoader, {
         apiKey: TEST_API_KEY,
         croppedDataUrl: oversizeCrop,
         hasApiKey: true,
@@ -778,7 +830,7 @@ try {
       await assertHostPageIsolation(page);
 
       process.stdout.write(
-        'Unpacked-extension smoke test passed: exact keyed/no-key instruction, strict-CSP extension-frame crop, oversize-capture downscale, answer, code-block copy, composer, Escape-release teardown, and host-page isolation verified.\n',
+        'Unpacked-extension smoke test passed: exact keyed/no-key instruction, no-key Open Settings, strict-CSP extension-frame crop, oversize-capture downscale, answer, code-block copy, composer, Escape-release teardown, and host-page isolation verified.\n',
       );
     })(),
     timeoutFailure,

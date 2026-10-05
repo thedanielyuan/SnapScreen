@@ -1176,6 +1176,16 @@ describe('service worker message integration', () => {
     expect(harness.tabs.sendMessage).not.toHaveBeenCalled();
   });
 
+  it('opens Settings for the content script, which cannot open it itself', async () => {
+    const harness = await loadWorker();
+
+    await expect(dispatch(harness, { type: 'OPEN_SETTINGS' })).resolves.toEqual({
+      ok: true,
+    });
+
+    expect(chrome.runtime.openOptionsPage).toHaveBeenCalledTimes(1);
+  });
+
   it('captures the Chrome Web Store into a trusted workspace', async () => {
     const harness = await loadWorker();
     harness.tabs.sendMessage.mockRejectedValue(new Error('No receiver'));

@@ -4,6 +4,7 @@ import type {
   SnipOverlayDisposer,
   SnipOverlayOptions,
 } from './snip-overlay';
+import type { CsToBgMessage } from '../lib/messages';
 import type {
   FrameToControllerMessage,
   SerializedResultPanelState,
@@ -128,7 +129,9 @@ function handlePanelAction(action: UiPanelAction): void {
       if (options.onOpenSettings) {
         options.onOpenSettings();
       } else {
-        void chrome.runtime.openOptionsPage();
+        // Content scripts can't call chrome.runtime.openOptionsPage().
+        void chrome.runtime.sendMessage({ type: 'OPEN_SETTINGS' } satisfies CsToBgMessage)
+          .catch(() => undefined);
       }
       break;
     case 'resnip':
