@@ -1,7 +1,7 @@
 # Security and privacy
 
 How SnapScreen handles your API key and screenshots, and how its UI is isolated from the pages
-it runs on. The README's [Privacy](../README.md#privacy) section is the short version.
+it runs on. The [privacy policy](../PRIVACY.md) is the short version.
 
 ## API key
 
