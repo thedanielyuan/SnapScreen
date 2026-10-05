@@ -143,15 +143,16 @@ function isOptionsPage(page) {
 }
 
 // Unit tests stub chrome.runtime, so only a real browser shows whether the
-// in-page panel can open Settings.
-async function verifyOpenSettings(context, page, frame) {
+// in-page panel can open Settings. Saves a key there the way a user would and
+// returns to the page, where the error's Try again button is still waiting.
+async function saveKeyFromMissingKeyError(context, page, frame) {
   const overlay = frame.locator('#snapscreen-overlay-root');
   await overlay.waitFor({ state: 'visible', timeout: TEST_TIMEOUT_MS });
   await overlay.press('Enter');
   await overlay.press('Enter');
 
-  const openSettings = frame.locator('.snapscreen-error')
-    .getByRole('button', { name: 'Open Settings' });
+  const error = frame.locator('.snapscreen-error');
+  const openSettings = error.getByRole('button', { name: 'Open Settings' });
   await openSettings.waitFor({ state: 'visible', timeout: TEST_TIMEOUT_MS });
 
   // Chrome may focus an open Settings tab instead of opening another, so close
@@ -165,10 +166,46 @@ async function verifyOpenSettings(context, page, frame) {
   await optionsPage.waitForURL((url) => url.pathname === OPTIONS_PATH, {
     timeout: TEST_TIMEOUT_MS,
   });
+  await optionsPage.locator('#api-key').fill(TEST_API_KEY);
+  await optionsPage.locator('#save-settings').click();
+  await optionsPage.locator('#status').filter({ hasText: 'Settings saved.' }).waitFor({
+    state: 'visible',
+    timeout: TEST_TIMEOUT_MS,
+  });
   await optionsPage.close();
 
   await page.bringToFront();
-  await verifyEscapeClose(page, frame, openSettings, 'No-API-key error close');
+  const tryAgain = error.getByRole('button', { name: 'Try again' });
+  await tryAgain.waitFor({ state: 'visible', timeout: TEST_TIMEOUT_MS });
+  return tryAgain;
+}
+
+// Reads the PNG header of the screenshot an answer request sent.
+function readSentImageWidth(apiRequest) {
+  let body;
+  try {
+    body = JSON.parse(apiRequest.postData ?? '');
+  } catch {
+    return 0;
+  }
+  const imageBlock = body.messages?.[0]?.content?.find?.((block) => block.type === 'image');
+  const sentPng = Buffer.from(imageBlock?.source?.data ?? '', 'base64');
+  return sentPng.length >= 24 ? sentPng.readUInt32BE(16) : 0;
+}
+
+async function waitForAnswer(frame, apiRequests) {
+  try {
+    await frame.getByText(ANSWER_SENTINEL, { exact: true }).waitFor({
+      state: 'visible',
+      timeout: TEST_TIMEOUT_MS,
+    });
+  } catch (error) {
+    const frameText = await frame.locator('body').innerText().catch(() => '');
+    throw new Error(
+      `The isolated result did not render (API requests=${apiRequests.length}, frame text=${JSON.stringify(frameText)}).`,
+      { cause: error },
+    );
+  }
 }
 
 async function verifyEscapeClose(page, frame, focusTarget, flow) {
@@ -434,14 +471,13 @@ async function installHostProbe(page) {
 async function injectAndStartSnip(
   worker,
   contentLoader,
-  { apiKey, croppedDataUrl, hasApiKey },
+  { apiKey, croppedDataUrl },
 ) {
   return worker.evaluate(
     async ({
       apiKey,
       croppedDataUrl,
       fixtureUrl,
-      hasApiKey,
       hiddenPrompt,
       loader,
       screenshotDataUrl,
@@ -489,7 +525,6 @@ async function injectAndStartSnip(
         type: 'START_SNIP',
         captureId: crypto.randomUUID(),
         dataUrl: screenshotDataUrl,
-        hasApiKey,
         defaultPrompt: hiddenPrompt,
         limits: {
           maxInputCharacters: 4_000,
@@ -509,7 +544,6 @@ async function injectAndStartSnip(
       apiKey,
       croppedDataUrl,
       fixtureUrl: FIXTURE_URL,
-      hasApiKey,
       hiddenPrompt: HIDDEN_PROMPT,
       loader: contentLoader,
       screenshotDataUrl: TEST_CROP_DATA_URL,
@@ -624,10 +658,16 @@ try {
       const contentLoader = await verifyBuild();
       profileDirectory = await mkdtemp(join(tmpdir(), 'snapscreen-smoke-'));
       const apiRequests = [];
+      // Answers wait for releaseApiResponse() so each flow can see its pending
+      // state. holdApiResponses() re-arms the gate for the next flow.
       let releaseApiResponse;
-      const apiResponseGate = new Promise((resolveGate) => {
-        releaseApiResponse = resolveGate;
-      });
+      let apiResponseGate;
+      const holdApiResponses = () => {
+        apiResponseGate = new Promise((resolveGate) => {
+          releaseApiResponse = resolveGate;
+        });
+      };
+      holdApiResponses();
       context = await chromium.launchPersistentContext(profileDirectory, {
         channel: 'chromium',
         headless: true,
@@ -684,7 +724,6 @@ try {
       await injectAndStartSnip(worker, contentLoader, {
         apiKey: '',
         croppedDataUrl: oversizeCrop,
-        hasApiKey: false,
       });
 
       let uiHost = page.locator(UI_HOST_SELECTOR);
@@ -709,20 +748,46 @@ try {
       await injectAndStartSnip(worker, contentLoader, {
         apiKey: '',
         croppedDataUrl: oversizeCrop,
-        hasApiKey: false,
       });
       uiHost = page.locator(UI_HOST_SELECTOR);
       await uiHost.waitFor({ state: 'attached', timeout: TEST_TIMEOUT_MS });
       uiFrame = await waitForUiFrame(page);
-      await verifyOpenSettings(context, page, uiFrame);
+      const tryAgain = await saveKeyFromMissingKeyError(context, page, uiFrame);
       if (apiRequests.length !== 0) {
         throw new Error(`The no-API-key flow sent ${apiRequests.length} Anthropic request(s).`);
       }
 
+      // The capture survives the trip to Settings, so no second snip is needed.
+      await tryAgain.click();
+      await uiFrame.locator('.snapscreen-pending').waitFor({
+        state: 'visible',
+        timeout: TEST_TIMEOUT_MS,
+      });
+      releaseApiResponse();
+      await waitForAnswer(uiFrame, apiRequests);
+      const retryRequests = apiRequests.splice(0);
+      if (
+        retryRequests.length !== 1
+        || retryRequests[0].headers['x-api-key'] !== TEST_API_KEY
+      ) {
+        throw new Error(
+          `Try again sent ${retryRequests.length} Anthropic request(s) instead of one with the saved key.`,
+        );
+      }
+      if (readSentImageWidth(retryRequests[0]) !== DOWNSCALED_CROP_WIDTH) {
+        throw new Error('Try again did not resend the original capture.');
+      }
+      await verifyEscapeClose(
+        page,
+        uiFrame,
+        uiFrame.locator('.snapscreen-input'),
+        'Missing-key recovery close',
+      );
+      holdApiResponses();
+
       await injectAndStartSnip(worker, contentLoader, {
         apiKey: TEST_API_KEY,
         croppedDataUrl: oversizeCrop,
-        hasApiKey: true,
       });
       uiHost = page.locator(UI_HOST_SELECTOR);
       await uiHost.waitFor({ state: 'attached', timeout: TEST_TIMEOUT_MS });
@@ -752,19 +817,7 @@ try {
       }
 
       releaseApiResponse();
-
-      try {
-        await uiFrame.getByText(ANSWER_SENTINEL, { exact: true }).waitFor({
-          state: 'visible',
-          timeout: TEST_TIMEOUT_MS,
-        });
-      } catch (error) {
-        const frameText = await uiFrame.locator('body').innerText().catch(() => '');
-        throw new Error(
-          `The isolated result did not render (API requests=${apiRequests.length}, frame text=${JSON.stringify(frameText)}).`,
-          { cause: error },
-        );
-      }
+      await waitForAnswer(uiFrame, apiRequests);
 
       const completedMarkup = await panel.evaluate((element) => element.outerHTML);
       if (completedMarkup.includes(HIDDEN_PROMPT)) {
@@ -813,9 +866,7 @@ try {
       if (!requestText.includes(HIDDEN_PROMPT) || !requestText.includes('"type":"image"')) {
         throw new Error('The model request did not retain the hidden prompt and screenshot.');
       }
-      const imageBlock = apiBody.messages[0]?.content?.find?.((block) => block.type === 'image');
-      const sentPng = Buffer.from(imageBlock?.source?.data ?? '', 'base64');
-      const sentWidth = sentPng.length >= 24 ? sentPng.readUInt32BE(16) : 0;
+      const sentWidth = readSentImageWidth(apiRequest);
       if (sentWidth !== DOWNSCALED_CROP_WIDTH) {
         throw new Error(
           `Expected the ${OVERSIZE_CROP_SIZE.width} px capture to be sent at ${DOWNSCALED_CROP_WIDTH} px wide, got ${sentWidth} px.`,
@@ -830,7 +881,7 @@ try {
       await assertHostPageIsolation(page);
 
       process.stdout.write(
-        'Unpacked-extension smoke test passed: exact keyed/no-key instruction, no-key Open Settings, strict-CSP extension-frame crop, oversize-capture downscale, answer, code-block copy, composer, Escape-release teardown, and host-page isolation verified.\n',
+        'Unpacked-extension smoke test passed: exact keyed/no-key instruction, no-key Open Settings and Try again, strict-CSP extension-frame crop, oversize-capture downscale, answer, code-block copy, composer, Escape-release teardown, and host-page isolation verified.\n',
       );
     })(),
     timeoutFailure,

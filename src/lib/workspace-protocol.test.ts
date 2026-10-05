@@ -82,7 +82,6 @@ describe('workspace protocol validation', () => {
         type: 'START_SNIP',
         captureId: 'capture-1',
         dataUrl: 'data:image/png;base64,FROZEN',
-        hasApiKey: true,
         defaultPrompt: 'Answer this.',
         limits,
       },

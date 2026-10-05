@@ -783,6 +783,27 @@
   box-shadow: 0 0 12px var(--snapscreen-accent-glow);
 }
 
+.snapscreen-btn-secondary {
+  /* One pixel less padding keeps it as tall as the borderless primary. */
+  padding: 7px 13px;
+  border: 1px solid var(--snapscreen-composer-border);
+  background: transparent;
+  color: var(--snapscreen-text-primary);
+}
+
+.snapscreen-btn-secondary:hover,
+.snapscreen-btn-secondary:focus-visible {
+  border-color: var(--snapscreen-accent);
+  background: var(--snapscreen-hover-bg);
+  outline: none;
+}
+
+.snapscreen-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 /* ── Future-proof radio buttons ── */
 
 .snapscreen-panel input[type="radio"] {
