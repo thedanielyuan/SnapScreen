@@ -1,4 +1,4 @@
-import type { Rect } from './messages';
+import type { AnthropicMessage, Rect } from './messages';
 import { inspectPngDataUrl, type ScreenshotMetadata } from './request-limits';
 import type { SnapScreenLimits } from './storage';
 
@@ -103,6 +103,29 @@ export async function fitScreenshotToLimits(
 function byteScale(bytes: number, maxBytes: number): number {
   // Aims 10% under the limit, because PNG size isn't proportional to area.
   return bytes > maxBytes ? Math.sqrt(maxBytes / bytes) * 0.9 : 1;
+}
+
+/**
+ * Fits every screenshot in a conversation, like `fitScreenshotToLimits`. History
+ * rebuilt after a first answer is stopped or interrupted holds the full-size
+ * capture. History from a completed answer already holds the fitted one, which
+ * passes through unchanged.
+ */
+export async function fitHistoryScreenshotsToLimits(
+  history: AnthropicMessage[],
+  limits: Pick<SnapScreenLimits, 'maxScreenshotBytes' | 'maxScreenshotDimension'>,
+): Promise<AnthropicMessage[]> {
+  return Promise.all(history.map(async (message) => {
+    if (!Array.isArray(message.content)) return message;
+    const content = await Promise.all(message.content.map(async (block) => {
+      if (block.type !== 'image') return block;
+      const dataUrl = `data:${block.source.media_type};base64,${block.source.data}`;
+      const fitted = await fitScreenshotToLimits(dataUrl, limits);
+      if (fitted === dataUrl) return block;
+      return { ...block, source: { ...block.source, data: dataUrlToBase64(fitted) } };
+    }));
+    return { ...message, content };
+  }));
 }
 
 async function encodeScaled(bitmap: ImageBitmap, scale: number): Promise<Blob> {

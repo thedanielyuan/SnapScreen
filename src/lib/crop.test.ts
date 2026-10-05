@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cropImage, dataUrlToBase64, fitScreenshotToLimits } from './crop';
+import {
+  cropImage,
+  dataUrlToBase64,
+  fitHistoryScreenshotsToLimits,
+  fitScreenshotToLimits,
+} from './crop';
+import type { AnthropicContentBlock, AnthropicMessage } from './messages';
 
 interface CropMocks {
   bitmap: { width: number; height: number; close: ReturnType<typeof vi.fn> };
@@ -276,6 +282,41 @@ describe('fitScreenshotToLimits', () => {
     await expect(fitScreenshotToLimits('data:image/png;base64,U09VUkNF', limits))
       .resolves.toBe('data:image/png;base64,U09VUkNF');
     expect(mocks.createImageBitmap).not.toHaveBeenCalled();
+  });
+});
+
+describe('fitHistoryScreenshotsToLimits', () => {
+  const limits = { maxScreenshotBytes: 5_000_000, maxScreenshotDimension: 2_576 };
+
+  function imageBlock(dataUrl: string): AnthropicContentBlock {
+    return {
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/png', data: dataUrlToBase64(dataUrl) },
+    };
+  }
+
+  it('downscales an oversize screenshot and passes everything else through', async () => {
+    const mocks = installCropMocks({ bitmapSize: { width: 2_880, height: 1_800 } });
+    const guidance: AnthropicContentBlock = { type: 'text', text: 'Guidance' };
+    const fitting = imageBlock(pngDataUrl(2_576, 1_000, 1_000));
+    const history: AnthropicMessage[] = [
+      { role: 'user', content: [imageBlock(pngDataUrl(2_880, 1_800, 1_000)), guidance] },
+      { role: 'assistant', content: 'Answer' },
+      { role: 'user', content: [fitting] },
+    ];
+
+    const fitted = await fitHistoryScreenshotsToLimits(history, limits);
+
+    expect(fitted[0].content).toEqual([
+      {
+        type: 'image',
+        source: { type: 'base64', media_type: 'image/png', data: 'Q1JPUEVERA==' },
+      },
+      guidance,
+    ]);
+    expect(fitted[1]).toBe(history[1]);
+    expect((fitted[2].content as AnthropicContentBlock[])[0]).toBe(fitting);
+    expect(mocks.createImageBitmap).toHaveBeenCalledOnce();
   });
 });
 

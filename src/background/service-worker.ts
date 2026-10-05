@@ -1,5 +1,9 @@
 import contentScript from '../content/index.ts?script&iife';
-import { cropImage, fitScreenshotToLimits } from '../lib/crop';
+import {
+  cropImage,
+  fitHistoryScreenshotsToLimits,
+  fitScreenshotToLimits,
+} from '../lib/crop';
 import { analyzeImage, followUp, AnthropicError } from '../lib/anthropic';
 import {
   getSettings,
@@ -1134,10 +1138,16 @@ async function handleControllerMessage(
             message.sessionSettings,
             settings,
           );
+          // After a stopped or interrupted first answer, the page rebuilds
+          // history with the full-size capture. Send it downscaled too.
+          const history = await fitHistoryScreenshotsToLimits(
+            message.history,
+            sessionSettings.limits,
+          );
           const result = await keepAliveUntilSettled(followUp(
             settings.apiKey,
             message.text,
-            message.history,
+            history,
             {
               signal: generation.controller.signal,
               onDelta: makeDeltaRelay(endpoint, ids, generation),
