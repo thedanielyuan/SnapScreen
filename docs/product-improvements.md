@@ -5,10 +5,11 @@ Every problem below was checked in the code, and the Open Settings bug in 1.1 wa
 Chromium. Priorities are judgment calls: there's no usage data, and this wasn't a hands-on
 usability or accessibility review.
 
-Section 1 fixes behavior that's broken or misleading today and is small enough to ship before
-launch. Section 2 should follow the launch work in [REMEDIATION_PLAN.md](../REMEDIATION_PLAN.md).
+Section 1 fixes behavior that was broken or misleading; Section 2 makes slow answers easier to
+wait for. Every item is done, all merged before the launch work in
+[REMEDIATION_PLAN.md](../REMEDIATION_PLAN.md).
 
-Effort includes tests and doc updates. **S**: a day or less. **M**: a few days.
+Effort includes tests and doc updates. **S**: a day or less.
 
 | #   | Item                                                     | Effort | Status |
 | --- | -------------------------------------------------------- | ------ | ------ |
@@ -17,7 +18,6 @@ Effort includes tests and doc updates. **S**: a day or less. **M**: a few days.
 | 1.3 | Stop pulling the reader to the bottom while streaming    | S      | Done   |
 | 1.4 | Fix the workspace's "reload this tab" advice             | S      | Done   |
 | 2.1 | Show that a slow answer is still working                 | S      | Done   |
-| 2.2 | Measure answer quality before changing prompts or models | M      | To do  |
 
 ## 1. Fix first
 
@@ -109,29 +109,6 @@ settings.
 
 **Done when:** a 30-second wait shows a running timer and a working Stop button, and screen
 readers hear a useful status once rather than every second.
-
-### 2.2 Measure answer quality before changing prompts or models
-
-The only test against the real API sends a 1×1 image and checks that some text comes back
-([anthropic.live.test.ts](../src/lib/anthropic.live.test.ts#L19)), and the prompt tests check
-only wording ([screenshot-qa-prompt.test.ts](../src/lib/screenshot-qa-prompt.test.ts#L7)).
-Nothing shows whether a prompt edit or a model upgrade makes answers better or worse.
-
-Build a set of 20–30 non-sensitive screenshots: charts, tiny text, maths, multiple choice, code
-with and without a stated language, cut-off crops where the right answer is to ask for a retake,
-and a few follow-up conversations. Give each one an expected answer a script can check (a
-number, an option, a phrase), or a short rubric where judgment is needed. Add a script that runs
-them through the production request code and prints scores and latency.
-
-Each run spends API credit, so keep it out of `npm test` and CI and run it only with approval.
-Keep the daily live API check separate.
-
-**Done when:**
-
-- One command runs the set and prints a summary that can be compared before and after a change.
-- The set includes cases where asking for a retake or a programming language is the right
-  answer.
-- Nothing in CI or `npm test` runs it.
 
 ## Left out
 
