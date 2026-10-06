@@ -1,6 +1,15 @@
 import AppKit
 import Foundation
 
+#if SNAPSCREEN_TEST_HOOKS
+/// Live integration builds only; `npm run build:native` never compiles this. The test writes the
+/// scenario to a file so one browser run can drive an unattended exchange and then a held selection.
+enum TestScenario: String { case exchange, hold }
+let testScenario: TestScenario? = ProcessInfo.processInfo.environment["SNAPSCREEN_TEST_SCENARIO_FILE"]
+  .flatMap { try? String(contentsOfFile: $0, encoding: .utf8) }
+  .flatMap { TestScenario(rawValue: $0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+#endif
+
 final class CompanionPanel: NSPanel {
   override var canBecomeKey: Bool { true }
   override var canBecomeMain: Bool { false }
@@ -133,6 +142,9 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
   private var shield: PointerShield?
   private var liveResizing = false
   private var transportOpen = true
+  #if SNAPSCREEN_TEST_HOOKS
+  private var testFollowupSent = false
+  #endif
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     installEditingMenu()
@@ -233,6 +245,9 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
       case .done:
         responseTimer?.invalidate()
         statusLabel?.stringValue = "Answer complete"
+        #if SNAPSCREEN_TEST_HOOKS
+        if testScenario == .exchange { DispatchQueue.main.async { [weak self] in self?.continueTestExchange() } }
+        #endif
       case .stopped:
         responseTimer?.invalidate()
         statusLabel?.stringValue = "Answer stopped"
@@ -315,6 +330,11 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
     window.makeKeyAndOrderFront(nil)
     placeShield(below: window)
     window.makeFirstResponder(view)
+    #if SNAPSCREEN_TEST_HOOKS
+    if testScenario == .exchange {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak view] in view?.confirm() }
+    }
+    #endif
   }
 
   private func selected(_ rect: NormalizedRect) {
@@ -425,6 +445,16 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
     noticeLabel?.stringValue = message
     noticeLabel?.isHidden = message.isEmpty
   }
+
+  #if SNAPSCREEN_TEST_HOOKS
+  /// Asks one follow-up after the first answer, then closes after the follow-up's answer.
+  private func continueTestExchange() {
+    if testFollowupSent { closeAnswer(); return }
+    testFollowupSent = true
+    followupField?.stringValue = "SNAPSCREEN_LIVE_FOLLOW_UP"
+    submitFollowup()
+  }
+  #endif
 
   private func updateControls() {
     askButton?.isEnabled = session.canFollowup
@@ -647,7 +677,11 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
 if CommandLine.arguments.contains("--self-test") {
   do {
     let count = try runProtocolSelfTests()
+    #if SNAPSCREEN_TEST_HOOKS
+    print("Native companion self-test: \(count) checks passed (test hooks build)")
+    #else
     print("Native companion self-test: \(count) checks passed")
+    #endif
     exit(0)
   } catch {
     fputs("Native companion self-test failed: \(error)\n", stderr)

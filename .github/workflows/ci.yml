@@ -38,5 +38,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+      - run: npm ci
       - run: npm run build:native
       - run: npm run test:native
+      - run: npm run build
+      - run: npx playwright install --no-shell chromium
+      # Real Chrome-launched companion sessions with mocked answers; needs the runner's GUI session.
+      - run: npm run test:native-live
