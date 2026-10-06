@@ -19,6 +19,7 @@ const dependencies = vi.hoisted(() => ({
   fitScreenshotToLimits: vi.fn(),
   followUp: vi.fn(),
   getSettings: vi.fn(),
+  getInterfaceMode: vi.fn(async () => 'extension'),
   initializeStorageAccess: vi.fn(),
 }));
 
@@ -38,6 +39,7 @@ vi.mock('../lib/crop', () => ({
 }));
 vi.mock('../lib/storage', () => ({
   getSettings: dependencies.getSettings,
+  getInterfaceMode: dependencies.getInterfaceMode,
   initializeStorageAccess: dependencies.initializeStorageAccess,
   normalizeLimits: (limits: unknown) => limits,
 }));
@@ -440,6 +442,7 @@ async function claimWorkspace(
 }
 
 beforeEach(() => {
+  dependencies.getInterfaceMode.mockReset().mockResolvedValue('extension');
   dependencies.analyzeImage.mockReset().mockResolvedValue({
     history: [],
     text: 'Answer',
@@ -471,6 +474,41 @@ afterEach(() => {
 });
 
 describe('service worker message integration', () => {
+  it('does not choose an interface when stored preferences are unavailable', async () => {
+    dependencies.getInterfaceMode.mockRejectedValue(new Error('Storage unavailable'));
+    const harness = await loadWorker();
+    harness.actionClicked.emit(trustedSender().tab!);
+    await vi.waitFor(() => expect(harness.action.setBadgeText).toHaveBeenCalled());
+    expect(harness.tabs.captureVisibleTab).not.toHaveBeenCalled();
+    expect(harness.tabs.sendMessage).not.toHaveBeenCalled();
+    expect(harness.tabs.create).not.toHaveBeenCalled();
+    expect(harness.scripting.executeScript).not.toHaveBeenCalled();
+  });
+
+  it('keeps a missing native host failure outside the page and workspace', async () => {
+    dependencies.getInterfaceMode.mockResolvedValue('native');
+    const harness = await loadWorker();
+    harness.actionClicked.emit(trustedSender().tab!);
+    await vi.waitFor(() => expect(harness.action.setBadgeText).toHaveBeenCalled());
+    expect(harness.tabs.captureVisibleTab).not.toHaveBeenCalled();
+    expect(harness.tabs.sendMessage).not.toHaveBeenCalled();
+    expect(harness.tabs.create).not.toHaveBeenCalled();
+    expect(harness.tabs.update).not.toHaveBeenCalled();
+    expect(harness.scripting.executeScript).not.toHaveBeenCalled();
+  });
+
+  it('reports denied native file access without a permission prompt or workspace', async () => {
+    dependencies.getInterfaceMode.mockResolvedValue('native');
+    const harness = await loadWorker();
+    harness.extension.isAllowedFileSchemeAccess.mockResolvedValue(false);
+    harness.actionClicked.emit({ ...trustedSender().tab!, url: 'file:///private/test.png' });
+    await vi.waitFor(() => expect(harness.action.setBadgeText).toHaveBeenCalled());
+    expect(harness.permissions.request).not.toHaveBeenCalled();
+    expect(harness.tabs.create).not.toHaveBeenCalled();
+    expect(harness.tabs.sendMessage).not.toHaveBeenCalled();
+    expect(harness.scripting.executeScript).not.toHaveBeenCalled();
+  });
+
   it('uses the initiating session settings for analysis and follow-ups', async () => {
     const harness = await loadWorker();
     const sessionSettings = {

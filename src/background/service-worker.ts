@@ -7,6 +7,7 @@ import {
 import { analyzeImage, followUp, AnthropicError } from '../lib/anthropic';
 import {
   getSettings,
+  getInterfaceMode,
   initializeStorageAccess,
   normalizeLimits,
   type SnapScreenSessionSettings,
@@ -37,6 +38,7 @@ import { GenerationRegistry, type ActiveGeneration } from './generation-registry
 import { getDocumentMessageOptions, type DocumentTarget } from './document-target';
 import { UiCapabilityRegistry } from './ui-capability-registry';
 import { keepAliveUntilSettled } from './worker-keepalive';
+import { NativeSessionController } from './native-session';
 
 const generations = new GenerationRegistry();
 const uiCapabilities = new UiCapabilityRegistry();
@@ -107,6 +109,20 @@ const WORKSPACE_CLAIM_TIMEOUT_MS = 30_000;
 const WORKSPACE_DISCONNECT_TIMEOUT_MS = 5_000;
 const WORKSPACE_STORAGE_PREFIX = 'snapscreenWorkspace:';
 const documentVersionByTab = new Map<number, number>();
+
+const nativeSessions = new NativeSessionController({
+  capture: (source, isCurrent) => captureInitiatingViewport({
+    getActiveTab: async (windowId) => {
+      const [tab] = await chrome.tabs.query({ active: true, windowId });
+      return tab ?? null;
+    },
+    getActivationVersion: (windowId) => activationVersionByWindow.get(windowId) ?? 0,
+    captureVisibleTab: (windowId) => chrome.tabs.captureVisibleTab(windowId, { format: 'png' }),
+  }, { ...source, isCurrent }),
+  isSourceCurrent: (source) =>
+    (documentVersionByTab.get(source.tabId) ?? 0) === source.documentVersion,
+  report: showActionBadge,
+});
 
 void initializeStorageAccess();
 
@@ -880,6 +896,25 @@ async function handleStartSnip(tab?: chrome.tabs.Tab): Promise<void> {
   if (typeof resolved?.id !== 'number') return;
 
   const expectedDocumentVersion = documentVersionByTab.get(resolved.id) ?? 0;
+  // Native mode branches before any page message, injection, permission prompt, or workspace.
+  let mode: Awaited<ReturnType<typeof getInterfaceMode>>;
+  try {
+    mode = await getInterfaceMode();
+  } catch {
+    await showActionBadge(resolved.id, 'SnapScreen could not read Settings. Please try again.');
+    return;
+  }
+  if (mode === 'native') {
+    if (resolved.url?.startsWith('file:')
+      && !(await chrome.extension.isAllowedFileSchemeAccess().catch(() => false))) {
+      await showActionBadge(resolved.id,
+        'Enable “Allow access to file URLs” for SnapScreen, then invoke it again.');
+      return;
+    }
+    await nativeSessions.start({ tabId: resolved.id, windowId: resolved.windowId,
+      documentVersion: expectedDocumentVersion });
+    return;
+  }
   if (!(await ensureFileAccess(resolved.url))) {
     await openWorkspaceError(
       {
@@ -1249,6 +1284,7 @@ chrome.commands.onCommand.addListener((command, tab) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
+  nativeSessions.invalidateSource(tabId);
   const workspaceSessionId = workspaceSessionByTab.get(tabId);
   if (workspaceSessionId) cleanupWorkspace(workspaceSessionId);
   const sourceWorkspaceSessionId = workspaceSessionBySourceTab.get(tabId);
@@ -1279,6 +1315,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   // A URL-only update can be a same-document hash/history change. The content
   // script and its document-scoped session remain valid in that case.
   if (changeInfo.status === 'loading') {
+    nativeSessions.invalidateSource(tabId);
     const workspaceSessionId = workspaceSessionByTab.get(tabId);
     if (
       workspaceSessionId

@@ -1,13 +1,16 @@
 # SnapScreen native companion implementation plan
 
-Status: Phase 1 complete; Phase 2 approved with a narrowed claim. Initial platform: macOS. Written 6 October 2026.
+Status: Phase 1 complete; Phase 2 bridge implemented as an experimental explicit mode. Initial platform: macOS. Updated 6 October 2026.
 
 Phase 1 outcome: the final prototype keeps page focus and visibility and keeps native clicks,
 drags, scrolling, resizing, and typed characters away from the page in the tested setups.
 Fullscreen resizing now uses native edges plus a pointer shield. Modifier keys still reach page
 key handlers: the activation shortcut's ⌥⇧ and ⌘ used for native shortcuts. On 6 October 2026
 the user accepted that limitation and approved Phase 2 on the narrowed claim; see
-[Phase 1 results](native-phase1-results.md). The full companion has not been started.
+[Phase 1 results](native-phase1-results.md). Phase 2 adds the extension bridge and development
+companion described in [native setup and implementation notes](native-phase2.md). Phase 3 UI
+completion and polish, and Phase 4 packaged physical acceptance and signing, remain. The new
+implementation has no additional focus-preservation claim until those interactions are measured.
 
 Build a small desktop companion that displays the snipping overlay and answer window outside
 the webpage. Keep screenshot capture, API credentials, and Claude requests in the Chrome
@@ -110,6 +113,16 @@ events already recorded by the page.
 
 ## Phase 2 Build the extension and native bridge
 
+Current implementation: Settings explicitly selects native mode, with **In Chrome** remaining
+the default. Each native session owns one Chrome-launched AppKit host process and port, with
+no separate app relay or local IPC. The host registration permits one exact extension origin.
+The manifest uses split incognito contexts; local credentials and preferences are still
+shared within a Chrome profile. Native sessions never inject page UI or automatically open a
+workspace or Settings. The initial selection surface fits the frozen image in a native
+window; it does not claim viewport alignment. Source navigation after crop acceptance keeps
+the conversation alive, but every new capture requires another extension invocation.
+The sections below preserve the design contract for further work.
+
 Use Chrome Native Messaging between the service worker and a locally installed native host.
 Add the `nativeMessaging` permission and restrict the host's allowed extension origins.
 Keep the bridge private to the extension; a website should have no bridge endpoint.
@@ -198,7 +211,8 @@ Stop, Retry, preview, and follow-ups. Keep native activation behavior explicit; 
 be non-modal while still taking focus. Preserve keyboard accessibility, and report any
 conflict between an accessible interaction and the proposed focus guarantee.
 
-Provide native-mode availability in Settings. If the app is missing, incompatible, or crashes,
+The explicit Settings mode and failure routing are available in Phase 2. Refine native-mode
+availability information during Phase 3. If the app is missing, incompatible, or crashes,
 cancel cleanly and expose a status through the extension badge or existing native surface.
 Do not silently inject the old popup, activate a workspace, or open Settings during a native
 session. Installation, permissions, and opening Settings are separate user actions and can
@@ -285,6 +299,8 @@ Ordinary page JavaScript is the observer covered by this plan. It makes no conce
 against screen sharing, other extensions, native monitoring software, or browser/OS inspection.
 It also cannot prevent a site from making guesses based on pauses or other user behavior.
 
-**First implementation deliverable: a macOS interaction prototype, an instrumented test page,
-and the measured results.** Full migration depends on that evidence. This plan itself changes
-no application behavior.
+**First implementation deliverable completed: a macOS interaction prototype, an instrumented
+test page, and the measured results.** The user accepted the modifier-key limitation and
+approved Phase 2. The experimental bridge now coexists with the default extension interface;
+full migration and distribution still depend on the remaining implementation and acceptance
+work above.

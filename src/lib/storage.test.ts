@@ -2,10 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_LIMITS,
   LIMIT_CONSTRAINTS,
+  getInterfaceMode,
   getSettings,
   initializeStorageAccess,
   normalizeLimits,
   removeApiKey,
+  saveSettings,
 } from './storage';
 
 afterEach(() => {
@@ -63,6 +65,36 @@ describe('settings limits', () => {
       maxScreenshotDimension: LIMIT_CONSTRAINTS.maxScreenshotDimension.max,
       maxConversationTurns: 4,
     });
+  });
+});
+
+describe('interface mode', () => {
+  it.each([undefined, null, '', 'extension', 'unknown', true, {}])(
+    'defaults unsupported stored value %s to the extension interface',
+    async (interfaceMode) => {
+      const get = vi.fn().mockResolvedValue({ interfaceMode });
+      vi.stubGlobal('chrome', { storage: { local: { get } } });
+
+      await expect(getInterfaceMode()).resolves.toBe('extension');
+      expect(get).toHaveBeenCalledWith('interfaceMode');
+    },
+  );
+
+  it('loads explicit native mode without adding it to session settings', async () => {
+    const get = vi.fn().mockResolvedValue({ interfaceMode: 'native' });
+    vi.stubGlobal('chrome', { storage: { local: { get } } });
+
+    await expect(getInterfaceMode()).resolves.toBe('native');
+    expect(await getSettings()).not.toHaveProperty('interfaceMode');
+  });
+
+  it('saves the interface independently without replacing the stored key or limits', async () => {
+    const set = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('chrome', { storage: { local: { set } } });
+
+    await saveSettings({ interfaceMode: 'native' });
+
+    expect(set).toHaveBeenCalledWith({ interfaceMode: 'native' });
   });
 });
 

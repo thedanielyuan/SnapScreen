@@ -42,6 +42,18 @@
           placeholder="Answer the question shown in this screenshot."
         ></textarea>
 
+        <label for="interface-mode">Interface</label>
+        <select id="interface-mode" name="interfaceMode" aria-describedby="interface-mode-hint">
+          <option value="extension">In Chrome (default)</option>
+          <option value="native">macOS companion (experimental)</option>
+        </select>
+        <p id="interface-mode-hint" class="hint">
+          Native mode requires the separately installed macOS companion. It shows snips and
+          answers in desktop windows; modifier keys may still reach the page. If the companion
+          is unavailable, the extension badge reports the error without switching interfaces.
+          Saving this choice applies to your next snip and does not launch the companion.
+        </p>
+
         <details id="advanced-settings" class="advanced-section">
           <summary>Advanced</summary>
           <fieldset class="limits-section">

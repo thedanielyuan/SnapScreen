@@ -10,6 +10,10 @@ const OPTIONS_MARKUP = `
     <button type="button" id="test-key">Test key</button>
     <button type="button" id="remove-key" disabled>Remove key</button>
     <textarea id="default-prompt"></textarea>
+    <select id="interface-mode">
+      <option value="extension">In Chrome</option>
+      <option value="native">macOS companion</option>
+    </select>
     <details id="advanced-settings">
       <summary>Advanced</summary>
       <input id="max-input-characters" type="number" />
@@ -90,6 +94,7 @@ describe('options API-key controls', () => {
     const form = document.getElementById('settings-form')!;
     const apiKey = document.getElementById('api-key') as HTMLInputElement;
     const prompt = document.getElementById('default-prompt') as HTMLTextAreaElement;
+    const interfaceMode = document.getElementById('interface-mode') as HTMLSelectElement;
     const limit = document.getElementById('max-input-characters') as HTMLInputElement;
     const saveButton = document.getElementById('save-settings') as HTMLButtonElement;
     const testButton = document.getElementById('test-key') as HTMLButtonElement;
@@ -98,6 +103,7 @@ describe('options API-key controls', () => {
 
     expect(apiKey.disabled).toBe(true);
     expect(prompt.disabled).toBe(true);
+    expect(interfaceMode.disabled).toBe(true);
     expect(limit.disabled).toBe(true);
     expect(saveButton.disabled).toBe(true);
     expect(testButton.disabled).toBe(true);
@@ -120,6 +126,7 @@ describe('options API-key controls', () => {
     expect(prompt.value).toBe('Old prompt');
     expect(apiKey.disabled).toBe(false);
     expect(prompt.disabled).toBe(false);
+    expect(interfaceMode.disabled).toBe(false);
     expect(limit.disabled).toBe(false);
     expect(saveButton.disabled).toBe(false);
     expect(testButton.disabled).toBe(false);
@@ -143,6 +150,7 @@ describe('options API-key controls', () => {
     await vi.waitFor(() => {
       expect(setSettings).toHaveBeenCalledWith({
         defaultPrompt: 'New prompt',
+        interfaceMode: 'extension',
         limits: {
           maxInputCharacters: 4_000,
           maxScreenshotBytes: 5_000_000,
@@ -155,6 +163,32 @@ describe('options API-key controls', () => {
       );
     });
     expect(removeSetting).not.toHaveBeenCalled();
+  });
+
+  it('loads and saves an explicit native preference without launching a host', async () => {
+    const connectNative = vi.fn();
+    vi.stubGlobal('chrome', { ...chrome, runtime: { connectNative } });
+    getStoredSettings.mockResolvedValue({
+      apiKey: 'sk-ant-stored',
+      defaultPrompt: 'Old prompt',
+      interfaceMode: 'native',
+    });
+    await initializeOptionsPage(document);
+    const interfaceMode = document.getElementById('interface-mode') as HTMLSelectElement;
+    expect(interfaceMode.value).toBe('native');
+
+    interfaceMode.value = 'extension';
+    document.getElementById('settings-form')!.dispatchEvent(
+      new Event('submit', { bubbles: true, cancelable: true }),
+    );
+
+    await vi.waitFor(() => {
+      expect(setSettings).toHaveBeenCalledWith(expect.objectContaining({
+        interfaceMode: 'extension',
+      }));
+    });
+    expect(connectNative).not.toHaveBeenCalled();
+    expect(chrome.tabs.create).not.toHaveBeenCalled();
   });
 
   it('loads and saves configurable request limits', async () => {

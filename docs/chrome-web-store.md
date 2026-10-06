@@ -4,47 +4,52 @@ Answers for the **Privacy practices** tab in the Chrome Web Store Developer Dash
 in sync with [PRIVACY.md](../PRIVACY.md) and `src/manifest.json` whenever permissions or data
 handling change.
 
-The local [Phase 1 native prototype](../experiments/native-phase1/README.md) is a separate
-unpacked experiment and must not be submitted as the store package. Its additional
-`nativeMessaging` permission sends screenshots and follow-up text only to its local test
-host; it uses mocked answers and has no API credentials or network provider access. The
-local experiment logs numeric window/scroll geometry, input-source identifiers, modifier-key
-names, and tested-build hashes alongside event metadata; screenshots, typed text, and clipboard
-contents are excluded from those logs. The
-production manifest and the store declarations below remain for the shipping extension.
-A future native release needs revised recipient/permission declarations before submission.
+The package now includes an explicit, experimental macOS companion mode alongside the default
+**In Chrome** interface. The declarations below cover its `nativeMessaging` permission and
+local recipient. The companion is a separate development installation; signing, distribution,
+and final physical interaction acceptance remain future work. This change does not mean a
+store release has been submitted. The isolated
+[Phase 1 prototype](../experiments/native-phase1/README.md) remains a separate unpacked test
+extension and must not be submitted as the store package.
 
 ## Single purpose
 
 > SnapScreen answers questions about part of the current tab: the user snips a region of the
-> page, and SnapScreen shows an answer from Anthropic's Claude next to it.
+> page, and SnapScreen shows an answer from Anthropic's Claude in Chrome or the user's
+> explicitly selected local macOS companion.
 
 ## Permission justifications
 
 | Permission | Justification |
 | --- | --- |
 | `activeTab` | Captures the visible part of the current tab, only after the user clicks the toolbar icon or presses the SnapScreen shortcut. |
-| `scripting` | Injects SnapScreen's snipping overlay and answer panel into the current tab when the user invokes it. |
+| `scripting` | Injects SnapScreen's snipping overlay and answer panel into the current tab when the user invokes the default In Chrome mode. Native mode does not inject page UI. |
 | `storage` | Saves the user's Anthropic API key and settings on the device, and temporary data that reconnects SnapScreen's workspace tab. |
+| `nativeMessaging` | Connects to the separately installed local macOS companion only for a user-invoked native session. Sends the captured screenshot, crop, and streamed answers and receives selection/follow-up actions. The host is restricted to the exact extension origin and receives no API key. |
 | Host permission `https://api.anthropic.com/*` | Sends the selected region and the user's question to Anthropic's API, which writes the answer. |
 | Optional host permission `file:///*` | Requested only when the user invokes SnapScreen on a local `file://` page, so it can capture that page. |
 
 ## Remote code
 
-No. All code ships in the package; the API returns plain text, which SnapScreen displays as text.
+No. Extension code ships in the extension package; the optional companion is a separately
+installed local executable. Neither downloads or executes code from the API. API answers are
+displayed as text.
 
 ## Data usage
 
 Declare these data types:
 
 - **Website content:** the region of the page the user snips, sent to Anthropic to generate the
-  answer.
+  answer. In native mode the visible screenshot and selected crop also go to the local
+  companion for selection and preview; answers and follow-ups pass through that local UI.
 - **Authentication information:** the user's own Anthropic API key, stored on the device and
   sent only to Anthropic.
 
-All three data-use certifications are true: SnapScreen doesn't sell user data or transfer it
-except to Anthropic to provide its single purpose, doesn't use it for anything unrelated, and
-doesn't use it for credit decisions.
+SnapScreen doesn't sell user data. Transfers to Anthropic and the explicitly selected local
+companion serve only its single purpose; it doesn't use data for unrelated purposes or credit
+decisions. Screenshots and conversations stay in memory and are discarded when sessions end
+or disconnect. Accepted crops replace full screenshots. Clipboard writes require explicit
+Copy. Native processes receive no API key, system prompt, or structured API history.
 
 ## Privacy policy URL
 
