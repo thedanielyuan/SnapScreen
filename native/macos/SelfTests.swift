@@ -71,6 +71,8 @@ func runProtocolSelfTests() throws -> Int {
     message("error", ["code": "code\n", "message": "x"]),
     message("error", ["code": "code", "message": " \n"]),
     message("expired", ["message": " \n"]),
+    message("notice", ["message": " \n"]),
+    message("notice", ["message": String(repeating: "x", count: 1025)]),
     message("error", ["code": "err", "message": String(repeating: "x", count: 1025)]),
     message("expired", ["message": String(repeating: "x", count: 1025)]),
     message("capture", ["imageDataUrl": "data:image/jpeg;base64,AQ=="]),
@@ -85,7 +87,7 @@ func runProtocolSelfTests() throws -> Int {
   for value in [hello, message("capture", ["imageDataUrl": png]),
     message("accepted", ["imageDataUrl": png, "maxInputCharacters": 4000]), message("started"), message("thinking"),
     message("answer", ["text": "x", "status": "streaming"]), message("error", ["code": "x", "message": "x"]),
-    message("expired", ["message": "x"])] {
+    message("notice", ["message": "x"]), message("expired", ["message": "x"])] {
     var extra = value
     extra["apiKey"] = "unknown field"
     try check(rejects(extra), "every variant has exact keys")
@@ -138,7 +140,11 @@ func runProtocolSelfTests() throws -> Int {
   try check(state.receive(accepted) && state.hasCrop, "accepted crop retained")
   try check(state.maxInputCharacters == 4000, "session limit applied")
   try check(!state.receive(try command("started")), "capture request ID cannot be reused for generation")
+  try check(!state.receive(try command("notice", ["message": "Removed"], request: "generation-1")),
+    "notice before its generation starts ignored")
   try check(state.receive(try command("started", request: "generation-1")), "new generation begins")
+  try check(state.receive(try command("notice", ["message": "Removed"], request: "generation-1")), "generation notice")
+  try check(!state.receive(try command("notice", ["message": "Removed"])), "stale notice ignored")
   try check(!state.receive(try command("thinking")), "stale generation event ignored")
   try check(state.command("followup", text: "question") == nil, "follow-up while streaming rejected")
   try check(state.command("stop")?["requestId"] as? String == "generation-1", "stop echoes active request")

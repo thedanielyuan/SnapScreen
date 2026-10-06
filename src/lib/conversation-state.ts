@@ -304,6 +304,10 @@ export function settleSuccessfulFollowUp(
   ];
 }
 
+export function describeRemovedTurns(removedTurns: number): string {
+  return `${removedTurns} older conversation ${removedTurns === 1 ? 'turn was' : 'turns were'} removed to keep the screenshot and newest request within the configured limit.`;
+}
+
 export function prepareAlignedConversationForNewestTurn(
   displayMessages: DisplayMessage[],
   conversationHistory: AnthropicMessage[],

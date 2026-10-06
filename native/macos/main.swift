@@ -119,6 +119,7 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
   private var followupField: NSTextField?
   private var followupEditor: NSTextView?
   private var statusLabel: NSTextField?
+  private var noticeLabel: NSTextField?
   private var askButton: NSButton?
   private var stopButton: NSButton?
   private var retryButton: NSButton?
@@ -216,11 +217,14 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
     case .started:
       answerText = ""
       answerView?.string = ""
+      showNotice("")
       statusLabel?.stringValue = "Thinking…"
       // The extension's API timeout is 240 seconds. This only handles a lost authoritative worker.
       armTimeout(seconds: 270)
     case .thinking:
       statusLabel?.stringValue = "Thinking…"
+    case .notice(let message):
+      showNotice(message)
     case .answer(let text, let status):
       answerText = text
       answerView?.string = text
@@ -233,8 +237,13 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
         responseTimer?.invalidate()
         statusLabel?.stringValue = "Answer stopped"
       }
-    case .error(_, let message):
+    case .error(let code, let message):
       responseTimer?.invalidate()
+      // The extension drops refused text from the conversation, so the window does too.
+      if code == "refusal" {
+        answerText = ""
+        answerView?.string = ""
+      }
       // The extension sanitizes provider messages before crossing this boundary.
       if selectionView != nil {
         releaseSelection()
@@ -343,6 +352,10 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
     window.contentView = root
     let status = NSTextField(wrappingLabelWithString: "Waiting for the selected region…")
     status.font = .systemFont(ofSize: 12)
+    let notice = NSTextField(wrappingLabelWithString: "")
+    notice.font = .systemFont(ofSize: 12)
+    notice.textColor = .secondaryLabelColor
+    notice.isHidden = true
     let scroll = NSScrollView()
     scroll.hasVerticalScroller = true
     scroll.borderType = .bezelBorder
@@ -374,7 +387,7 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
     let controls = NSStackView(views: [copy, preview, stop, retry, button("Close", #selector(closeAnswer))])
     controls.spacing = 8
     controls.orientation = .horizontal
-    let stack = NSStackView(views: [status, scroll, entry, controls])
+    let stack = NSStackView(views: [status, notice, scroll, entry, controls])
     stack.orientation = .vertical
     stack.alignment = .leading
     stack.spacing = 12
@@ -386,6 +399,7 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
       stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 16),
       stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16),
       status.widthAnchor.constraint(equalTo: stack.widthAnchor),
+      notice.widthAnchor.constraint(equalTo: stack.widthAnchor),
       scroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
       entry.widthAnchor.constraint(equalTo: stack.widthAnchor),
       controls.widthAnchor.constraint(equalTo: stack.widthAnchor),
@@ -395,6 +409,7 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
     answerView = text
     followupField = field
     statusLabel = status
+    noticeLabel = notice
     askButton = ask
     stopButton = stop
     retryButton = retry
@@ -404,6 +419,11 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
     window.makeKeyAndOrderFront(nil)
     placeShield(below: window)
     window.makeFirstResponder(text)
+  }
+
+  private func showNotice(_ message: String) {
+    noticeLabel?.stringValue = message
+    noticeLabel?.isHidden = message.isEmpty
   }
 
   private func updateControls() {
@@ -535,6 +555,8 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
     followupField = nil
     statusLabel?.stringValue = ""
     statusLabel = nil
+    noticeLabel?.stringValue = ""
+    noticeLabel = nil
     askButton = nil
     stopButton = nil
     retryButton = nil

@@ -23,6 +23,7 @@ const extensionMessages = [
   { ...session, type: 'answer', text: 'answer', status: 'done' },
   { ...session, type: 'answer', text: '', status: 'stopped' },
   { ...session, type: 'error', code: 'request_failed', message: 'Try again.' },
+  { ...session, type: 'notice', message: '2 older conversation turns were removed.' },
   { ...session, type: 'expired', message: 'Start a new snip.' },
 ];
 const nativeMessages = [
@@ -153,7 +154,7 @@ describe('native protocol', () => {
     expect(isExtensionToNativeMessage({ ...session, type: 'accepted', imageDataUrl, maxInputCharacters: 50_000 })).toBe(true);
     expect(isExtensionToNativeMessage({ ...session, type: 'error', code: 'bad code', message: 'Try again.' })).toBe(false);
     expect(isExtensionToNativeMessage({ ...session, type: 'error', code: 'bad\n', message: 'Try again.' })).toBe(false);
-    for (const type of ['error', 'expired']) {
+    for (const type of ['error', 'notice', 'expired']) {
       const message = type === 'error' ? { ...session, type, code: 'request_failed' } : { ...session, type };
       expect(isExtensionToNativeMessage({ ...message, message: 'a'.repeat(1_024) })).toBe(true);
       for (const text of ['', ' ', 'a'.repeat(1_025)]) {

@@ -50,7 +50,7 @@ struct NativeSession {
       hasCrop = true
       maxInputCharacters = limit
       phase = .waiting
-    case .thinking:
+    case .thinking, .notice:
       guard phase == .streaming else { return false }
     case .answer(_, let status):
       guard phase == .streaming else { return false }

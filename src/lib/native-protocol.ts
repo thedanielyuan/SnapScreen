@@ -38,7 +38,7 @@ export type ExtensionToNativeMessage =
       status: 'streaming' | 'done' | 'stopped';
     })
   | (NativeSessionEnvelope & { type: 'error'; code: string; message: string })
-  | (NativeSessionEnvelope & { type: 'expired'; message: string });
+  | (NativeSessionEnvelope & { type: 'notice' | 'expired'; message: string });
 
 export type NativeToExtensionMessage =
   | (NativeEnvelope & { type: 'ready' })
@@ -132,6 +132,7 @@ export function isExtensionToNativeMessage(value: unknown): value is ExtensionTo
         && isId(value.code)
         && isNonemptyText(value.message, MAX_ERROR_MESSAGE_LENGTH);
       break;
+    case 'notice':
     case 'expired':
       valid = hasKeys(value, [...SESSION_KEYS, 'message'])
         && isNonemptyText(value.message, MAX_ERROR_MESSAGE_LENGTH);

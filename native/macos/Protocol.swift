@@ -49,6 +49,7 @@ enum CommandPayload {
   case thinking
   case answer(String, AnswerStatus)
   case error(String, String)
+  case notice(String)
   case expired(String)
 }
 
@@ -133,11 +134,11 @@ func parseCommand(_ data: Data) throws -> HostCommand {
       let message = value["message"] as? String, message.utf16.count <= 1024,
       !trimProtocolText(message).isEmpty else { throw WireError.malformed }
     payload = .error(code, message)
-  case "expired":
+  case "notice", "expired":
     try keys(["message"])
     guard let message = value["message"] as? String, message.utf16.count <= 1024,
       !trimProtocolText(message).isEmpty else { throw WireError.malformed }
-    payload = .expired(message)
+    payload = type == "notice" ? .notice(message) : .expired(message)
   default:
     throw WireError.malformed
   }

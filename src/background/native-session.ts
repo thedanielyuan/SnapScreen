@@ -1,6 +1,7 @@
 import { analyzeImage, followUp, AnthropicError } from '../lib/anthropic';
 import { cropImage, fitScreenshotToLimits } from '../lib/crop';
 import {
+  describeRemovedTurns,
   prepareAlignedConversationForNewestTurn,
   settleFailedFirstAnswer,
   settleFailedFollowUp,
@@ -14,7 +15,9 @@ import {
   type ExtensionToNativeMessage,
   type NativeToExtensionMessage,
 } from '../lib/native-protocol';
+import { RequestLimitError } from '../lib/request-limits';
 import { getSettings, type SnapScreenSessionSettings } from '../lib/storage';
+import { ActiveTabChangedError, CaptureSupersededError } from './capture-session';
 import { NativeBridge } from './native-bridge';
 import { keepAliveUntilSettled } from './worker-keepalive';
 
@@ -59,6 +62,9 @@ interface Dependencies {
 }
 
 const INTERRUPTED = 'The native session ended. Invoke SnapScreen in Chrome to start a new capture.';
+const UNAVAILABLE = 'The SnapScreen companion could not start. Check its installation, then invoke SnapScreen again.';
+const CAPTURE_FAILED = 'Native capture could not start. Invoke SnapScreen again on the page you want to snip.';
+const UNDELIVERABLE = 'The screenshot could not be sent to the companion. Try a smaller browser window or check the companion installation.';
 const MAX_SESSIONS = 4;
 const SELECTION_TIMEOUT_MS = 120_000;
 
@@ -83,8 +89,10 @@ export class NativeSessionController {
       (message) => { void this.receive(session, message); },
       () => {
         if (!this.current(session)) return;
+        // Until the capture is delivered, a lost host means it never started.
+        const starting = session.phase === 'opening';
         this.dispose(session);
-        void this.deps.report(source.tabId, INTERRUPTED);
+        void this.deps.report(source.tabId, starting ? UNAVAILABLE : INTERRUPTED);
       });
     const session: Session = {
       source, connectionId, sessionId, requestId: crypto.randomUUID(), bridge,
@@ -102,11 +110,13 @@ export class NativeSessionController {
       if (!this.captureCurrent(session)) return this.expire(session);
       session.phase = 'selecting';
       this.send(session, { type: 'capture', imageDataUrl: session.frozen });
-    } catch {
+    } catch (error) {
       if (!this.current(session)) return;
+      // A navigation during capture ends selection silently, like the other source checks.
+      if (error instanceof CaptureSupersededError) return this.expire(session);
       this.dispose(session);
       await this.deps.report(source.tabId,
-        'Native capture could not start. Check the companion installation and source tab, then invoke SnapScreen again.');
+        error instanceof ActiveTabChangedError ? error.message : CAPTURE_FAILED);
     }
   }
 
@@ -124,28 +134,41 @@ export class NativeSessionController {
     return this.current(session) && this.deps.isSourceCurrent(session.source);
   }
 
+  private envelope(session: Session, payload: NativeEvent): ExtensionToNativeMessage {
+    return {
+      version: NATIVE_PROTOCOL_VERSION,
+      connectionId: session.connectionId,
+      sessionId: session.sessionId,
+      requestId: session.requestId,
+      ...payload,
+    } as ExtensionToNativeMessage;
+  }
+
   private send(session: Session, payload: NativeEvent): boolean {
     if (!this.current(session)) return false;
     try {
-      session.bridge.send({
-        version: NATIVE_PROTOCOL_VERSION,
-        connectionId: session.connectionId,
-        sessionId: session.sessionId,
-        requestId: session.requestId,
-        ...payload,
-      } as ExtensionToNativeMessage);
+      session.bridge.send(this.envelope(session, payload));
       return true;
     } catch {
       const shouldReport = this.current(session);
       this.dispose(session);
       if (shouldReport) void this.deps.report(session.source.tabId,
-        'The native session could not be delivered. Try a smaller capture or check the companion installation.');
+        payload.type === 'capture' || payload.type === 'accepted' ? UNDELIVERABLE : INTERRUPTED);
       return false;
     }
   }
 
+  /** Ends a session after navigation, supersession, or timeout. These are expected, so no badge. */
   private expire(session: Session): void {
-    this.send(session, { type: 'expired', message: INTERRUPTED });
+    if (!this.current(session)) return;
+    // Before the capture is delivered the host has no window, and may not have finished its handshake.
+    if (session.phase !== 'opening') {
+      try {
+        session.bridge.send(this.envelope(session, { type: 'expired', message: INTERRUPTED }));
+      } catch {
+        // The session ends either way.
+      }
+    }
     this.dispose(session);
   }
 
@@ -243,6 +266,8 @@ export class NativeSessionController {
         generation.baseDisplayMessages, generation.baseHistory, session.settings.limits.maxConversationTurns);
       generation.baseHistory = aligned.conversationHistory;
       generation.baseDisplayMessages = aligned.displayMessages;
+      if (aligned.removedTurns > 0
+        && !this.send(session, { type: 'notice', message: describeRemovedTurns(aligned.removedTurns) })) return;
       const handlers = {
         signal: generation.controller.signal,
         limits: session.settings.limits,
@@ -280,11 +305,14 @@ export class NativeSessionController {
     } catch (error) {
       if (!current()) return;
       const failure = error instanceof AnthropicError ? error
-        : new AnthropicError('request_failed', 'SnapScreen could not complete this request. Try again.');
+        : error instanceof RequestLimitError ? new AnthropicError(error.code, error.message)
+          : new AnthropicError('request_failed', 'SnapScreen could not complete this request. Try again.');
+      // As in Chrome mode, refused text is never kept as an answer or sent back with a follow-up.
+      const partialAnswer = failure.code === 'refusal' ? '' : generation.partialAnswer;
       const failed = generation.kind === 'initial'
-        ? settleFailedFirstAnswer({ ...generation, errorMessage: failure.message,
+        ? settleFailedFirstAnswer({ ...generation, partialAnswer, errorMessage: failure.message,
           dataUrl: session.crop!, sessionInstruction: session.settings!.defaultPrompt })
-        : settleFailedFollowUp({ ...generation, userText: userText!, errorMessage: failure.message,
+        : settleFailedFollowUp({ ...generation, partialAnswer, userText: userText!, errorMessage: failure.message,
           dataUrl: session.crop!, sessionInstruction: session.settings!.defaultPrompt });
       session.history = failed.conversationHistory;
       session.display = failed.displayMessages;

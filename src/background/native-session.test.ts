@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NativeSessionController } from './native-session';
 import { analyzeImage, followUp, AnthropicError } from '../lib/anthropic';
+import { RequestLimitError } from '../lib/request-limits';
+import { ActiveTabChangedError } from './capture-session';
 import { cropImage, fitScreenshotToLimits } from '../lib/crop';
 import { DEFAULT_LIMITS, getSettings } from '../lib/storage';
 import type { ExtensionToNativeMessage } from '../lib/native-protocol';
@@ -293,9 +295,115 @@ describe('background-owned native sessions', () => {
     const harness = setup();
     harness.capture.mockResolvedValue(`data:image/png;base64,${'A'.repeat(24 * 1024 * 1024)}`);
     await harness.controller.start(source);
-    expect(harness.report).toHaveBeenCalledWith(1, expect.stringContaining('could not be delivered'));
+    expect(harness.report).toHaveBeenCalledWith(1, expect.stringContaining('could not be sent to the companion'));
     expect(harness.ports[0].disconnect).toHaveBeenCalledOnce();
     expect(analyzeImage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a missing host', (port: Port) => { port.postMessage = (message) => {
+      port.sent.push(message);
+      queueMicrotask(() => port.onDisconnect.emit(undefined));
+    }; }],
+    ['an incompatible host', (port: Port) => { port.postMessage = (message) => {
+      port.sent.push(message);
+      queueMicrotask(() => port.onMessage.emit({ ...message, version: 999, type: 'ready' }));
+    }; }],
+    ['a silent host', (port: Port) => { port.postMessage = (message) => { port.sent.push(message); }; }],
+  ])('reports %s as an unavailable companion', async (_name, configure) => {
+    const harness = setup();
+    vi.mocked(chrome.runtime.connectNative).mockImplementationOnce(() => {
+      const port = new Port();
+      configure(port);
+      harness.ports.push(port);
+      return port as unknown as chrome.runtime.Port;
+    });
+    const start = harness.controller.start(source);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await start;
+    expect(harness.report.mock.calls).toEqual([[1, expect.stringContaining('companion could not start')]]);
+    expect(harness.capture).not.toHaveBeenCalled();
+  });
+
+  it('reports a host lost after the capture as an ended session', async () => {
+    const harness = setup();
+    await harness.controller.start(source);
+    harness.ports[0].onDisconnect.emit(undefined);
+    expect(harness.report.mock.calls).toEqual([[1, expect.stringContaining('native session ended')]]);
+  });
+
+  it.each(['a newer invocation', 'navigation'])('ends an unfinished handshake silently after %s', async cause => {
+    const harness = setup();
+    vi.mocked(chrome.runtime.connectNative).mockImplementationOnce(() => {
+      const port = new Port();
+      port.postMessage = (message) => { port.sent.push(message); };
+      harness.ports.push(port);
+      return port as unknown as chrome.runtime.Port;
+    });
+    const first = harness.controller.start(source);
+    await flush();
+    if (cause === 'navigation') harness.controller.invalidateSource(source.tabId);
+    else await harness.controller.start(source);
+    await first;
+    expect(harness.report).not.toHaveBeenCalled();
+    expect(harness.ports[0].disconnect).toHaveBeenCalledOnce();
+    expect(harness.ports[0].sent.map(message => message.type)).toEqual(['hello']);
+    if (cause !== 'navigation') expect(harness.ports[1].latest().type).toBe('capture');
+  });
+
+  it('reports an active-tab change during capture in its own words', async () => {
+    const harness = setup();
+    harness.capture.mockRejectedValueOnce(new ActiveTabChangedError());
+    await harness.controller.start(source);
+    expect(harness.report).toHaveBeenCalledWith(1, new ActiveTabChangedError().message);
+    expect(harness.ports[0].disconnect).toHaveBeenCalledOnce();
+  });
+
+  it('sends request-limit errors in their own words', async () => {
+    const harness = setup();
+    const port = await accepted(harness);
+    vi.mocked(followUp).mockRejectedValueOnce(new RequestLimitError('input_too_long', 'Questions are limited.'));
+    port.command('followup', { text: 'Too long' });
+    await flush();
+    expect(port.latest()).toMatchObject({ type: 'error', code: 'input_too_long', message: 'Questions are limited.' });
+  });
+
+  it('notifies the companion when older turns are removed', async () => {
+    const harness = setup();
+    vi.mocked(getSettings).mockResolvedValue({ apiKey: 'sk-ant-test-secret',
+      defaultPrompt: 'Keep guidance.', limits: { ...DEFAULT_LIMITS, maxConversationTurns: 2 } });
+    const port = await accepted(harness);
+    for (const text of ['Second', 'Third']) {
+      port.command('followup', { text });
+      await flush();
+    }
+    const notices = port.sent.filter(message => message.type === 'notice');
+    expect(notices).toEqual([expect.objectContaining({ message: '1 older conversation turn was removed to keep the screenshot and newest request within the configured limit.' })]);
+    const types = port.sent.map(message => message.type);
+    expect(types.lastIndexOf('notice')).toBe(types.lastIndexOf('started') + 1);
+  });
+
+  it.each(['first answer', 'follow-up'])('never keeps refused %s text', async stage => {
+    const harness = setup();
+    const refusal = deferred<{ text: string; history: [] }>();
+    if (stage === 'first answer') vi.mocked(analyzeImage).mockReturnValueOnce(refusal.promise);
+    else vi.mocked(followUp).mockReturnValueOnce(refusal.promise);
+    const port = await accepted(harness);
+    if (stage === 'follow-up') {
+      port.command('followup', { text: 'Refused question' });
+      await flush();
+    }
+    const options = stage === 'first answer'
+      ? vi.mocked(analyzeImage).mock.calls[0][2]! : vi.mocked(followUp).mock.calls[0][3]!;
+    options.onDelta?.('Refused partial');
+    refusal.reject(new AnthropicError('refusal', 'Claude declined to answer this question.'));
+    await flush();
+    expect(port.latest()).toMatchObject({ type: 'error', code: 'refusal' });
+    port.command('followup', { text: 'Next question' });
+    await flush();
+    const requests = JSON.stringify([...vi.mocked(analyzeImage).mock.calls, ...vi.mocked(followUp).mock.calls].slice(-1));
+    expect(requests).toContain('Next question');
+    expect(requests).not.toContain('Refused partial');
   });
 
   it('batches stream snapshots and cancels pending batches on Close', async () => {

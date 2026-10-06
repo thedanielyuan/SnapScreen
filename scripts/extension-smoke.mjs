@@ -246,6 +246,7 @@ async function verifyNativeMode(context, worker, apiRequests) {
           disconnected: native.disconnected,
           forbidden: native.forbidden,
           badge: await chrome.action.getBadgeText({ tabId: tab.id }),
+          title: await chrome.action.getTitle({ tabId: tab.id }),
         };
       }, { scenario, apiKey: TEST_API_KEY });
 
@@ -265,6 +266,9 @@ async function verifyNativeMode(context, worker, apiRequests) {
       } else if (result.badge !== '!' || apiRequests.length !== requestsBefore
         || result.captures !== (scenario === 'disconnected' ? 1 : 0)) {
         throw new Error(`Native ${scenario} did not fail before API use: ${JSON.stringify(result)}.`);
+      } else if (!result.title.includes(scenario === 'disconnected'
+        ? 'native session ended' : 'companion could not start')) {
+        throw new Error(`Native ${scenario} reported the wrong failure: ${result.title}`);
       }
       const mutations = await page.evaluate(() => window.__snapscreenNativeMutations);
       if (mutations !== 0 || await page.locator(UI_HOST_SELECTOR).count() !== 0
