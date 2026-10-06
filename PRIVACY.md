@@ -1,6 +1,6 @@
 # SnapScreen privacy policy
 
-Last updated: October 1, 2026
+Last updated: October 6, 2026
 
 SnapScreen is a Chrome extension that answers questions about part of a web page. This policy
 explains what it handles, where that data goes, and what stays on your device.
@@ -24,6 +24,21 @@ explains what it handles, where that data goes, and what stays on your device.
 | The address of the page you snipped | Only when a page needs SnapScreen's separate workspace tab | Chrome's temporary session storage on your device, to reconnect that tab | Until the workspace tab closes or Chrome quits |
 
 SnapScreen never writes screenshots or conversations to disk.
+
+### Optional local development experiment
+
+The separate Phase 1 native prototype in this repository is not part of the packaged Chrome
+extension. If you build and run it, its `nativeMessaging` permission sends the captured image
+and typed follow-up to a local macOS process. It uses only mocked answers and sends nothing to
+Anthropic. Image and question data remain in memory until the session is replaced, closed, or
+disconnected. Copy writes the mock answer to your clipboard. The instrumented test page can
+save event and focus metadata locally, including native window positions/sizes, answer
+scroll offsets, keyboard input-source identifiers, and modifier-key names, without screenshots,
+typed text, or clipboard contents. To check Copy, the local process compares pasted follow-up
+text with the copied mock answer in memory and logs only whether they match. Reports also identify
+the tested executable and extension files by their SHA-256 hashes.
+The runner registers the host only in a temporary test browser profile and removes that
+profile when it exits normally.
 
 ## Anthropic
 

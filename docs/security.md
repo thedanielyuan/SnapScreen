@@ -3,6 +3,26 @@
 How SnapScreen handles your API key and screenshots, and how its UI is isolated from the pages
 it runs on. The [privacy policy](../PRIVACY.md) is the short version.
 
+## Local native interaction experiment
+
+`experiments/native-phase1/` builds a separate, unpacked test extension. Its only permissions
+are `activeTab` and `nativeMessaging`; it cannot read the production extension's storage or
+API key. A Chrome-launched Swift process receives screenshots and follow-up text in memory,
+renders AppKit panels, and exchanges canned answers. The test host allows only the experiment's
+exact extension origin and is registered in the runner's disposable browser profile. There
+is no additional app relay or web-facing messaging endpoint. Messages are bounded and validated
+on both sides; sessions expire on disconnection, with no capture or request replay.
+
+The probe and transport logs contain event/state metadata, including bounded numeric native
+window frames, answer scroll offsets, input-source identifiers, and modifier-key names, never
+image pixels or question text. A paste check compares follow-up text with the copied mock
+answer in memory and logs only the result. A transparent, nonactivating shield window beneath
+the panels takes mouse events only while a panel is being resized. Saved reports
+include tested-build SHA-256 hashes. Copy puts the canned answer on the system clipboard. The experiment has no Anthropic
+requests and does not change the shipped extension's manifest or isolation boundary. A
+nonactivating panel is not a focus-preservation guarantee; see the
+[observed results](native-phase1-results.md) before drawing interaction conclusions.
+
 ## API key
 
 Your API key is stored unencrypted in `chrome.storage.local` on your device and is sent

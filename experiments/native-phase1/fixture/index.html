@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SnapScreen native interaction probe</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="probe.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">SnapScreen · Phase 1</p>
+        <h1>Native interaction probe</h1>
+        <p>Focus the field, reset the log, then invoke the experimental extension. This page
+          records observable signals in memory without updating this interface.</p>
+      </header>
+
+      <section class="starting-state" aria-labelledby="starting-heading">
+        <h2 id="starting-heading">Starting state</h2>
+        <label for="page-input">Page text field — keep this focused before every trial</label>
+        <input id="page-input" type="text" value="Page input starts here" autofocus
+          autocomplete="off" spellcheck="false">
+        <p>Use only dummy text. Input characters, clipboard contents, and screenshots are never
+          included in the probe log. A focus outline provides a visual cue; the log is the evidence.</p>
+      </section>
+
+      <section aria-labelledby="target-heading">
+        <h2 id="target-heading">Capture target</h2>
+        <p>Select a rectangle spanning two or more colored cells to check image geometry.</p>
+        <div class="capture-grid" aria-label="Four columns by three rows of numbered colored cells">
+          <div class="cell red">R1 · C1<span>red</span></div>
+          <div class="cell orange">R1 · C2<span>orange</span></div>
+          <div class="cell yellow">R1 · C3<span>yellow</span></div>
+          <div class="cell green">R1 · C4<span>green</span></div>
+          <div class="cell mint">R2 · C1<span>mint</span></div>
+          <div class="cell cyan">R2 · C2<span>cyan</span></div>
+          <div class="cell blue">R2 · C3<span>blue</span></div>
+          <div class="cell purple">R2 · C4<span>purple</span></div>
+          <div class="cell pink">R3 · C1<span>pink</span></div>
+          <div class="cell brown">R3 · C2<span>brown</span></div>
+          <div class="cell gray">R3 · C3<span>gray</span></div>
+          <div class="cell white">R3 · C4<span>white</span></div>
+        </div>
+      </section>
+
+      <section aria-labelledby="controls-heading">
+        <h2 id="controls-heading">Inspect after the trial</h2>
+        <p>These controls are ordinary page interactions and appear in the log. Inspection and
+          download mark the end of a trial before changing this page.</p>
+        <div class="controls">
+          <button id="reset-log" type="button">Reset and focus field</button>
+          <button id="inspect-log" type="button">Inspect log</button>
+          <button id="download-log" type="button">Download JSON</button>
+        </div>
+        <pre id="log-output" aria-label="Probe log output">Recording in memory. No live log is rendered.</pre>
+      </section>
+      <footer>Local fixture · no network resources · no API requests · observations are specific to
+        the tested browser, OS, display, and action.</footer>
+    </main>
+  </body>
+</html>
