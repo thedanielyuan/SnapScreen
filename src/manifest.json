@@ -5,7 +5,6 @@
   "homepage_url": "https://github.com/thedanielyuan/SnapScreen",
   "minimum_chrome_version": "116",
   "permissions": ["activeTab", "scripting", "storage", "nativeMessaging"],
-  "incognito": "split",
   "host_permissions": ["https://api.anthropic.com/*"],
   "optional_host_permissions": ["file:///*"],
   "content_security_policy": {

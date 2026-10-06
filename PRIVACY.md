@@ -43,9 +43,9 @@ writes only the text you explicitly choose to your system clipboard, which can r
 the window closes. Missing or incompatible companions report an extension badge error without
 opening another interface. Modifier keys may still reach the page.
 
-If you allow the extension in incognito, its regular and incognito sessions use separate
-extension contexts and native processes. Chrome's local extension storage still shares the
-API key and saved settings between regular and incognito use within that Chrome profile.
+If you allow the extension in incognito, each incognito native session also gets its own
+companion process, as every session does. Chrome's local extension storage shares the API key
+and saved settings between regular and incognito use within that Chrome profile.
 [Chrome incognito behavior](https://developer.chrome.com/docs/extensions/reference/manifest/incognito)
 
 ### Optional local development experiment

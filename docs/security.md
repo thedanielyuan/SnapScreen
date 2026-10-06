@@ -32,10 +32,10 @@ Navigation or closure of the source tab before crop acceptance cancels selection
 is accepted, its conversation and follow-ups can continue without the source tab. A new capture
 always requires another user invocation of the extension on a valid source. Closing a session,
 losing its port, or losing authoritative worker state cancels pending work and discards session
-data. Reconnection never restores that session or replays a request. Each session has its own
-connection and process, and the manifest uses `incognito: "split"` to separate regular and
-incognito extension contexts. Chrome still shares local storage, including API credentials and
-interface preferences, between those contexts in the same profile.
+data. Reconnection never restores that session or replays a request. Each session, including
+one started from an incognito window, has its own connection and process, so commands and
+answers cannot cross sessions or browsing contexts. Chrome shares local storage, including API
+credentials and interface preferences, between regular and incognito use in the same profile.
 [Chrome incognito behavior](https://developer.chrome.com/docs/extensions/reference/manifest/incognito)
 
 This is a development companion, not a signed/notarized macOS release. The fitted frozen-image
