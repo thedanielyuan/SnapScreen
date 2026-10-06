@@ -1,6 +1,7 @@
 import {
   appendUserMessage,
   createInitialDisplay,
+  describeRemovedTurns,
   prepareAlignedConversationForNewestTurn,
   restoreBeforeFailedFollowUp,
   settleFailedFirstAnswer,
@@ -446,9 +447,7 @@ export function createCaptureController(
         baseDisplayMessages = prepared.displayMessages;
         baseHistory = prepared.conversationHistory;
         if (prepared.removedTurns > 0) {
-          ui.showErrorToast(
-            `${prepared.removedTurns} older conversation ${prepared.removedTurns === 1 ? 'turn was' : 'turns were'} removed to keep the screenshot and newest request within the configured limit.`,
-          );
+          ui.showErrorToast(describeRemovedTurns(prepared.removedTurns));
         }
       } catch (error) {
         ui.showErrorToast(

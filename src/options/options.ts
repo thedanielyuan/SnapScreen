@@ -3,6 +3,7 @@ import {
   DEFAULT_LIMITS,
   DEFAULT_PROMPT,
   LIMIT_CONSTRAINTS,
+  getInterfaceMode,
   getSettings,
   removeApiKey,
   saveSettings,
@@ -17,6 +18,7 @@ export async function initializeOptionsPage(doc: Document = document): Promise<v
   const removeKeyBtn = doc.getElementById('remove-key') as HTMLButtonElement;
   const saveBtn = doc.getElementById('save-settings') as HTMLButtonElement;
   const promptInput = doc.getElementById('default-prompt') as HTMLTextAreaElement;
+  const interfaceModeInput = doc.getElementById('interface-mode') as HTMLSelectElement;
   const maxInputCharactersInput = doc.getElementById('max-input-characters') as HTMLInputElement;
   const maxScreenshotMegabytesInput = doc.getElementById('max-screenshot-megabytes') as HTMLInputElement;
   const maxScreenshotDimensionInput = doc.getElementById('max-screenshot-dimension') as HTMLInputElement;
@@ -52,6 +54,7 @@ export async function initializeOptionsPage(doc: Document = document): Promise<v
     toggleKeyBtn.disabled = hydrationPending || removalPending;
     apiKeyInput.disabled = hydrationPending || removalPending;
     promptInput.disabled = hydrationPending;
+    interfaceModeInput.disabled = hydrationPending;
     for (const input of limitInputs) input.disabled = hydrationPending;
     updateRemoveKeyState();
   }
@@ -100,6 +103,7 @@ export async function initializeOptionsPage(doc: Document = document): Promise<v
 
     const apiKey = apiKeyInput.value.trim();
     const defaultPrompt = promptInput.value.trim() || DEFAULT_PROMPT;
+    const interfaceMode = interfaceModeInput.value === 'native' ? 'native' : 'extension';
     const limits = readLimits();
     if (!limits) return;
     if (countTextCharacters(defaultPrompt) > limits.maxInputCharacters) {
@@ -112,8 +116,8 @@ export async function initializeOptionsPage(doc: Document = document): Promise<v
     const operationEpoch = removalEpoch;
     settingsEpoch += 1;
     const settings = apiKey
-      ? { apiKey, defaultPrompt, limits }
-      : { defaultPrompt, limits };
+      ? { apiKey, defaultPrompt, limits, interfaceMode } as const
+      : { defaultPrompt, limits, interfaceMode } as const;
     const save = saveSettings(settings);
     pendingSave = save;
     savePending = true;
@@ -209,6 +213,7 @@ export async function initializeOptionsPage(doc: Document = document): Promise<v
   });
 
   promptInput.value = DEFAULT_PROMPT;
+  interfaceModeInput.value = 'extension';
   setLimitInputs(DEFAULT_LIMITS);
   updateControlStates();
 
@@ -283,10 +288,11 @@ export async function initializeOptionsPage(doc: Document = document): Promise<v
   const loadSettings = async (): Promise<void> => {
     const loadEpoch = settingsEpoch;
     try {
-      const settings = await getSettings();
+      const [settings, interfaceMode] = await Promise.all([getSettings(), getInterfaceMode()]);
       if (loadEpoch !== settingsEpoch) return;
       apiKeyInput.value = settings.apiKey;
       promptInput.value = settings.defaultPrompt || DEFAULT_PROMPT;
+      interfaceModeInput.value = interfaceMode;
       setLimitInputs(settings.limits);
       hasStoredApiKey = !!settings.apiKey;
     } catch (error) {

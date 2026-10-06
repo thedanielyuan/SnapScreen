@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { chromium } from 'playwright';
@@ -63,6 +63,9 @@ async function verifyBuild() {
   if (!Array.isArray(manifest.permissions) || !manifest.permissions.includes('activeTab')) {
     throw new Error('The built extension is missing its activeTab permission.');
   }
+  if (!manifest.permissions.includes('nativeMessaging')) {
+    throw new Error('The built extension is missing its nativeMessaging permission.');
+  }
   if (
     !Array.isArray(manifest.optional_host_permissions)
     || !manifest.optional_host_permissions.includes('file:///*')
@@ -97,6 +100,193 @@ async function verifyBuild() {
   }
 
   return contentScript;
+}
+
+async function prepareSmokeExtension(profileDirectory) {
+  const extensionDirectory = join(profileDirectory, 'extension-fixture');
+  await cp(DIST, extensionDirectory, { recursive: true });
+  const manifest = JSON.parse(await readFile(join(extensionDirectory, 'manifest.json'), 'utf8'));
+  const loaderPath = join(extensionDirectory, manifest.background.service_worker);
+  const loader = await readFile(loaderPath, 'utf8');
+  const originalPath = 'snapscreen-smoke-original-worker.js';
+  await writeFile(join(extensionDirectory, originalPath), loader);
+  // Record the real built action callback before its module executes. Only the
+  // disposable copy gets this harness; production dist has no test entrypoint.
+  const shimPath = 'snapscreen-smoke-action-shim.js';
+  await writeFile(join(extensionDirectory, shimPath), `
+const addActionListener = chrome.action.onClicked.addListener.bind(chrome.action.onClicked);
+globalThis.__snapscreenSmokeActionListeners = [];
+chrome.action.onClicked.addListener = (listener) => {
+  globalThis.__snapscreenSmokeActionListeners.push(listener);
+  addActionListener(listener);
+};
+`);
+  await writeFile(loaderPath, `import './${shimPath}';\nimport './${originalPath}';\n`);
+  return extensionDirectory;
+}
+
+async function verifyNativeMode(context, worker, apiRequests) {
+  const page = await context.newPage();
+  await installHostProbe(page);
+  await page.goto(FIXTURE_URL, { waitUntil: 'domcontentloaded' });
+  await page.bringToFront();
+  await page.evaluate(() => {
+    window.__snapscreenNativeMutations = 0;
+    new MutationObserver((records) => {
+      window.__snapscreenNativeMutations += records.length;
+    }).observe(document, { attributes: true, characterData: true, childList: true, subtree: true });
+  });
+  const originalPages = context.pages().map(candidate => candidate.url()).sort();
+
+  await worker.evaluate(({ apiKey, screenshotDataUrl }) => {
+    const forbidden = [];
+    const originals = [];
+    const watch = (owner, key, label) => {
+      const original = owner[key];
+      originals.push(() => { owner[key] = original; });
+      owner[key] = (...args) => {
+        forbidden.push(label);
+        return original.apply(owner, args);
+      };
+    };
+    watch(chrome.scripting, 'executeScript', 'script injection');
+    watch(chrome.tabs, 'sendMessage', 'content message');
+    watch(chrome.tabs, 'create', 'tab creation');
+    watch(chrome.tabs, 'update', 'tab activation');
+    watch(chrome.windows, 'update', 'window activation');
+    watch(chrome.runtime, 'openOptionsPage', 'Settings activation');
+
+    const native = {
+      scenario: '', forbidden, originals, messages: [], captures: 0, disconnected: false,
+      finish: undefined, emit: undefined,
+    };
+    globalThis.__snapscreenSmokeNative = native;
+    const originalCapture = chrome.tabs.captureVisibleTab;
+    const originalConnect = chrome.runtime.connectNative;
+    const originalBadge = chrome.action.setBadgeText;
+    originals.push(() => { chrome.tabs.captureVisibleTab = originalCapture; });
+    originals.push(() => { chrome.runtime.connectNative = originalConnect; });
+    originals.push(() => { chrome.action.setBadgeText = originalBadge; });
+    chrome.tabs.captureVisibleTab = async () => {
+      native.captures += 1;
+      return screenshotDataUrl;
+    };
+    chrome.action.setBadgeText = async (details) => {
+      await originalBadge(details);
+      if (details.text === '!') native.finish?.();
+    };
+    chrome.runtime.connectNative = (host) => {
+      if (host !== 'com.snapscreen.companion') throw new Error('Unexpected native host.');
+      const messages = new Set();
+      const disconnects = new Set();
+      const event = (listeners) => ({
+        addListener: listener => listeners.add(listener),
+        removeListener: listener => listeners.delete(listener),
+      });
+      const emit = message => { for (const listener of messages) listener(message); };
+      const drop = () => { for (const listener of disconnects) listener(); };
+      native.emit = emit;
+      return {
+        onMessage: event(messages),
+        onDisconnect: event(disconnects),
+        disconnect: () => { native.disconnected = true; drop(); },
+        postMessage: (message) => {
+          if (JSON.stringify(message).includes(apiKey)) throw new Error('API key leaked to native host.');
+          native.messages.push(message);
+          const { version, connectionId, sessionId, requestId } = message;
+          if (message.type === 'hello') {
+            queueMicrotask(() => {
+              if (native.scenario === 'missing') drop();
+              else emit({ version: native.scenario === 'incompatible' ? 999 : version,
+                type: 'ready', connectionId });
+            });
+          } else if (message.type === 'capture') {
+            queueMicrotask(() => {
+              if (native.scenario === 'disconnected') drop();
+              else emit({ version, connectionId, sessionId, requestId, type: 'selected',
+                rect: { x: 0, y: 0, width: 1, height: 1 } });
+            });
+          } else if (message.type === 'answer' && message.status === 'done') {
+            native.finish?.();
+          } else if (message.type === 'error' || message.type === 'expired') {
+            native.finish?.();
+          }
+        },
+      };
+    };
+  }, { apiKey: TEST_API_KEY, screenshotDataUrl: TEST_CROP_DATA_URL });
+
+  try {
+    for (const scenario of ['success', 'missing', 'incompatible', 'disconnected']) {
+      const requestsBefore = apiRequests.length;
+      const result = await worker.evaluate(async ({ scenario, apiKey }) => {
+        const native = globalThis.__snapscreenSmokeNative;
+        native.scenario = scenario;
+        native.messages = [];
+        native.captures = 0;
+        native.disconnected = false;
+        await chrome.storage.local.set({ interfaceMode: 'native', apiKey });
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        const listeners = globalThis.__snapscreenSmokeActionListeners;
+        if (listeners?.length !== 1 || !tab?.id) throw new Error('The built action callback is unavailable.');
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error(`Native ${scenario} did not settle.`)), 5_000);
+          native.finish = () => { clearTimeout(timer); resolve(); };
+          listeners[0](tab);
+        });
+        const answer = native.messages.find(message => message.type === 'answer' && message.status === 'done');
+        if (answer) {
+          const { version, connectionId, sessionId, requestId } = answer;
+          native.emit({ version, connectionId, sessionId, requestId, type: 'close' });
+        }
+        return {
+          types: native.messages.map(message => message.type),
+          answer: answer?.text,
+          captures: native.captures,
+          disconnected: native.disconnected,
+          forbidden: native.forbidden,
+          badge: await chrome.action.getBadgeText({ tabId: tab.id }),
+          title: await chrome.action.getTitle({ tabId: tab.id }),
+        };
+      }, { scenario, apiKey: TEST_API_KEY });
+
+      if (result.forbidden.length) {
+        throw new Error(`Native ${scenario} used a page or activation path: ${result.forbidden.join(', ')}.`);
+      }
+      if (!result.disconnected) throw new Error(`Native ${scenario} left its port open.`);
+      if (scenario === 'success') {
+        if (result.answer !== SMOKE_ANSWER || result.captures !== 1
+          || !['hello', 'capture', 'accepted', 'started', 'answer'].every(type => result.types.includes(type))
+          || apiRequests.length !== requestsBefore + 1) {
+          throw new Error(`Native answer flow failed: ${JSON.stringify(result)}.`);
+        }
+        if (apiRequests.at(-1).headers['x-api-key'] !== TEST_API_KEY) {
+          throw new Error('The native answer request did not use the background-owned API key.');
+        }
+      } else if (result.badge !== '!' || apiRequests.length !== requestsBefore
+        || result.captures !== (scenario === 'disconnected' ? 1 : 0)) {
+        throw new Error(`Native ${scenario} did not fail before API use: ${JSON.stringify(result)}.`);
+      } else if (!result.title.includes(scenario === 'disconnected'
+        ? 'native session ended' : 'companion could not start')) {
+        throw new Error(`Native ${scenario} reported the wrong failure: ${result.title}`);
+      }
+      const mutations = await page.evaluate(() => window.__snapscreenNativeMutations);
+      if (mutations !== 0 || await page.locator(UI_HOST_SELECTOR).count() !== 0
+        || page.frames().length !== 1
+        || JSON.stringify(context.pages().map(candidate => candidate.url()).sort()) !== JSON.stringify(originalPages)) {
+        throw new Error(`Native ${scenario} changed the page DOM, attached a frame, or opened a tab.`);
+      }
+      await assertHostPageIsolation(page);
+    }
+  } finally {
+    await worker.evaluate(async () => {
+      const native = globalThis.__snapscreenSmokeNative;
+      for (const restore of native.originals.reverse()) restore();
+      delete globalThis.__snapscreenSmokeNative;
+      await chrome.storage.local.set({ interfaceMode: 'extension' });
+    });
+    await page.close();
+  }
 }
 
 async function createOversizeCrop(worker) {
@@ -944,6 +1134,7 @@ try {
     (async () => {
       const contentLoader = await verifyBuild();
       profileDirectory = await mkdtemp(join(tmpdir(), 'snapscreen-smoke-'));
+      const extensionDirectory = await prepareSmokeExtension(profileDirectory);
       const apiRequests = [];
       // Answers wait for releaseApiResponse() so each flow can see its pending
       // state. holdApiResponses() re-arms the gate for the next flow.
@@ -962,8 +1153,8 @@ try {
         channel: 'chromium',
         headless: true,
         args: [
-          `--disable-extensions-except=${DIST}`,
-          `--load-extension=${DIST}`,
+          `--disable-extensions-except=${extensionDirectory}`,
+          `--load-extension=${extensionDirectory}`,
         ],
       });
 
@@ -1198,6 +1389,9 @@ try {
       });
       await verifyEscapeClose(page, uiFrame, scrollComposer, 'Scroll-following close');
 
+      await verifyNativeMode(context, worker, apiRequests);
+      await page.bringToFront();
+
       // Last, because the fake clock stays installed for the rest of the run.
       await installStalledThinkingStream(worker);
       await context.clock.install();
@@ -1213,7 +1407,7 @@ try {
       await verifyEscapeClose(page, uiFrame, slowComposer, 'Slow-answer close');
 
       process.stdout.write(
-        'Unpacked-extension smoke test passed: exact keyed/no-key instruction, no-key Open Settings and Try again, collapsed-limit validation, strict-CSP extension-frame crop, oversize-capture downscale, answer, code-block copy, composer, Escape-release teardown, host-page isolation, interrupted-first-answer Try again and follow-up, streaming scroll-following, and slow-answer status and Stop verified.\n',
+        'Unpacked-extension smoke test passed: exact keyed/no-key instruction, no-key Open Settings and Try again, collapsed-limit validation, strict-CSP extension-frame crop, oversize-capture downscale, answer, code-block copy, composer, Escape-release teardown, host-page isolation, interrupted-first-answer Try again and follow-up, streaming scroll-following, native answer/missing/incompatible/disconnected-host isolation, and slow-answer status and Stop verified.\n',
       );
     })(),
     timeoutFailure,

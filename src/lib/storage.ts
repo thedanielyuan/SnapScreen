@@ -33,6 +33,8 @@ export interface SnapScreenSettings extends SnapScreenSessionSettings {
   apiKey: string;
 }
 
+export type InterfaceMode = 'extension' | 'native';
+
 const DEFAULTS: SnapScreenSettings = {
   apiKey: '',
   defaultPrompt: DEFAULT_PROMPT,
@@ -52,7 +54,15 @@ export async function getSettings(): Promise<SnapScreenSettings> {
   };
 }
 
-export async function saveSettings(settings: Partial<SnapScreenSettings>): Promise<void> {
+// Interface selection stays out of the settings sent to capture UI contexts.
+export async function getInterfaceMode(): Promise<InterfaceMode> {
+  const stored = await chrome.storage.local.get('interfaceMode');
+  return stored.interfaceMode === 'native' ? 'native' : 'extension';
+}
+
+export async function saveSettings(
+  settings: Partial<SnapScreenSettings> & { interfaceMode?: InterfaceMode },
+): Promise<void> {
   await chrome.storage.local.set({
     ...settings,
     ...(settings.limits ? { limits: normalizeLimits(settings.limits) } : {}),

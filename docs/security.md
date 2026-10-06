@@ -3,6 +3,48 @@
 How SnapScreen handles your API key and screenshots, and how its UI is isolated from the pages
 it runs on. The [privacy policy](../PRIVACY.md) is the short version.
 
+## Optional macOS companion
+
+Settings defaults to the existing **In Chrome** interface. Selecting **macOS companion
+(experimental)** routes subsequent user invocations through the background's Native Messaging
+bridge. Native mode does not inject a content script or page UI, open a workspace, or open
+Settings automatically. Missing, incompatible, or disconnected hosts end the session and
+report an extension badge error; they never trigger an automatic switch to the injected mode.
+Opening or saving Settings does not start or probe the companion.
+
+Chrome launches one native host process for each session's `connectNative()` connection. The
+host owns its AppKit windows directly; there is no separate app relay, local socket, HTTP
+endpoint, or other IPC boundary. The installed host manifest permits only the exact chosen
+extension origin. The native protocol validates its version, bounded message shapes, and
+connection/session/request identities before accepting actions. It exposes no command for
+reading credentials, choosing arbitrary tabs, or initiating another capture.
+
+The local host is an additional trusted data recipient. It receives the frozen screenshot,
+accepted crop, streamed answer text, sanitized errors, and the follow-up text entered in its
+own window. The API key, shared system prompt, and structured API conversation history stay
+in the extension. The background owns cropping, history, request limits, API calls, and
+cancellation. Screenshot and conversation content are kept in process memory, never logged
+or written to files. After crop acceptance both sides release the full screenshot and decoded
+image buffers; only the crop and current conversation remain. Copy writes text to the system
+clipboard only on an explicit user action; clipboard contents can outlive the session.
+
+Navigation or closure of the source tab before crop acceptance cancels selection. Once a crop
+is accepted, its conversation and follow-ups can continue without the source tab. A new capture
+always requires another user invocation of the extension on a valid source. Closing a session,
+losing its port, or losing authoritative worker state cancels pending work and discards session
+data. Reconnection never restores that session or replays a request. Each session, including
+one started from an incognito window, has its own connection and process, so commands and
+answers cannot cross sessions or browsing contexts. Chrome shares local storage, including API
+credentials and interface preferences, between regular and incognito use in the same profile.
+[Chrome incognito behavior](https://developer.chrome.com/docs/extensions/reference/manifest/incognito)
+
+This is a development companion, not a signed/notarized macOS release. The fitted frozen-image
+surface does not promise alignment with Chrome's content area. Phase 1's measured observations
+do not establish the completed companion's interaction behavior; modifier keys can still reach
+page handlers. The package retains the web-accessible resources required by its default
+injected mode. See [setup and remaining verification](native-phase2.md) and the
+[Phase 1 results](native-phase1-results.md).
+
 ## Local native interaction experiment
 
 `experiments/native-phase1/` builds a separate, unpacked test extension. Its only permissions
@@ -30,7 +72,7 @@ directly to Anthropic's API only from trusted extension contexts: the background
 screenshot analysis, and the options page when you choose **Test key**. It never passes
 through a third-party server. SnapScreen restricts local extension storage to trusted
 extension contexts, and its content scripts (the code injected into web pages) neither read
-nor receive the key.
+nor receive the key. The native companion never receives it either.
 
 This is defense in depth, not credential encryption: anyone who can access or copy your
 Chrome profile may still be able to extract the key. Use a dedicated Anthropic key with an
@@ -49,7 +91,7 @@ workspace claims its one-time capability, after which the workspace page owns it
 source/workspace routing metadata is kept in `chrome.storage.session` so a service-worker
 restart can reconnect the workspace.
 
-## Injected UI isolation
+## Injected UI isolation (In Chrome mode)
 
 SnapScreen renders every injected interactive surface—the crop selector, result panel,
 screenshot lightbox, composer, and toast—inside a full-viewport extension-origin iframe. The
@@ -71,7 +113,7 @@ buffered until attestation completes. Privileged actions such as opening Setting
 back to the trusted content controller rather than executed by the web-accessible frame, and
 normal background commands reject extension-frame senders.
 
-## Fallback workspace
+## Fallback workspace (In Chrome mode)
 
 Pages that reject injection use a packaged workspace that is deliberately absent from
 `web_accessible_resources`. Its exact top-level extension URL and tab must claim a one-time

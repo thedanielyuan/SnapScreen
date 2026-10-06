@@ -26,3 +26,4 @@ release
 
 # Local native interaction experiment (binaries, profiles and raw observations)
 experiments/native-phase1/build/
+native/macos/build/

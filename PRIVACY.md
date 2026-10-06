@@ -7,8 +7,9 @@ explains what it handles, where that data goes, and what stays on your device.
 
 ## Summary
 
-- SnapScreen has no servers. It sends your snips and questions only to Anthropic, the AI
-  provider that writes the answers.
+- SnapScreen has no servers. It sends your snips and questions to Anthropic, the AI provider
+  that writes the answers. Optional native mode also gives screenshot and conversation data
+  to the separately installed SnapScreen companion on your Mac.
 - It doesn't collect analytics, show ads, or sell or share your data with anyone else.
 - Your API key and settings stay in Chrome on your device.
 
@@ -16,14 +17,36 @@ explains what it handles, where that data goes, and what stays on your device.
 
 | Data | When | Where it goes | How long it's kept |
 | --- | --- | --- | --- |
-| A screenshot of the visible part of the tab | When you click the SnapScreen icon or press its shortcut | Stays in memory on your device while you choose a region | Until the snip finishes or you cancel |
-| The region you select | When you finish a snip | Sent to Anthropic to get the answer | In memory until you close the answer |
-| Questions you type, and your default prompt | When you ask | Sent to Anthropic with the region | In memory until you close the answer |
+| A screenshot of the visible part of the tab | When you click the SnapScreen icon or press its shortcut | In memory on your device; also sent to the local companion in native mode | Until the crop is accepted or you cancel |
+| The region you select | When you finish a snip | Sent to Anthropic to get the answer; also shown by the local companion in native mode | In memory until you close or lose the session |
+| Questions you type, and your default prompt | When you ask | Sent to Anthropic with the region; native follow-ups are typed in the local companion | In memory until you close or lose the session |
+| Answer text | When Anthropic responds | Displayed in the extension or local companion | In memory until you close or lose the session; explicit Copy puts text on your clipboard |
 | Your Anthropic API key | When you save it in Settings | Stored in Chrome on your device, and sent to Anthropic with each request | Until you remove it or uninstall SnapScreen |
-| Settings (default prompt and limits) | When you save them | Stored in Chrome on your device | Until you change them or uninstall SnapScreen |
+| Settings (default prompt, limits, and interface choice) | When you save them | Stored in Chrome on your device | Until you change them or uninstall SnapScreen |
 | The address of the page you snipped | Only when a page needs SnapScreen's separate workspace tab | Chrome's temporary session storage on your device, to reconnect that tab | Until the workspace tab closes or Chrome quits |
 
 SnapScreen never writes screenshots or conversations to disk.
+
+### Optional macOS companion
+
+The **In Chrome** interface is the default. To use native mode, install the companion and
+explicitly select it in Settings. Chrome starts a separate local process for each native
+session. It receives the screenshot, crop, streamed answers, and follow-ups; it never receives
+your API key, the system prompt, or the structured history used for Anthropic requests. The
+extension still sends every API request directly to Anthropic. No local web server or shared
+app relay is involved.
+
+Both processes release the full screenshot when the crop is accepted. The selected region and
+conversation stay in memory until the session closes or disconnects. Follow-ups can continue
+after the source page navigates or closes. Lost sessions are not restored or replayed. Copy
+writes only the text you explicitly choose to your system clipboard, which can retain it after
+the window closes. Missing or incompatible companions report an extension badge error without
+opening another interface. Modifier keys may still reach the page.
+
+If you allow the extension in incognito, each incognito native session also gets its own
+companion process, as every session does. Chrome's local extension storage shares the API key
+and saved settings between regular and incognito use within that Chrome profile.
+[Chrome incognito behavior](https://developer.chrome.com/docs/extensions/reference/manifest/incognito)
 
 ### Optional local development experiment
 
@@ -53,6 +76,9 @@ cached for about 5 minutes after its last use.
 - **activeTab and scripting:** capture the current tab and show SnapScreen on it, only after
   you click the icon or press the shortcut. SnapScreen can't read or change any other page.
 - **storage:** saves your API key and settings on your device.
+- **nativeMessaging:** connects to the separately installed local macOS companion when you
+  explicitly choose native mode and invoke SnapScreen. It transfers screenshots and answer
+  data to that process and receives selection and follow-up actions; it never transfers keys.
 - **Access to `api.anthropic.com`:** sends your snip and question to Anthropic.
 - **Access to local files (optional):** requested only when you use SnapScreen on a `file://`
   page.
@@ -67,6 +93,7 @@ has the details.
 ## Your choices
 
 - Remove your API key at any time on SnapScreen's Settings page.
+- Choose **In Chrome** in Settings to use the extension without the native companion.
 - Uninstalling SnapScreen deletes its stored key and settings from Chrome.
 
 ## Changes
