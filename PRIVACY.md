@@ -34,7 +34,9 @@ explicitly select it in Settings. Chrome starts a separate local process for eac
 session. It receives the screenshot, crop, streamed answers, and follow-ups; it never receives
 your API key, the system prompt, or the structured history used for Anthropic requests. The
 extension still sends every API request directly to Anthropic. No local web server or shared
-app relay is involved.
+app relay is involved. The optional **Check companion** button in Settings briefly starts a
+local host for a version handshake, then disconnects. It opens no native window and transfers
+no screenshots, questions, answers, or API credentials.
 
 Both processes release the full screenshot when the crop is accepted. The selected region and
 conversation stay in memory until the session closes or disconnects. Follow-ups can continue
@@ -77,7 +79,8 @@ cached for about 5 minutes after its last use.
   you click the icon or press the shortcut. SnapScreen can't read or change any other page.
 - **storage:** saves your API key and settings on your device.
 - **nativeMessaging:** connects to the separately installed local macOS companion when you
-  explicitly choose native mode and invoke SnapScreen. It transfers screenshots and answer
+  explicitly choose native mode and invoke SnapScreen, or choose **Check companion** in
+  Settings for a data-free version handshake. Native sessions transfer screenshots and answer
   data to that process and receives selection and follow-up actions; it never transfers keys.
 - **Access to `api.anthropic.com`:** sends your snip and question to Anthropic.
 - **Access to local files (optional):** requested only when you use SnapScreen on a `file://`

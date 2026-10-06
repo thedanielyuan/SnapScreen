@@ -6,6 +6,7 @@ import {
   MAX_IMAGE_DATA_URL_BYTES,
   MAX_NATIVE_ANSWER_LENGTH,
   MAX_NATIVE_INPUT_LENGTH,
+  MAX_NATIVE_REMOVED_TURNS,
   NATIVE_PROTOCOL_VERSION,
 } from './native-protocol';
 
@@ -23,7 +24,7 @@ const extensionMessages = [
   { ...session, type: 'answer', text: 'answer', status: 'done' },
   { ...session, type: 'answer', text: '', status: 'stopped' },
   { ...session, type: 'error', code: 'request_failed', message: 'Try again.' },
-  { ...session, type: 'notice', message: '2 older conversation turns were removed.' },
+  { ...session, type: 'notice', message: '2 older conversation turns were removed.', removedTurns: 2 },
   { ...session, type: 'expired', message: 'Start a new snip.' },
 ];
 const nativeMessages = [
@@ -63,10 +64,10 @@ describe('native protocol', () => {
     }
   });
 
-  it('requires version 2 and bounded opaque connection, session, and request identities', () => {
+  it('requires the current version and bounded opaque connection, session, and request identities', () => {
     for (const validate of [isNativeToExtensionMessage, isExtensionToNativeMessage]) {
       const type = validate === isNativeToExtensionMessage ? 'stop' : 'started';
-      for (const version of [undefined, 1, 3, '2', 2.1]) {
+      for (const version of [undefined, 1, 2, 4, '3', 3.1]) {
         expect(validate({ ...session, type, version })).toBe(false);
       }
       for (const field of ['connectionId', 'sessionId', 'requestId']) {
@@ -155,11 +156,19 @@ describe('native protocol', () => {
     expect(isExtensionToNativeMessage({ ...session, type: 'error', code: 'bad code', message: 'Try again.' })).toBe(false);
     expect(isExtensionToNativeMessage({ ...session, type: 'error', code: 'bad\n', message: 'Try again.' })).toBe(false);
     for (const type of ['error', 'notice', 'expired']) {
-      const message = type === 'error' ? { ...session, type, code: 'request_failed' } : { ...session, type };
+      const message = type === 'error' ? { ...session, type, code: 'request_failed' }
+        : type === 'notice' ? { ...session, type, removedTurns: 0 } : { ...session, type };
       expect(isExtensionToNativeMessage({ ...message, message: 'a'.repeat(1_024) })).toBe(true);
       for (const text of ['', ' ', 'a'.repeat(1_025)]) {
         expect(isExtensionToNativeMessage({ ...message, message: text })).toBe(false);
       }
+    }
+    const notice = { ...session, type: 'notice', message: 'Removed.' };
+    for (const removedTurns of [0, 1, MAX_NATIVE_REMOVED_TURNS]) {
+      expect(isExtensionToNativeMessage({ ...notice, removedTurns })).toBe(true);
+    }
+    for (const removedTurns of [-1, 1.5, MAX_NATIVE_REMOVED_TURNS + 1, NaN, '1', null]) {
+      expect(isExtensionToNativeMessage({ ...notice, removedTurns })).toBe(false);
     }
   });
 });

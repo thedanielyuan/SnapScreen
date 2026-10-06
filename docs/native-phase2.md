@@ -2,8 +2,9 @@
 
 Phase 2 introduces an optional development macOS companion. The default interface remains
 **In Chrome**. Native mode uses Chrome's capture authorization and background API client while
-showing a fitted frozen screenshot and answers in a local AppKit process. Phase 3 interface
-polish and Phase 4 physical acceptance, signing, and distribution remain outstanding.
+showing a fitted frozen screenshot and answers in a local AppKit process.
+[Phase 3](native-phase3.md) adds code blocks, selection feedback, keyboard controls, and an
+explicit availability check. Phase 4 physical acceptance, signing, and distribution remain.
 
 The [Phase 1 observations](native-phase1-results.md) belong to the prototype and tested
 conditions. They do not validate every interaction in this implementation. In particular,
@@ -97,9 +98,10 @@ windows cannot resume it.
 
 Chrome ends a host process about two seconds after its connection closes, so the companion's
 interruption notice is only brief; the badge is the lasting signal. When older turns are
-removed to stay within the conversation limit, the companion shows a notice under its status
-line. As in the In Chrome interface, text streamed before a refusal is discarded rather than
-kept as an answer or sent back with a follow-up.
+removed to stay within the conversation limit, the extension sends the companion how many it
+removed (protocol version 3); the companion removes the same turns and shows a notice above the
+new request. As in the In Chrome interface, text streamed before a refusal is discarded rather
+than kept as an answer or sent back with a follow-up.
 
 ## Data boundary
 
@@ -126,21 +128,24 @@ npm run test:native
 npm run test:native-live
 ```
 
-`test:native` runs the companion's protocol, framing, and lifecycle self-tests and the
-installer test. `test:native-live` launches Playwright's Chromium with a disposable profile,
+`test:native` runs the companion's protocol, framing, lifecycle, and interface self-tests and
+the installer test. `test:native-live` launches Playwright's Chromium with a disposable profile,
 registers a test build of the companion only in that profile, and runs real Chrome-launched
 sessions against mocked answers. It covers the handshake, a 10 MB capture, a selection, a
 streamed answer, a follow-up, Close and host exit, navigation before acceptance, and a missing
-host. Companion windows appear on screen for a few seconds. That test build (`--test-hooks`)
-confirms the default selection and asks the follow-up by itself. `npm run build:native` never
+host. It also checks the Settings status for installed, missing, moved, foreign-origin, and
+unstartable registrations against Chrome's real errors. Companion windows appear on screen for
+a few seconds. That test build (`--test-hooks`) places and confirms the keyboard selection and
+asks the follow-up by itself. `npm run build:native` never
 compiles those hooks, and `test:native` fails if the registered build contains them. None of
 these checks uses an API key or registers a host in your own browser. The browser smoke test
 still substitutes a mock native port for its page-isolation checks. A paid live API test is
 not needed for a bridge-only change and must still be approved before it is run.
 
 Because the live test confirms selections programmatically, it establishes transport and
-lifecycle behavior, not native focus behavior. Phase 3 must finish and polish the native UI,
-including accessibility and any remaining selection, preview, or per-code-block controls.
+lifecycle behavior, not native focus behavior. [Phase 3](native-phase3.md) implements the
+selection, preview, and per-code-block controls with accessibility metadata; physical
+accessibility and focus acceptance remain unverified.
 Phase 4 must repeat the physical interaction matrix against the completed companion and cover
 concurrent profiles/incognito, restarts, timeouts, and oversized or malformed messages from a
 real host. Automated DOM assertions cannot establish native focus

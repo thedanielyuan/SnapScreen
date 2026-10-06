@@ -6,6 +6,7 @@ import { ActiveTabChangedError } from './capture-session';
 import { cropImage, fitScreenshotToLimits } from '../lib/crop';
 import { DEFAULT_LIMITS, getSettings } from '../lib/storage';
 import type { ExtensionToNativeMessage } from '../lib/native-protocol';
+import { NATIVE_PROTOCOL_VERSION } from '../lib/native-protocol';
 
 vi.mock('../lib/anthropic', async (actual) => ({
   ...await actual<typeof import('../lib/anthropic')>(), analyzeImage: vi.fn(), followUp: vi.fn(),
@@ -40,7 +41,7 @@ class Port {
   }
   command(type: string, extra = {}, envelope = this.latest()) {
     if (!('sessionId' in envelope)) throw new Error('No session envelope');
-    this.onMessage.emit({ version: 2, connectionId: envelope.connectionId,
+    this.onMessage.emit({ version: NATIVE_PROTOCOL_VERSION, connectionId: envelope.connectionId,
       sessionId: envelope.sessionId, requestId: envelope.requestId, type, ...extra });
   }
 }
@@ -378,7 +379,8 @@ describe('background-owned native sessions', () => {
       await flush();
     }
     const notices = port.sent.filter(message => message.type === 'notice');
-    expect(notices).toEqual([expect.objectContaining({ message: '1 older conversation turn was removed to keep the screenshot and newest request within the configured limit.' })]);
+    expect(notices).toEqual([expect.objectContaining({ removedTurns: 1,
+      message: '1 older conversation turn was removed to keep the screenshot and newest request within the configured limit.' })]);
     const types = port.sent.map(message => message.type);
     expect(types.lastIndexOf('notice')).toBe(types.lastIndexOf('started') + 1);
   });

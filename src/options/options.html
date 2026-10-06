@@ -47,12 +47,25 @@
           <option value="extension">In Chrome (default)</option>
           <option value="native">macOS companion (experimental)</option>
         </select>
-        <p id="interface-mode-hint" class="hint">
-          Native mode requires the separately installed macOS companion. It shows snips and
-          answers in desktop windows; modifier keys may still reach the page. If the companion
-          is unavailable, the extension badge reports the error without switching interfaces.
-          Saving this choice applies to your next snip and does not launch the companion.
-        </p>
+        <p id="interface-mode-hint" class="hint">Where snips and answers appear. Applies to your next snip.</p>
+        <section id="companion-section" class="companion-section" aria-label="macOS companion" hidden>
+          <p class="hint companion-intro">
+            Snips and answers open in desktop windows instead of on the page. This requires the
+            separately installed companion, and modifier keys may still reach the page. If it can't
+            start, the toolbar badge shows why.
+          </p>
+          <div class="companion-actions">
+            <button type="button" id="check-companion" class="btn-secondary" aria-describedby="companion-status">
+              Check companion
+            </button>
+            <a href="https://github.com/thedanielyuan/SnapScreen/blob/main/docs/native-phase2.md#local-setup" target="_blank" rel="noopener noreferrer">
+              Setup guide
+            </a>
+          </div>
+          <p id="companion-status" class="companion-status" role="status" aria-live="polite">
+            Checking briefly starts the companion. No window opens, and no screenshot or API key is used.
+          </p>
+        </section>
 
         <details id="advanced-settings" class="advanced-section">
           <summary>Advanced</summary>

@@ -1,12 +1,14 @@
 import type { Rect } from './messages';
 
 export const NATIVE_HOST_NAME = 'com.snapscreen.companion';
-export const NATIVE_PROTOCOL_VERSION = 2;
+export const NATIVE_PROTOCOL_VERSION = 3;
 export const MAX_NATIVE_FRAME_BYTES = 512 * 1024;
 export const MAX_EXTENSION_FRAME_BYTES = 32 * 1024 * 1024;
 export const MAX_IMAGE_DATA_URL_BYTES = 24 * 1024 * 1024;
 export const MAX_NATIVE_ANSWER_LENGTH = 262_144;
 export const MAX_NATIVE_INPUT_LENGTH = 50_000;
+/** Bounds a notice's count of conversation turns removed before a request. */
+export const MAX_NATIVE_REMOVED_TURNS = 1_000;
 
 const MAX_ERROR_MESSAGE_LENGTH = 1_024;
 const BASE_KEYS = ['version', 'type', 'connectionId'];
@@ -38,7 +40,8 @@ export type ExtensionToNativeMessage =
       status: 'streaming' | 'done' | 'stopped';
     })
   | (NativeSessionEnvelope & { type: 'error'; code: string; message: string })
-  | (NativeSessionEnvelope & { type: 'notice' | 'expired'; message: string });
+  | (NativeSessionEnvelope & { type: 'notice'; message: string; removedTurns: number })
+  | (NativeSessionEnvelope & { type: 'expired'; message: string });
 
 export type NativeToExtensionMessage =
   | (NativeEnvelope & { type: 'ready' })
@@ -133,6 +136,13 @@ export function isExtensionToNativeMessage(value: unknown): value is ExtensionTo
         && isNonemptyText(value.message, MAX_ERROR_MESSAGE_LENGTH);
       break;
     case 'notice':
+      valid = hasKeys(value, [...SESSION_KEYS, 'message', 'removedTurns'])
+        && isNonemptyText(value.message, MAX_ERROR_MESSAGE_LENGTH)
+        && typeof value.removedTurns === 'number'
+        && Number.isInteger(value.removedTurns)
+        && value.removedTurns >= 0
+        && value.removedTurns <= MAX_NATIVE_REMOVED_TURNS;
+      break;
     case 'expired':
       valid = hasKeys(value, [...SESSION_KEYS, 'message'])
         && isNonemptyText(value.message, MAX_ERROR_MESSAGE_LENGTH);

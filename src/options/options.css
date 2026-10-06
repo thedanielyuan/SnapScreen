@@ -164,6 +164,117 @@ a {
   margin-top: 24px;
 }
 
+.companion-section {
+  margin: -8px 0 20px;
+  padding: 14px 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.companion-section[hidden] {
+  display: none;
+}
+
+.companion-intro {
+  margin: 0 0 12px;
+}
+
+.companion-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 13px;
+}
+
+.companion-actions .btn-secondary {
+  padding: 7px 14px;
+  font-size: 13px;
+}
+
+.companion-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.companion-status[data-state]::before {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  border-radius: 50%;
+  color: #fff;
+  font: 700 11px/16px system-ui, -apple-system, sans-serif;
+  text-align: center;
+}
+
+.companion-status[data-state="checking"]::before {
+  content: "";
+  box-sizing: border-box;
+  border: 2px solid #d1d5db;
+  border-top-color: #3b82f6;
+  animation: companion-spin 0.7s linear infinite;
+}
+
+.companion-status[data-state="ready"] {
+  color: #047857;
+}
+
+.companion-status[data-state="ready"]::before {
+  content: "✓";
+  background: #059669;
+}
+
+.companion-status[data-state="error"] {
+  color: #b91c1c;
+}
+
+.companion-status[data-state="error"]::before {
+  content: "!";
+  background: #dc2626;
+}
+
+@keyframes companion-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .companion-section {
+    border-color: #333;
+    background: #1a1a1a;
+  }
+
+  .companion-status {
+    color: #9ca3af;
+  }
+
+  .companion-status[data-state="checking"]::before {
+    border-color: #404040;
+    border-top-color: #60a5fa;
+  }
+
+  .companion-status[data-state="ready"] {
+    color: #34d399;
+  }
+
+  .companion-status[data-state="error"] {
+    color: #f87171;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .companion-status[data-state="checking"]::before {
+    animation: none;
+  }
+}
+
 .btn-primary {
   padding: 10px 20px;
   border: none;

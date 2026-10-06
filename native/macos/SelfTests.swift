@@ -16,10 +16,10 @@ func runProtocolSelfTests() throws -> Int {
   }
   // A real 1×1 PNG, only for in-memory validation. Production screenshots are never written.
   let png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aFe8AAAAASUVORK5CYII="
-  let hello: [String: Any] = ["version": 2, "type": "hello", "connectionId": "connection-1"]
+  let hello: [String: Any] = ["version": protocolVersion, "type": "hello", "connectionId": "connection-1"]
   func message(_ type: String, _ fields: [String: Any] = [:], request: String = "capture-1",
     session: String = "session-1", connection: String = "connection-1") -> [String: Any] {
-    var value: [String: Any] = ["version": 2, "type": type, "connectionId": connection,
+    var value: [String: Any] = ["version": protocolVersion, "type": type, "connectionId": connection,
       "sessionId": session, "requestId": request]
     for (key, item) in fields { value[key] = item }
     return value
@@ -57,7 +57,7 @@ func runProtocolSelfTests() throws -> Int {
   try check(validId("AZ_az-0123") != nil && validId("é") == nil, "ASCII IDs only")
   try check(trimProtocolText("\u{FEFF}").isEmpty, "ECMAScript BOM whitespace is blank")
   try check(trimProtocolText("\u{0085}\u{200B}") == "\u{0085}\u{200B}", "non-ECMAScript Foundation whitespace retained")
-  for version: Any in [true, 1, 3, 2.5, "2"] {
+  for version: Any in [true, 1, 2, 4, 3.5, "3"] {
     var value = hello
     value["version"] = version
     try check(rejects(value), "unsupported or malformed version")
@@ -71,8 +71,14 @@ func runProtocolSelfTests() throws -> Int {
     message("error", ["code": "code\n", "message": "x"]),
     message("error", ["code": "code", "message": " \n"]),
     message("expired", ["message": " \n"]),
-    message("notice", ["message": " \n"]),
-    message("notice", ["message": String(repeating: "x", count: 1025)]),
+    message("notice", ["message": " \n", "removedTurns": 0]),
+    message("notice", ["message": String(repeating: "x", count: 1025), "removedTurns": 0]),
+    message("notice", ["message": "x"]),
+    message("notice", ["message": "x", "removedTurns": -1]),
+    message("notice", ["message": "x", "removedTurns": 1.5]),
+    message("notice", ["message": "x", "removedTurns": maxRemovedTurns + 1]),
+    message("notice", ["message": "x", "removedTurns": true]),
+    message("notice", ["message": "x", "removedTurns": "1"]),
     message("error", ["code": "err", "message": String(repeating: "x", count: 1025)]),
     message("expired", ["message": String(repeating: "x", count: 1025)]),
     message("capture", ["imageDataUrl": "data:image/jpeg;base64,AQ=="]),
@@ -87,7 +93,7 @@ func runProtocolSelfTests() throws -> Int {
   for value in [hello, message("capture", ["imageDataUrl": png]),
     message("accepted", ["imageDataUrl": png, "maxInputCharacters": 4000]), message("started"), message("thinking"),
     message("answer", ["text": "x", "status": "streaming"]), message("error", ["code": "x", "message": "x"]),
-    message("notice", ["message": "x"]), message("expired", ["message": "x"])] {
+    message("notice", ["message": "x", "removedTurns": 0]), message("expired", ["message": "x"])] {
     var extra = value
     extra["apiKey"] = "unknown field"
     try check(rejects(extra), "every variant has exact keys")
@@ -140,11 +146,15 @@ func runProtocolSelfTests() throws -> Int {
   try check(state.receive(accepted) && state.hasCrop, "accepted crop retained")
   try check(state.maxInputCharacters == 4000, "session limit applied")
   try check(!state.receive(try command("started")), "capture request ID cannot be reused for generation")
-  try check(!state.receive(try command("notice", ["message": "Removed"], request: "generation-1")),
+  try check(!state.receive(try command("notice", ["message": "Removed", "removedTurns": 1], request: "generation-1")),
     "notice before its generation starts ignored")
   try check(state.receive(try command("started", request: "generation-1")), "new generation begins")
-  try check(state.receive(try command("notice", ["message": "Removed"], request: "generation-1")), "generation notice")
-  try check(!state.receive(try command("notice", ["message": "Removed"])), "stale notice ignored")
+  let notice = try command("notice", ["message": "Removed", "removedTurns": 2], request: "generation-1")
+  if case .notice(let text, let removed) = notice.payload {
+    try check(text == "Removed" && removed == 2, "notice carries its removed-turn count")
+  } else { throw SelfTestError.failed("notice") }
+  try check(state.receive(notice), "generation notice")
+  try check(!state.receive(try command("notice", ["message": "Removed", "removedTurns": 0])), "stale notice ignored")
   try check(!state.receive(try command("thinking")), "stale generation event ignored")
   try check(state.command("followup", text: "question") == nil, "follow-up while streaming rejected")
   try check(state.command("stop")?["requestId"] as? String == "generation-1", "stop echoes active request")

@@ -10,7 +10,10 @@ Settings defaults to the existing **In Chrome** interface. Selecting **macOS com
 bridge. Native mode does not inject a content script or page UI, open a workspace, or open
 Settings automatically. Missing, incompatible, or disconnected hosts end the session and
 report an extension badge error; they never trigger an automatic switch to the injected mode.
-Opening or saving Settings does not start or probe the companion.
+Opening or saving Settings does not start or probe the companion. The explicit **Check
+companion** button performs only a version handshake on a separate short-lived connection,
+then disconnects without creating a session or native window. It sends no screenshot, key,
+question, or conversation; only the trusted options page can initiate this check.
 
 Chrome launches one native host process for each session's `connectNative()` connection. The
 host owns its AppKit windows directly; there is no separate app relay, local socket, HTTP
@@ -41,8 +44,10 @@ credentials and interface preferences, between regular and incognito use in the 
 This is a development companion, not a signed/notarized macOS release. The fitted frozen-image
 surface does not promise alignment with Chrome's content area. Phase 1's measured observations
 do not establish the completed companion's interaction behavior; modifier keys can still reach
-page handlers. The package retains the web-accessible resources required by its default
-injected mode. See [setup and remaining verification](native-phase2.md) and the
+page handlers. Escape and Command-W close a companion window when the key is released, so that
+release is not delivered to Chrome after the window disappears. The package retains the
+web-accessible resources required by its default injected mode. See
+[setup and remaining verification](native-phase2.md) and the
 [Phase 1 results](native-phase1-results.md).
 
 ## Local native interaction experiment

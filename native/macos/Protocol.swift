@@ -3,12 +3,13 @@ import CoreFoundation
 import Foundation
 import ImageIO
 
-let protocolVersion = 2
+let protocolVersion = 3
 let maxInputBytes = 32 * 1024 * 1024
 let maxOutputBytes = 512 * 1024
 let maxImageURLBytes = 24 * 1024 * 1024
 let maxAnswerCharacters = 262_144
 let maxFollowupCharacters = 50_000
+let maxRemovedTurns = 1_000
 
 // ECMAScript String.trim() whitespace, shared with the extension's runtime validators. Foundation
 // differs for U+FEFF, U+0085 and U+200B; mismatches could turn harmless blank input into disconnects.
@@ -49,7 +50,7 @@ enum CommandPayload {
   case thinking
   case answer(String, AnswerStatus)
   case error(String, String)
-  case notice(String)
+  case notice(String, removedTurns: Int)
   case expired(String)
 }
 
@@ -134,11 +135,17 @@ func parseCommand(_ data: Data) throws -> HostCommand {
       let message = value["message"] as? String, message.utf16.count <= 1024,
       !trimProtocolText(message).isEmpty else { throw WireError.malformed }
     payload = .error(code, message)
-  case "notice", "expired":
+  case "notice":
+    try keys(["message", "removedTurns"])
+    guard let message = value["message"] as? String, message.utf16.count <= 1024,
+      !trimProtocolText(message).isEmpty, let removed = number(value["removedTurns"]),
+      removed.rounded() == removed, removed >= 0, removed <= Double(maxRemovedTurns) else { throw WireError.malformed }
+    payload = .notice(message, removedTurns: Int(removed))
+  case "expired":
     try keys(["message"])
     guard let message = value["message"] as? String, message.utf16.count <= 1024,
       !trimProtocolText(message).isEmpty else { throw WireError.malformed }
-    payload = type == "notice" ? .notice(message) : .expired(message)
+    payload = .expired(message)
   default:
     throw WireError.malformed
   }
@@ -189,23 +196,4 @@ func decodeImage(_ bytes: Data) -> NSImage? {
     let decoded = CGImageSourceCreateImageAtIndex(source, 0,
       [kCGImageSourceShouldCacheImmediately: false] as CFDictionary) else { return nil }
   return NSImage(cgImage: decoded, size: NSSize(width: decoded.width, height: decoded.height))
-}
-
-func fittedImageRect(_ imageSize: CGSize, in bounds: CGRect) -> CGRect {
-  guard imageSize.width.isFinite, imageSize.height.isFinite,
-    imageSize.width > 0, imageSize.height > 0, bounds.width > 24, bounds.height > 24 else { return .zero }
-  let available = bounds.insetBy(dx: 12, dy: 12)
-  let scale = min(available.width / imageSize.width, available.height / imageSize.height)
-  let size = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
-  return CGRect(x: available.midX - size.width / 2, y: available.midY - size.height / 2,
-    width: size.width, height: size.height)
-}
-
-func selectionMeetsMinimum(_ selection: CGRect, in fitted: CGRect, minimum: CGFloat = 5) -> Bool {
-  [selection.width, selection.height, fitted.width, fitted.height].allSatisfy { $0.isFinite } &&
-    selection.width * fitted.width >= minimum && selection.height * fitted.height >= minimum
-}
-
-func isNearFrameEdge(_ point: CGPoint, _ frame: CGRect, margin: CGFloat = 8) -> Bool {
-  !frame.insetBy(dx: margin, dy: margin).contains(point)
 }

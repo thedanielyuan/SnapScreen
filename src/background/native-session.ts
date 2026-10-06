@@ -11,6 +11,7 @@ import {
 import type { AnthropicMessage, DisplayMessage } from '../lib/messages';
 import {
   MAX_NATIVE_ANSWER_LENGTH,
+  MAX_NATIVE_REMOVED_TURNS,
   NATIVE_PROTOCOL_VERSION,
   type ExtensionToNativeMessage,
   type NativeToExtensionMessage,
@@ -267,7 +268,9 @@ export class NativeSessionController {
       generation.baseHistory = aligned.conversationHistory;
       generation.baseDisplayMessages = aligned.displayMessages;
       if (aligned.removedTurns > 0
-        && !this.send(session, { type: 'notice', message: describeRemovedTurns(aligned.removedTurns) })) return;
+        && !this.send(session, { type: 'notice', message: describeRemovedTurns(aligned.removedTurns),
+          // Requests that fail before trimming (for example without a key) can pile up.
+          removedTurns: Math.min(aligned.removedTurns, MAX_NATIVE_REMOVED_TURNS) })) return;
       const handlers = {
         signal: generation.controller.signal,
         limits: session.settings.limits,

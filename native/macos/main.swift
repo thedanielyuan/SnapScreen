@@ -10,11 +10,6 @@ let testScenario: TestScenario? = ProcessInfo.processInfo.environment["SNAPSCREE
   .flatMap { TestScenario(rawValue: $0.trimmingCharacters(in: .whitespacesAndNewlines)) }
 #endif
 
-final class CompanionPanel: NSPanel {
-  override var canBecomeKey: Bool { true }
-  override var canBecomeMain: Bool { false }
-}
-
 /// Kept below the active panel, click-through except during an edge resize. This preserves
 /// Phase 1's tested protection from pointer events falling through a shrinking native panel.
 final class PointerShield: NSPanel {
@@ -22,119 +17,14 @@ final class PointerShield: NSPanel {
   override var canBecomeMain: Bool { false }
 }
 
-final class SelectionView: NSView {
-  var image: NSImage?
-  var selection = CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
-  var onConfirm: ((NormalizedRect) -> Void)?
-  var onCancel: (() -> Void)?
-  private var anchor: CGPoint?
-  override var isFlipped: Bool { true }
-  override var acceptsFirstResponder: Bool { true }
-
-  var imageRect: CGRect {
-    guard let image = image else { return .zero }
-    return fittedImageRect(image.size, in: bounds)
-  }
-
-  override func draw(_ dirtyRect: NSRect) {
-    NSColor.windowBackgroundColor.setFill()
-    bounds.fill()
-    let fitted = imageRect
-    image?.draw(in: fitted, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
-    let selected = CGRect(x: fitted.minX + selection.minX * fitted.width,
-      y: fitted.minY + selection.minY * fitted.height,
-      width: selection.width * fitted.width, height: selection.height * fitted.height)
-    let shade = NSBezierPath(rect: fitted)
-    shade.appendRect(selected)
-    shade.windingRule = .evenOdd
-    NSColor.black.withAlphaComponent(0.42).setFill()
-    shade.fill()
-    NSColor.systemYellow.setStroke()
-    let outline = NSBezierPath(rect: selected)
-    outline.lineWidth = 3
-    outline.stroke()
-  }
-
-  private func normalizedPoint(_ event: NSEvent) -> CGPoint {
-    let point = convert(event.locationInWindow, from: nil)
-    let fitted = imageRect
-    return CGPoint(x: max(0, min(1, (point.x - fitted.minX) / max(1, fitted.width))),
-      y: max(0, min(1, (point.y - fitted.minY) / max(1, fitted.height))))
-  }
-
-  override func mouseDown(with event: NSEvent) {
-    window?.makeFirstResponder(self)
-    guard imageRect.contains(convert(event.locationInWindow, from: nil)) else { return }
-    anchor = normalizedPoint(event)
-  }
-
-  override func mouseDragged(with event: NSEvent) {
-    guard let anchor = anchor else { return }
-    let point = normalizedPoint(event)
-    selection = CGRect(x: min(point.x, anchor.x), y: min(point.y, anchor.y),
-      width: abs(point.x - anchor.x), height: abs(point.y - anchor.y))
-    needsDisplay = true
-  }
-
-  override func mouseUp(with event: NSEvent) {
-    guard anchor != nil else { return }
-    mouseDragged(with: event)
-    anchor = nil
-    // As in the extension's snip overlay, releasing a drag submits it and a click or tiny drag cancels.
-    if selectionMeetsMinimum(selection, in: imageRect) { confirm() } else { onCancel?() }
-  }
-
-  override func keyDown(with event: NSEvent) {
-    switch event.keyCode {
-    case 36, 76: confirm()
-    case 53: onCancel?()
-    case 123, 124, 125, 126:
-      let fitted = imageRect
-      let dx: CGFloat = event.keyCode == 123 ? -1 / max(1, fitted.width) :
-        (event.keyCode == 124 ? 1 / max(1, fitted.width) : 0)
-      let dy: CGFloat = event.keyCode == 126 ? -1 / max(1, fitted.height) :
-        (event.keyCode == 125 ? 1 / max(1, fitted.height) : 0)
-      if event.modifierFlags.contains(.shift) {
-        selection.size.width = max(1 / max(1, fitted.width), min(1 - selection.minX, selection.width + dx))
-        selection.size.height = max(1 / max(1, fitted.height), min(1 - selection.minY, selection.height + dy))
-      } else {
-        selection.origin.x = max(0, min(1 - selection.width, selection.minX + dx))
-        selection.origin.y = max(0, min(1 - selection.height, selection.minY + dy))
-      }
-      needsDisplay = true
-    default:
-      // Selection owns keyboard input. Do not forward unknown keys to Chrome.
-      break
-    }
-  }
-
-  @objc func confirm() {
-    let x = max(0, min(1, selection.minX))
-    let y = max(0, min(1, selection.minY))
-    let rect = NormalizedRect(x: x, y: y,
-      width: min(1 - x, selection.width), height: min(1 - y, selection.height))
-    guard rect.isValid else { return }
-    onConfirm?(rect)
-  }
-}
-
-final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewDelegate {
+final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate {
   private var session = NativeSession()
   private var panel: CompanionPanel?
   private var previewPanel: CompanionPanel?
   private var selectionView: SelectionView?
   private var cropImage: NSImage?
-  private var answerView: NSTextView?
-  private var followupField: NSTextField?
-  private var followupEditor: NSTextView?
-  private var statusLabel: NSTextField?
-  private var noticeLabel: NSTextField?
-  private var askButton: NSButton?
-  private var stopButton: NSButton?
-  private var retryButton: NSButton?
-  private var copyButton: NSButton?
-  private var previewButton: NSButton?
-  private var answerText = ""
+  private var conversation: ConversationView?
+  private var composer: ComposerView?
   private var monitor: Any?
   private var pressedWindow: CompanionPanel?
   private var pointerTimer: Timer?
@@ -187,6 +77,16 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
 
   private func installEditingMenu() {
     let mainMenu = NSMenu(title: "Main")
+    // AppKit reserves the first menu for the application. Keep File and Edit separate.
+    let appItem = NSMenuItem(title: "SnapScreen Companion", action: nil, keyEquivalent: "")
+    appItem.submenu = NSMenu(title: "SnapScreen Companion")
+    mainMenu.addItem(appItem)
+    let fileItem = NSMenuItem(title: "File", action: nil, keyEquivalent: "")
+    let fileMenu = NSMenu(title: "File")
+    // CompanionPanel closes on the key's release; this item documents the shortcut.
+    fileMenu.addItem(withTitle: "Close window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+    fileItem.submenu = fileMenu
+    mainMenu.addItem(fileItem)
     let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
     let editMenu = NSMenu(title: "Edit")
     editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
@@ -224,47 +124,35 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
     case .accepted(let bytes, _):
       guard let image = decodeImage(bytes) else { expire(); return }
       cropImage = image
-      statusLabel?.stringValue = "Preparing answer…"
+      conversation?.setScreenshot(image)
       armTimeout(seconds: 30)
     case .started:
-      answerText = ""
-      answerView?.string = ""
-      showNotice("")
-      statusLabel?.stringValue = "Thinking…"
       // The extension's API timeout is 240 seconds. This only handles a lost authoritative worker.
       armTimeout(seconds: 270)
     case .thinking:
-      statusLabel?.stringValue = "Thinking…"
-    case .notice(let message):
-      showNotice(message)
+      conversation?.setThinking()
+    case .notice(let message, let removedTurns):
+      conversation?.addNotice(message, removedTurns: removedTurns)
     case .answer(let text, let status):
-      answerText = text
-      answerView?.string = text
-      switch status {
-      case .streaming: statusLabel?.stringValue = "Answering…"
-      case .done:
+      conversation?.updateAnswer(text, status: status)
+      if status != .streaming {
         responseTimer?.invalidate()
-        statusLabel?.stringValue = "Answer complete"
-        #if SNAPSCREEN_TEST_HOOKS
-        if testScenario == .exchange { DispatchQueue.main.async { [weak self] in self?.continueTestExchange() } }
-        #endif
-      case .stopped:
-        responseTimer?.invalidate()
-        statusLabel?.stringValue = "Answer stopped"
+        announce(status == .done ? "Answer complete" : "Answer stopped")
       }
+      #if SNAPSCREEN_TEST_HOOKS
+      if status == .done && testScenario == .exchange {
+        DispatchQueue.main.async { [weak self] in self?.continueTestExchange() }
+      }
+      #endif
     case .error(let code, let message):
       responseTimer?.invalidate()
-      // The extension drops refused text from the conversation, so the window does too.
-      if code == "refusal" {
-        answerText = ""
-        answerView?.string = ""
-      }
-      // The extension sanitizes provider messages before crossing this boundary.
       if selectionView != nil {
         releaseSelection()
-        showAnswer()
+        showAnswer(beside: nil, on: nil)
       }
-      statusLabel?.stringValue = message
+      // The extension sanitizes provider messages before crossing this boundary. It drops refused
+      // text from the conversation, so the window does too.
+      conversation?.fail(message, clearAnswer: code == "refusal")
     case .expired:
       expire()
     }
@@ -277,54 +165,58 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
     catch { expire() }
   }
 
-  private func makePanel(title: String, size: NSSize, answer: Bool = false) -> CompanionPanel {
-    let value = CompanionPanel(contentRect: NSRect(origin: .zero, size: size),
-      styleMask: [.titled, .closable, .resizable, .nonactivatingPanel], backing: .buffered, defer: false)
+  private func announce(_ text: String) {
+    guard let element = conversation else { return }
+    NSAccessibility.post(element: element, notification: .announcementRequested,
+      userInfo: [.announcement: text, .priority: NSAccessibilityPriorityLevel.medium.rawValue])
+  }
+
+  /// Media panels (selection and preview) show an image edge to edge under a transparent title bar.
+  private func makePanel(title: String, contentSize: NSSize, minimumSize: NSSize, media: Bool) -> CompanionPanel {
+    var style: NSWindow.StyleMask = [.titled, .closable, .resizable, .nonactivatingPanel]
+    if media { style.insert(.fullSizeContentView) }
+    let value = CompanionPanel(contentRect: NSRect(origin: .zero, size: contentSize),
+      styleMask: style, backing: .buffered, defer: false)
     value.title = title
     value.identifier = NSUserInterfaceItemIdentifier(title)
     value.level = .floating
     value.hidesOnDeactivate = false
     value.becomesKeyOnlyIfNeeded = false
     value.isReleasedWhenClosed = false
+    value.autorecalculatesKeyViewLoop = true
     value.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     value.acceptsMouseMovedEvents = true
-    value.minSize = NSSize(width: answer ? 560 : 450, height: 350)
-    value.center()
+    value.titlebarAppearsTransparent = true
+    value.contentMinSize = minimumSize
+    if media {
+      value.titleVisibility = .hidden
+      value.appearance = NSAppearance(named: .darkAqua)
+      value.backgroundColor = Theme.backdrop
+    }
     value.delegate = self
     return value
   }
 
+  private static var titlebarHeight: CGFloat {
+    let content = NSRect(x: 0, y: 0, width: 400, height: 300)
+    return NSWindow.frameRect(forContentRect: content, styleMask: [.titled]).height - content.height
+  }
+
   private func showSelection(_ image: NSImage) {
-    let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1200, height: 800)
-    let window = makePanel(title: "SnapScreen — Select region",
-      size: NSSize(width: min(1100, screen.width - 60), height: min(760, screen.height - 80)))
-    let root = NSView()
-    window.contentView = root
+    let screen = screenUnderPointer()
+    let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
+    // Shown at captured size when it fits, otherwise fitted within most of the screen.
+    let size = imageWindowContentSize(image.size, backingScale: screen?.backingScaleFactor ?? 2,
+      maximum: NSSize(width: visible.width * 0.92, height: visible.height * 0.92),
+      minimum: NSSize(width: 480, height: 320), chrome: NSSize(width: 16, height: Self.titlebarHeight + 16))
+    let window = makePanel(title: "SnapScreen — Select region", contentSize: size,
+      minimumSize: NSSize(width: 360, height: 260), media: true)
+    window.setFrame(windowFrame(size: size, beside: nil, in: visible), display: false)
     let view = SelectionView()
     view.image = image
-    view.translatesAutoresizingMaskIntoConstraints = false
-    view.setAccessibilityLabel("Frozen screenshot region selection")
-    view.setAccessibilityRole(.image)
     view.onCancel = { [weak self] in self?.cancel() }
     view.onConfirm = { [weak self] rect in self?.selected(rect) }
-    root.addSubview(view)
-    let hint = NSTextField(labelWithString: "Drag a region; releasing it asks. Arrows move, Shift + arrows resize, Enter selects. Escape cancels.")
-    hint.font = .systemFont(ofSize: 12)
-    hint.maximumNumberOfLines = 3
-    hint.lineBreakMode = .byWordWrapping
-    hint.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-    let footer = NSStackView(views: [hint, button("Cancel selection", #selector(cancel))])
-    footer.orientation = .horizontal
-    footer.spacing = 10
-    footer.translatesAutoresizingMaskIntoConstraints = false
-    root.addSubview(footer)
-    NSLayoutConstraint.activate([
-      view.leadingAnchor.constraint(equalTo: root.leadingAnchor), view.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-      view.topAnchor.constraint(equalTo: root.topAnchor), view.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -8),
-      footer.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
-      footer.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
-      footer.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -12),
-    ])
+    window.contentView = view
     panel = window
     selectionView = view
     window.makeKeyAndOrderFront(nil)
@@ -332,17 +224,25 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
     window.makeFirstResponder(view)
     #if SNAPSCREEN_TEST_HOOKS
     if testScenario == .exchange {
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak view] in view?.confirm() }
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak view] in
+        view?.placeKeyboardSelection()
+        view?.confirm()
+      }
     }
     #endif
   }
 
   private func selected(_ rect: NormalizedRect) {
     guard let message = session.command("selected", rect: rect) else { return }
+    let screen = panel?.screen
+    var anchor: CGRect?
+    if let view = selectionView, let window = view.window, let region = view.selectionDisplayRect {
+      anchor = window.convertToScreen(view.convert(region, to: nil))
+    }
     // Do not create a CGImage crop here: it could retain the full backing pixels. The extension
     // owns cropping and returns the accepted region. Drop every full-image reference before send.
     releaseSelection()
-    showAnswer()
+    showAnswer(beside: anchor, on: screen)
     send(message)
     armTimeout(seconds: 30)
   }
@@ -359,91 +259,43 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
     endPressTracking()
   }
 
-  private func button(_ title: String, _ selector: Selector) -> NSButton {
-    let value = NSButton(title: title, target: self, action: selector)
-    value.bezelStyle = .rounded
-    value.setAccessibilityLabel(title)
-    return value
-  }
-
-  private func showAnswer() {
-    let window = makePanel(title: "SnapScreen — Answer", size: NSSize(width: 680, height: 520), answer: true)
+  private func showAnswer(beside anchor: CGRect?, on screen: NSScreen?) {
+    let screen = screen ?? screenUnderPointer()
+    let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
+    let window = makePanel(title: "SnapScreen", contentSize: NSSize(width: 460, height: 560),
+      minimumSize: NSSize(width: 340, height: 280), media: false)
+    window.setFrame(windowFrame(size: window.frame.size, beside: anchor, in: visible), display: false)
     let root = NSView()
     window.contentView = root
-    let status = NSTextField(wrappingLabelWithString: "Waiting for the selected region…")
-    status.font = .systemFont(ofSize: 12)
-    let notice = NSTextField(wrappingLabelWithString: "")
-    notice.font = .systemFont(ofSize: 12)
-    notice.textColor = .secondaryLabelColor
-    notice.isHidden = true
-    let scroll = NSScrollView()
-    scroll.hasVerticalScroller = true
-    scroll.borderType = .bezelBorder
-    let text = NSTextView(frame: NSRect(x: 0, y: 0, width: 640, height: 350))
-    text.isEditable = false
-    text.isSelectable = true
-    text.font = .systemFont(ofSize: 15)
-    text.textContainerInset = NSSize(width: 12, height: 12)
-    text.autoresizingMask = [.width]
-    text.isVerticallyResizable = true
-    text.isHorizontallyResizable = false
-    text.textContainer?.widthTracksTextView = true
-    text.setAccessibilityLabel("Answer text")
-    scroll.documentView = text
-    let field = NSTextField()
-    field.placeholderString = "Ask a follow-up"
-    field.setAccessibilityLabel("Follow-up question")
-    field.target = self
-    field.action = #selector(submitFollowup)
-    let ask = button("Ask", #selector(submitFollowup))
-    let entry = NSStackView(views: [field, ask])
-    entry.spacing = 8
-    entry.orientation = .horizontal
-    field.setContentHuggingPriority(.defaultLow, for: .horizontal)
-    let copy = button("Copy answer", #selector(copyAnswer))
-    let preview = button("Preview", #selector(showPreview))
-    let stop = button("Stop", #selector(stopAnswer))
-    let retry = button("Retry", #selector(retryAnswer))
-    let controls = NSStackView(views: [copy, preview, stop, retry, button("Close", #selector(closeAnswer))])
-    controls.spacing = 8
-    controls.orientation = .horizontal
-    let stack = NSStackView(views: [status, notice, scroll, entry, controls])
-    stack.orientation = .vertical
-    stack.alignment = .leading
-    stack.spacing = 12
-    stack.translatesAutoresizingMaskIntoConstraints = false
-    root.addSubview(stack)
+    let thread = ConversationView()
+    thread.translatesAutoresizingMaskIntoConstraints = false
+    thread.onPreview = { [weak self] in self?.showPreview() }
+    thread.onRetry = { [weak self] in self?.retryAnswer() }
+    let input = ComposerView()
+    input.translatesAutoresizingMaskIntoConstraints = false
+    input.onSubmit = { [weak self] text in self?.submitFollowup(text) }
+    input.onStop = { [weak self] in self?.stopAnswer() }
+    input.onChange = { [weak self] in self?.updateControls() }
+    thread.focusFallback = { [weak input] in input?.textView }
+    root.addSubview(thread)
+    root.addSubview(input)
     NSLayoutConstraint.activate([
-      stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 16),
-      stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -16),
-      stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 16),
-      stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16),
-      status.widthAnchor.constraint(equalTo: stack.widthAnchor),
-      notice.widthAnchor.constraint(equalTo: stack.widthAnchor),
-      scroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
-      entry.widthAnchor.constraint(equalTo: stack.widthAnchor),
-      controls.widthAnchor.constraint(equalTo: stack.widthAnchor),
-      scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 180),
+      thread.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+      thread.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+      thread.topAnchor.constraint(equalTo: root.topAnchor),
+      thread.bottomAnchor.constraint(equalTo: input.topAnchor, constant: -8),
+      input.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 14),
+      input.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -14),
+      input.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -14),
     ])
     panel = window
-    answerView = text
-    followupField = field
-    statusLabel = status
-    noticeLabel = notice
-    askButton = ask
-    stopButton = stop
-    retryButton = retry
-    copyButton = copy
-    previewButton = preview
+    conversation = thread
+    composer = input
+    thread.beginTurn(question: nil)
     updateControls()
     window.makeKeyAndOrderFront(nil)
     placeShield(below: window)
-    window.makeFirstResponder(text)
-  }
-
-  private func showNotice(_ message: String) {
-    noticeLabel?.stringValue = message
-    noticeLabel?.isHidden = message.isEmpty
+    window.makeFirstResponder(input.textView)
   }
 
   #if SNAPSCREEN_TEST_HOOKS
@@ -451,92 +303,74 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
   private func continueTestExchange() {
     if testFollowupSent { closeAnswer(); return }
     testFollowupSent = true
-    followupField?.stringValue = "SNAPSCREEN_LIVE_FOLLOW_UP"
-    submitFollowup()
+    composer?.setDraft("SNAPSCREEN_LIVE_FOLLOW_UP")
+    composer?.submit()
   }
   #endif
 
   private func updateControls() {
-    askButton?.isEnabled = session.canFollowup
-    followupField?.isEnabled = session.canFollowup
-    stopButton?.isEnabled = session.canStop
-    retryButton?.isEnabled = session.canRetry
-    copyButton?.isEnabled = session.active && !answerText.isEmpty
-    previewButton?.isEnabled = session.active && cropImage != nil
+    conversation?.canRetry = session.canRetry
+    conversation?.actionsEnabled = session.active
+    guard let composer = composer else { return }
+    composer.maximumCharacters = session.maxInputCharacters
+    composer.isRunning = [.accepting, .waiting, .streaming].contains(session.phase)
+    composer.canStop = session.canStop
+    composer.canSubmit = session.canFollowup
   }
 
-  func windowWillReturnFieldEditor(_ sender: NSWindow, to client: Any?) -> Any? {
-    guard let field = followupField, (client as? NSTextField) === field else { return nil }
-    if let editor = followupEditor { return editor }
-    let editor = NSTextView()
-    editor.isFieldEditor = true
-    editor.isRichText = false
-    editor.importsGraphics = false
-    editor.delegate = self
-    followupEditor = editor
-    return editor
-  }
-
-  func textView(_ textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange, replacementString: String?) -> Bool {
-    guard textView === followupEditor else { return true }
-    let current = textView.string as NSString
-    guard affectedCharRange.location != NSNotFound, affectedCharRange.location <= current.length,
-      affectedCharRange.length <= current.length - affectedCharRange.location else { return false }
-    let proposed = current.replacingCharacters(in: affectedCharRange, with: replacementString ?? "")
-    return inputFitsLimits(proposed, maximum: session.maxInputCharacters)
-  }
-
-  @objc private func submitFollowup() {
-    guard let field = followupField else { return }
-    let value = trimProtocolText(field.stringValue)
-    guard let message = session.command("followup", text: value) else { return }
-    field.stringValue = ""
-    statusLabel?.stringValue = "Preparing follow-up…"
+  private func submitFollowup(_ text: String) {
+    guard let message = session.command("followup", text: text) else { return }
+    conversation?.removeAbandonedTurn()
+    conversation?.beginTurn(question: text)
+    composer?.clearDraft()
     updateControls()
     send(message)
     armTimeout(seconds: 30)
   }
 
-  @objc private func stopAnswer() {
+  private func stopAnswer() {
     guard let message = session.command("stop") else { return }
-    statusLabel?.stringValue = "Stopping…"
     updateControls()
     send(message)
   }
 
-  @objc private func retryAnswer() {
+  private func retryAnswer() {
     guard let message = session.command("retry") else { return }
-    statusLabel?.stringValue = "Preparing retry…"
+    conversation?.restartLatestTurn()
     updateControls()
     send(message)
     armTimeout(seconds: 30)
   }
 
-  @objc private func copyAnswer() {
-    guard session.active, !answerText.isEmpty else { return }
-    NSPasteboard.general.clearContents()
-    NSPasteboard.general.setString(answerText, forType: .string)
-  }
-
-  @objc private func showPreview() {
+  private func showPreview() {
     guard session.active, let image = cropImage else { return }
     if let existing = previewPanel { existing.makeKeyAndOrderFront(nil); return }
-    let window = makePanel(title: "SnapScreen — Screenshot preview", size: NSSize(width: 580, height: 420))
-    let imageView = NSImageView()
-    imageView.image = image
-    imageView.imageScaling = .scaleProportionallyUpOrDown
-    imageView.setAccessibilityLabel("Selected screenshot preview")
-    window.contentView = imageView
+    let screen = panel?.screen ?? screenUnderPointer()
+    let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
+    let size = imageWindowContentSize(image.size, backingScale: 1,
+      maximum: NSSize(width: visible.width * 0.8, height: visible.height * 0.8),
+      minimum: NSSize(width: 320, height: 220), chrome: NSSize(width: 24, height: Self.titlebarHeight + 24))
+    let window = makePanel(title: "Screenshot", contentSize: size, minimumSize: NSSize(width: 240, height: 180), media: true)
+    window.setFrame(windowFrame(size: size, beside: nil, in: visible), display: false)
+    let preview = PreviewView(image: image)
+    window.contentView = preview
     previewPanel = window
     window.makeKeyAndOrderFront(nil)
     placeShield(below: window)
+    window.makeFirstResponder(preview)
   }
 
   func windowShouldClose(_ sender: NSWindow) -> Bool {
     if sender === previewPanel {
-      (previewPanel?.contentView as? NSImageView)?.image = nil
+      (previewPanel?.contentView as? PreviewView)?.image = nil
       previewPanel?.delegate = nil
       previewPanel = nil
+      // Keep typing in the conversation rather than returning keys to Chrome.
+      DispatchQueue.main.async { [weak self] in
+        guard let window = self?.panel, window.isVisible else { return }
+        window.makeKeyAndOrderFront(nil)
+        if let shield = self?.shield, let panel = self?.panel { shield.order(.below, relativeTo: panel.windowNumber) }
+      }
       return true
     }
     if session.phase == .expired { terminate(); return false }
@@ -544,13 +378,13 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
     return false
   }
 
-  @objc private func cancel() {
+  private func cancel() {
     guard let message = session.command("cancelled") else { return }
     send(message)
     terminate()
   }
 
-  @objc private func closeAnswer() {
+  private func closeAnswer() {
     guard let message = session.command("close") else { return }
     send(message)
     terminate()
@@ -567,31 +401,16 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
     selectionView?.onConfirm = nil
     selectionView?.onCancel = nil
     selectionView = nil
-    (previewPanel?.contentView as? NSImageView)?.image = nil
+    (previewPanel?.contentView as? PreviewView)?.image = nil
     previewPanel?.contentView = nil
     previewPanel?.delegate = nil
     previewPanel?.close()
     previewPanel = nil
     cropImage = nil
-    answerText = ""
-    answerView?.string = ""
-    answerView?.undoManager?.removeAllActions()
-    answerView = nil
-    followupField?.stringValue = ""
-    followupEditor?.string = ""
-    followupEditor?.undoManager?.removeAllActions()
-    followupEditor?.delegate = nil
-    followupEditor = nil
-    followupField = nil
-    statusLabel?.stringValue = ""
-    statusLabel = nil
-    noticeLabel?.stringValue = ""
-    noticeLabel = nil
-    askButton = nil
-    stopButton = nil
-    retryButton = nil
-    copyButton = nil
-    previewButton = nil
+    conversation?.clear()
+    conversation = nil
+    composer?.clear()
+    composer = nil
     panel?.makeFirstResponder(nil)
     panel?.contentView = nil
   }
@@ -606,17 +425,8 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
     guard let window = panel else { terminate(); return }
     // Retain only a notice in an already-visible panel. There are no retry/reconnect commands,
     // and no screenshot, answer or draft is retained or replayed after connection loss.
-    window.title = "SnapScreen — Session interrupted"
-    let root = NSView()
-    let label = NSTextField(wrappingLabelWithString: "This session was interrupted. Invoke SnapScreen in Chrome again to start a new capture.")
-    label.translatesAutoresizingMaskIntoConstraints = false
-    root.addSubview(label)
-    NSLayoutConstraint.activate([
-      label.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24),
-      label.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24),
-      label.centerYAnchor.constraint(equalTo: root.centerYAnchor),
-    ])
-    window.contentView = root
+    window.title = "SnapScreen — Session ended"
+    window.contentView = SessionEndedView()
   }
 
   private func terminate() {
@@ -674,9 +484,42 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
   private func lowerShield() { shield?.ignoresMouseEvents = true }
 }
 
+/// The only content left after the connection ends: no screenshot, answer or draft.
+final class SessionEndedView: NSView {
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    let icon = NSImageView(image: Theme.symbol("exclamationmark.circle", size: 30, weight: .regular,
+      color: .secondaryLabelColor) ?? NSImage())
+    icon.setAccessibilityElement(false)
+    let title = NSTextField(labelWithString: "Session ended")
+    title.font = .systemFont(ofSize: 15, weight: .semibold)
+    let body = NSTextField(wrappingLabelWithString: "Invoke SnapScreen in Chrome to start a new capture.")
+    body.font = .systemFont(ofSize: 13)
+    body.textColor = .secondaryLabelColor
+    body.alignment = .center
+    let stack = NSStackView(views: [icon, title, body])
+    stack.orientation = .vertical
+    stack.alignment = .centerX
+    stack.spacing = 8
+    stack.setCustomSpacing(12, after: icon)
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    addSubview(stack)
+    NSLayoutConstraint.activate([
+      stack.centerXAnchor.constraint(equalTo: centerXAnchor),
+      stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+      stack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 24),
+      stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -24),
+      body.widthAnchor.constraint(lessThanOrEqualToConstant: 320),
+    ])
+  }
+
+  required init?(coder: NSCoder) { nil }
+}
+
 if CommandLine.arguments.contains("--self-test") {
   do {
-    let count = try runProtocolSelfTests()
+    _ = NSApplication.shared
+    let count = try runProtocolSelfTests() + runAnswerViewTests() + runSelectionViewTests() + runConversationViewTests()
     #if SNAPSCREEN_TEST_HOOKS
     print("Native companion self-test: \(count) checks passed (test hooks build)")
     #else

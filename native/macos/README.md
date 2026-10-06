@@ -1,6 +1,6 @@
 # macOS native companion
 
-Development Phase 2 host for `com.snapscreen.companion`, protocol version 2. Chrome launches
+Development Phase 3 host for `com.snapscreen.companion`, protocol version 3. Chrome launches
 the executable and that process owns its AppKit panels directly. There is one session per
 process, no local server or shared application relay. Every new capture opens a new native
 connection/process; closing the session ends the process.
@@ -15,8 +15,10 @@ npm run test:native
 The output is `native/macos/build/SnapScreenCompanion.app/Contents/MacOS/SnapScreenCompanion`.
 The build targets the current machine's architecture and SDK. It is a local development
 build, without a distribution signing or notarization flow. The self-test command runs
-protocol, frame, PNG bounds, session-lifecycle and fitted-image geometry checks without
-creating windows, installing a host, connecting to Chrome or requesting an API answer.
+protocol, frame, PNG bounds, session-lifecycle, window geometry, selection, answer-rendering,
+conversation, composer and key-release checks without showing windows, installing a host,
+connecting to Chrome or requesting an API answer. Focus tests use hidden windows and do not
+establish Chrome focus preservation.
 
 To register a built host, first find the extension's exact ID in `chrome://extensions` and
 the browser's **Profile Path** in `chrome://version`. Supply the profile's parent user-data
@@ -42,13 +44,21 @@ of the browser under test; temporary test roots isolate the installation from da
 Select native companion mode in extension Settings after installing. Neither this document
 nor building/testing automatically registers a host with the user's Chrome installation.
 
-The UI reuses Phase 1's nonactivating panels, keyboard selection, release-to-submit region
-selection, edge-resize pointer shield, scrolling, Copy, preview and follow-up entry. Stop and
-Retry are included. Notices from the extension, such as removed older turns, appear under the
-status line, and a refused answer's streamed text is cleared as it is in the extension. The full screenshot is fitted inside a native selection window, not
-aligned over the browser viewport. The host discards its full image when selection is sent;
-only the crop subsequently accepted by the extension is available for preview. Answers use
-plain text; fenced code styling and per-block Copy remain Phase 3 work.
+The UI keeps Phase 1's nonactivating panels, release-to-submit region selection, edge-resize
+pointer shield, scrolling, Copy, preview and follow-up entry, and matches the In Chrome
+interface's look and wording. The full screenshot is fitted inside a dark selection window,
+not aligned over the browser viewport; Return places a keyboard selection as it does in Chrome.
+The host discards its full image when selection is sent; only the crop subsequently accepted
+by the extension is shown, as a thumbnail that opens a larger preview. The answer window is a
+conversation: answers in selectable plain text and fenced code (language labels and per-block
+Copy), follow-up questions, inline progress, failures with Retry, and Stopped answers. Turns the
+extension removes for the conversation limit leave the window too, with a notice. A refused
+answer's streamed text is cleared as it is in the extension. The composer's Send button becomes
+Stop while an answer runs. Incremental updates preserve the reading position when scrolled up.
+Escape and Command-W close a window on key release, so the release is not sent to Chrome.
+Sources: `SelectionView.swift`, `ConversationView.swift`, `AnswerView.swift`, `Composer.swift`,
+`Controls.swift` and `Geometry.swift`, wired together in `main.swift`. See the
+[Phase 3 notes](../../docs/native-phase3.md) for keyboard controls and remaining acceptance.
 
 Both transport directions and message variants are bounded and validated. `Protocol.swift`
 defines exact fields; `Session.swift` rejects stale generation and cross-connection/session
@@ -72,6 +82,6 @@ from a file named by `SNAPSCREEN_TEST_SCENARIO_FILE`. `--test-hooks` requires an
 `--bundle`, so the default build never contains them, and `npm run test:native` fails if it does.
 
 The Phase 1 focus observations are bounded evidence, not an undetectability promise. A
-packaged native build still needs the physical interaction matrix repeated. Phase 2 does
+packaged native build still needs the physical interaction matrix repeated. This development build does
 not establish broader macOS/Chrome version support, alternate layouts/input methods or
 multiple-display acceptance.

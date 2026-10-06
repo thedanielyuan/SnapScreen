@@ -11,7 +11,7 @@ const DIST = join(ROOT, 'dist');
 const FIXTURE_URL = 'https://api.anthropic.com/snapscreen-native-live';
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const TEST_API_KEY = 'sk-ant-snapscreen-native-live-only-5D21C8';
-const FIRST_ANSWER = 'SNAPSCREEN_LIVE_FIRST_ANSWER_8B2D41';
+const FIRST_ANSWER = 'SNAPSCREEN_LIVE_FIRST_ANSWER_8B2D41\n\n```python\nprint(2 + 2)\n```\n\nThe result is 4.';
 // Typed by the companion's test hook after the first answer (native/macos/main.swift).
 const FOLLOW_UP = 'SNAPSCREEN_LIVE_FOLLOW_UP';
 const FOLLOW_UP_ANSWER = 'SNAPSCREEN_LIVE_FOLLOW_UP_ANSWER_47C0E9';
@@ -151,6 +151,12 @@ async function run(root) {
       for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
       const dataUrl = `data:image/png;base64,${btoa(binary)}`;
       chrome.tabs.captureVisibleTab = async () => dataUrl;
+      globalThis.__nativeLive.captureCount = 0;
+      const capture = chrome.tabs.captureVisibleTab;
+      chrome.tabs.captureVisibleTab = async () => {
+        globalThis.__nativeLive.captureCount += 1;
+        return capture();
+      };
       await chrome.storage.local.set({ interfaceMode: 'native', apiKey });
     }, { apiKey: TEST_API_KEY });
 
@@ -165,6 +171,75 @@ async function run(root) {
     const trace = () => worker.evaluate(() => globalThis.__nativeLive.trace);
     const types = async () => (await trace()).map(entry => `${entry.direction}:${entry.type}`);
     const hostExited = () => waitFor('the companion process to exit', () => hostPids().length === 0, 5_000);
+
+    const checkOptions = async (expectedStatus, expectReady) => {
+      const requestCount = apiRequests.length;
+      const captureCount = await worker.evaluate(() => globalThis.__nativeLive.captureCount);
+      const options = await context.newPage();
+      try {
+        await options.addInitScript(() => {
+          const trace = [];
+          globalThis.__companionAvailabilityTrace = trace;
+          const connect = chrome.runtime.connectNative.bind(chrome.runtime);
+          chrome.runtime.connectNative = (name) => {
+            trace.push({ direction: 'connect', name });
+            const port = connect(name);
+            const post = port.postMessage.bind(port);
+            port.postMessage = (message) => {
+              trace.push({ direction: 'out', message });
+              return post(message);
+            };
+            port.onMessage.addListener(message => trace.push({ direction: 'in', message }));
+            const disconnect = port.disconnect.bind(port);
+            port.disconnect = () => {
+              trace.push({ direction: 'end' });
+              disconnect();
+            };
+            return port;
+          };
+          const capture = chrome.tabs.captureVisibleTab.bind(chrome.tabs);
+          chrome.tabs.captureVisibleTab = (...args) => {
+            trace.push({ direction: 'capture' });
+            return capture(...args);
+          };
+        });
+        await options.goto(`chrome-extension://${extensionId}/${manifest.options_page}`);
+        await options.locator('#save-settings').waitFor({ state: 'visible' });
+        await waitFor('Settings hydration', () => options.locator('#save-settings').isEnabled());
+        if ((await options.evaluate(() => globalThis.__companionAvailabilityTrace)).length
+          || hostPids().length) throw new Error('Opening Settings launched the companion.');
+
+        await options.locator('#check-companion').click();
+        await waitFor(`Settings availability: ${expectedStatus}`, async () =>
+          (await options.locator('#companion-status').textContent()).includes(expectedStatus));
+        await waitFor('the Settings check to finish', () => options.locator('#check-companion').isEnabled());
+        const availabilityTrace = await options.evaluate(() => globalThis.__companionAvailabilityTrace);
+        const outgoing = availabilityTrace.filter(entry => entry.direction === 'out');
+        const incoming = availabilityTrace.filter(entry => entry.direction === 'in');
+        if (availabilityTrace.filter(entry => entry.direction === 'connect').length !== 1
+          || outgoing.length !== 1 || outgoing[0].message.type !== 'hello'
+          || JSON.stringify(Object.keys(outgoing[0].message).sort()) !== JSON.stringify(['connectionId', 'type', 'version'])
+          || availabilityTrace.filter(entry => entry.direction === 'end').length !== 1
+          || availabilityTrace.some(entry => entry.direction === 'capture')
+          || apiRequests.length !== requestCount
+          || await worker.evaluate(() => globalThis.__nativeLive.captureCount) !== captureCount) {
+          throw new Error('Settings availability check did more than one handshake.');
+        }
+        if (expectReady && (incoming.length !== 1 || incoming[0].message.type !== 'ready'
+          || incoming[0].message.connectionId !== outgoing[0].message.connectionId
+          || incoming[0].message.version !== outgoing[0].message.version)) {
+          throw new Error('Settings availability check did not complete a matching version handshake.');
+        }
+        if (!expectReady && incoming.length) throw new Error('A missing host responded to the Settings check.');
+        await hostExited();
+      } finally {
+        await options.close();
+        await page.bringToFront();
+      }
+    };
+
+    // Settings checks a real host only on request and closes it before any capture or API call.
+    await checkOptions('Companion is installed and responding.', true);
 
     // 1. A complete unattended exchange: select, answer, follow-up, answer, close.
     await writeFile(scenarioFile, 'exchange');
@@ -184,7 +259,9 @@ async function run(root) {
     }
     if (apiRequests.length !== 2 || apiRequests.some(request => request.key !== TEST_API_KEY)
       || !apiRequests[0].body.includes('"type":"image"')
-      || !apiRequests[1].body.includes(FOLLOW_UP) || !apiRequests[1].body.includes(FIRST_ANSWER)) {
+      || !apiRequests[1].body.includes(FOLLOW_UP)
+      || !JSON.parse(apiRequests[1].body).messages.some(message => message.role === 'assistant'
+        && message.content === FIRST_ANSWER)) {
       throw new Error('The exchange did not make the expected background API requests.');
     }
     await hostExited();
@@ -205,6 +282,21 @@ async function run(root) {
 
     // 3. A missing host reports an installation problem on the badge without any page UI.
     if (installer('--remove').status !== 0) throw new Error('Host registration removal failed.');
+    await checkOptions('Companion not found for this browser', false);
+    // Settings matches Chrome's exact errors for the two common registration mistakes.
+    const registration = join(profile, 'NativeMessagingHosts', 'com.snapscreen.companion.json');
+    const register = (path, origin) => writeFile(registration, JSON.stringify({ name: 'com.snapscreen.companion',
+      description: 'SnapScreen live-test fixture', path, type: 'stdio', allowed_origins: [origin] }));
+    await register(hostExecutable, 'chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/');
+    await checkOptions('registered for a different extension ID', false);
+    // Chrome reports a missing executable as not found, and an unexecutable one as unstartable.
+    await register(join(root, 'missing-companion'), `chrome-extension://${extensionId}/`);
+    await checkOptions('Companion not found for this browser', false);
+    const unexecutable = join(root, 'unexecutable-companion');
+    await writeFile(unexecutable, '#!/bin/sh\n', { mode: 0o644 });
+    await register(unexecutable, `chrome-extension://${extensionId}/`);
+    await checkOptions("couldn't start it", false);
+    await rm(registration);
     await invoke();
     const title = await waitFor('the missing-host badge', () => worker.evaluate(async () => {
       const tabId = globalThis.__nativeLive.tabId;
@@ -244,5 +336,6 @@ if (failure) {
   process.exit(1);
 }
 process.stdout.write('Native companion live test passed: Chrome-launched handshake, 10 MB capture, unattended '
-  + 'selection, streamed answer, follow-up, Close and host exit; navigation expiry; missing-host badge.\n');
+  + 'selection, streamed answer, follow-up, Close and host exit; navigation expiry; missing-host badge; '
+  + 'explicit Settings availability checks with installed, missing, moved, foreign-origin and unstartable hosts.\n');
 process.exit(0);

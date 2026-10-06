@@ -9,6 +9,20 @@ import {
   saveSettings,
 } from '../lib/storage';
 import { MEGABYTE, countTextCharacters } from '../lib/request-limits';
+import { checkCompanionAvailability } from './companion-availability';
+import type { CompanionAvailability } from './companion-availability';
+
+const COMPANION_STATUS: Record<CompanionAvailability, string> = {
+  ready: 'Companion is installed and responding.',
+  unsupported: 'The companion runs only on macOS. Choose In Chrome on this device.',
+  unavailable: "Couldn't check the companion. Follow the setup guide, then try again.",
+  missing: 'Companion not found for this browser, or its app has moved. Build and register it with the setup guide, then check again.',
+  forbidden: "The companion is registered for a different extension ID. Register it again with this extension's ID.",
+  'failed-to-start': "Chrome found the companion but couldn't start it. Rebuild it with the setup guide, then check again.",
+  incompatible: "This companion doesn't match the extension. Rebuild and register it, then check again.",
+  disconnected: 'The companion closed before responding. Check its installation, then try again.',
+  'timed-out': "The companion didn't respond within 5 seconds. Check its installation, then try again.",
+};
 
 export async function initializeOptionsPage(doc: Document = document): Promise<void> {
   const form = doc.getElementById('settings-form') as HTMLFormElement;
@@ -19,6 +33,9 @@ export async function initializeOptionsPage(doc: Document = document): Promise<v
   const saveBtn = doc.getElementById('save-settings') as HTMLButtonElement;
   const promptInput = doc.getElementById('default-prompt') as HTMLTextAreaElement;
   const interfaceModeInput = doc.getElementById('interface-mode') as HTMLSelectElement;
+  const checkCompanionBtn = doc.getElementById('check-companion') as HTMLButtonElement;
+  const companionStatus = doc.getElementById('companion-status') as HTMLParagraphElement;
+  const companionSection = doc.getElementById('companion-section');
   const maxInputCharactersInput = doc.getElementById('max-input-characters') as HTMLInputElement;
   const maxScreenshotMegabytesInput = doc.getElementById('max-screenshot-megabytes') as HTMLInputElement;
   const maxScreenshotDimensionInput = doc.getElementById('max-screenshot-dimension') as HTMLInputElement;
@@ -34,6 +51,7 @@ export async function initializeOptionsPage(doc: Document = document): Promise<v
   let removalPending = false;
   let savePending = false;
   let testPending = false;
+  let companionCheckPending = false;
   let pendingSave: Promise<void> | null = null;
   let removalEpoch = 0;
   let settingsEpoch = 0;
@@ -212,6 +230,34 @@ export async function initializeOptionsPage(doc: Document = document): Promise<v
     void chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
   });
 
+  function showCompanionStatus(state: 'checking' | 'ready' | 'error', message: string): void {
+    companionStatus.dataset.state = state;
+    companionStatus.textContent = message;
+  }
+
+  // Companion details matter only once that interface is chosen, before or after saving.
+  function updateCompanionSection(): void {
+    if (companionSection) companionSection.hidden = interfaceModeInput.value !== 'native';
+  }
+
+  interfaceModeInput.addEventListener('change', updateCompanionSection);
+
+  checkCompanionBtn.addEventListener('click', async () => {
+    if (companionCheckPending) return;
+    companionCheckPending = true;
+    checkCompanionBtn.disabled = true;
+    showCompanionStatus('checking', 'Checking companion…');
+    try {
+      const availability = await checkCompanionAvailability();
+      showCompanionStatus(availability === 'ready' ? 'ready' : 'error', COMPANION_STATUS[availability]);
+    } catch {
+      showCompanionStatus('error', COMPANION_STATUS.unavailable);
+    } finally {
+      companionCheckPending = false;
+      checkCompanionBtn.disabled = false;
+    }
+  });
+
   promptInput.value = DEFAULT_PROMPT;
   interfaceModeInput.value = 'extension';
   setLimitInputs(DEFAULT_LIMITS);
@@ -293,6 +339,7 @@ export async function initializeOptionsPage(doc: Document = document): Promise<v
       apiKeyInput.value = settings.apiKey;
       promptInput.value = settings.defaultPrompt || DEFAULT_PROMPT;
       interfaceModeInput.value = interfaceMode;
+      updateCompanionSection();
       setLimitInputs(settings.limits);
       hasStoredApiKey = !!settings.apiKey;
     } catch (error) {
