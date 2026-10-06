@@ -85,72 +85,126 @@ func splitNativeAnswerSegments(_ text: String) -> [NativeAnswerSegment] {
   return segments
 }
 
-private final class AnswerDocumentView: NSView {
-  override var isFlipped: Bool { true }
-}
 
-private final class AnswerTextView: NSTextView {
+/// Selectable, read-only text. Tab moves focus instead of being swallowed by the text view, and
+/// typing while reading continues in the conversation's composer.
+class ReadOnlyTextView: NSTextView {
   override func keyDown(with event: NSEvent) {
     if event.keyCode == 48 && event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
       if event.modifierFlags.contains(.shift) { window?.selectPreviousKeyView(self) }
       else { window?.selectNextKeyView(self) }
       return
     }
+    if Self.isTyping(event), let target = typingTarget, window?.makeFirstResponder(target) == true {
+      // Redeliver through normal dispatch so the composer's input method sees the key.
+      NSApp.postEvent(event, atStart: true)
+      return
+    }
     super.keyDown(with: event)
+  }
+
+  /// Printable input without Command or Control; arrows and other function keys keep their meaning.
+  static func isTyping(_ event: NSEvent) -> Bool {
+    guard event.type == .keyDown, event.modifierFlags.intersection([.command, .control]).isEmpty,
+      let characters = event.characters, !characters.isEmpty else { return false }
+    return characters.unicodeScalars.allSatisfy {
+      !CharacterSet.controlCharacters.contains($0) && !(0xF700...0xF8FF).contains($0.value)
+    }
+  }
+
+  private var typingTarget: NSView? {
+    var view = superview
+    while let current = view {
+      if let conversation = current as? ConversationView { return conversation.focusFallback?() }
+      view = current.superview
+    }
+    return nil
+  }
+
+  func configureReadOnly(font: NSFont) {
+    isEditable = false
+    isSelectable = true
+    isRichText = false
+    importsGraphics = false
+    allowsUndo = false
+    drawsBackground = false
+    textContainerInset = .zero
+    textContainer?.lineFragmentPadding = 0
+    textContainer?.widthTracksTextView = false
+    textContainer?.heightTracksTextView = false
+    isHorizontallyResizable = false
+    isVerticallyResizable = false
+    isAutomaticLinkDetectionEnabled = false
+    isAutomaticDataDetectionEnabled = false
+    self.font = font
+    textColor = .labelColor
+  }
+
+  /// Lays out for `width` and returns the text's height.
+  func measuredHeight(for width: CGFloat) -> CGFloat {
+    textContainer?.containerSize = NSSize(width: max(1, width), height: CGFloat.greatestFiniteMagnitude)
+    guard let container = textContainer, let manager = layoutManager else { return 0 }
+    manager.ensureLayout(for: container)
+    return ceil(max(manager.usedRect(for: container).height, manager.extraLineFragmentRect.maxY))
   }
 }
 
-/// Each segment retains its text view while streaming, so selections, keyboard focus and copy
+enum AnswerStyle {
+  static let proseFont = NSFont.systemFont(ofSize: 14)
+  static let codeFont = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)
+  static let proseParagraph: NSParagraphStyle = {
+    let style = NSMutableParagraphStyle()
+    style.lineSpacing = 3
+    return style
+  }()
+  static let codeParagraph: NSParagraphStyle = {
+    let style = NSMutableParagraphStyle()
+    style.lineSpacing = 2
+    return style
+  }()
+}
+
+/// Each segment keeps its text view while streaming, so selections, keyboard focus and copy
 /// targets survive incremental snapshots. Text storage contains literal strings, never markup.
 final class AnswerSegmentView: NSView {
   private(set) var segment: NativeAnswerSegment
-  let textView: NSTextView = AnswerTextView(frame: .zero)
-  private(set) var copyButton: NSButton?
+  let textView = ReadOnlyTextView(frame: .zero)
+  private(set) var copyButton: ActionButton?
   private var languageLabel: NSTextField?
   private var measuredWidth: CGFloat = -1
   private var measuredHeight: CGFloat = 0
   private var textNeedsLayout = true
   private let contentFont: NSFont
+  private let paragraph: NSParagraphStyle
+  /// A streaming code block has no Copy control until its fence closes or the answer ends.
+  var answerIsFinal = false { didSet { updateCopyVisibility() } }
   var copyEnabled = true { didSet { copyButton?.isEnabled = copyEnabled } }
   override var isFlipped: Bool { true }
 
+  static let codeHeaderHeight: CGFloat = 32
+  static let codeInset: CGFloat = 12
+
   init(segment: NativeAnswerSegment) {
     self.segment = segment
-    contentFont = segment.isCode ? .monospacedSystemFont(ofSize: 13, weight: .regular) : .systemFont(ofSize: 14)
+    contentFont = segment.isCode ? AnswerStyle.codeFont : AnswerStyle.proseFont
+    paragraph = segment.isCode ? AnswerStyle.codeParagraph : AnswerStyle.proseParagraph
     super.init(frame: .zero)
-    textView.isEditable = false
-    textView.isSelectable = true
-    textView.isRichText = false
-    textView.importsGraphics = false
-    textView.allowsUndo = false
-    textView.drawsBackground = false
-    textView.textContainerInset = .zero
-    textView.textContainer?.lineFragmentPadding = 0
-    textView.textContainer?.widthTracksTextView = false
-    textView.textContainer?.heightTracksTextView = false
-    textView.isHorizontallyResizable = false
-    textView.isVerticallyResizable = false
-    textView.isAutomaticLinkDetectionEnabled = false
-    textView.isAutomaticDataDetectionEnabled = false
-    textView.font = contentFont
-    textView.textColor = .labelColor
+    textView.configureReadOnly(font: contentFont)
+    textView.defaultParagraphStyle = paragraph
     textView.setAccessibilityLabel(segment.isCode ? "Code" : "Answer text")
     addSubview(textView)
     if segment.isCode {
-      wantsLayer = true
-      layer?.cornerRadius = 8
       let label = NSTextField(labelWithString: "")
-      label.font = .systemFont(ofSize: 11, weight: .medium)
+      label.font = .systemFont(ofSize: 11.5, weight: .medium)
       label.textColor = .secondaryLabelColor
       label.lineBreakMode = .byTruncatingTail
+      label.setAccessibilityElement(false)
       addSubview(label)
       languageLabel = label
-      let copy = CompanionButton(title: "Copy code", target: self, action: #selector(copyCode))
-      copy.bezelStyle = .rounded
-      copy.setAccessibilityLabel("Copy code block")
+      let copy = ActionButton(symbol: "doc.on.doc", title: "Copy", label: "Copy code", target: self,
+        action: #selector(copyCode))
       addSubview(copy)
       copyButton = copy
-      updateColors()
     }
     update(segment)
   }
@@ -175,8 +229,8 @@ final class AnswerSegmentView: NSView {
       }
       // Direct text-storage mutations do not inherit NSTextView's typing attributes when the
       // storage is empty. Always attach the intended font and dynamic color to inserted text.
-      textView.textStorage?.setAttributes([.font: contentFont, .foregroundColor: NSColor.labelColor],
-        range: changedRange)
+      textView.textStorage?.setAttributes([.font: contentFont, .foregroundColor: NSColor.labelColor,
+        .paragraphStyle: paragraph], range: changedRange)
       // Plain NSTextView normalizes its storage to its own uniform typing attributes when
       // selection changes. Update those defaults too, including after an empty first insertion.
       textView.font = contentFont
@@ -189,44 +243,53 @@ final class AnswerSegmentView: NSView {
       textNeedsLayout = true
     }
     if case .code(_, let language, _) = value {
-      languageLabel?.stringValue = language.isEmpty ? "Code" : language
+      languageLabel?.stringValue = language.isEmpty ? "code" : language
       textView.setAccessibilityLabel(language.isEmpty ? "Code block" : "\(language) code block")
-      copyButton?.setAccessibilityLabel(language.isEmpty ? "Copy code block" : "Copy \(language) code block")
+      let label = language.isEmpty ? "Copy code" : "Copy \(language) code"
+      copyButton?.toolTip = label
+      copyButton?.setAccessibilityLabel(label)
     }
+    updateCopyVisibility()
+  }
+
+  private func updateCopyVisibility() {
+    guard case .code(_, _, let complete) = segment else { return }
+    copyButton?.isHidden = !(complete || answerIsFinal)
   }
 
   func height(for width: CGFloat) -> CGFloat {
-    let inset: CGFloat = segment.isCode ? 12 : 0
+    let inset: CGFloat = segment.isCode ? Self.codeInset : 0
     let contentWidth = max(1, width - inset * 2)
     if measuredWidth != width || textNeedsLayout {
-      textView.textContainer?.containerSize = NSSize(width: contentWidth, height: CGFloat.greatestFiniteMagnitude)
-      if let container = textView.textContainer, let manager = textView.layoutManager {
-        manager.ensureLayout(for: container)
-        measuredHeight = max(20, ceil(max(manager.usedRect(for: container).height, manager.extraLineFragmentRect.maxY)))
-      }
+      measuredHeight = max(segment.isCode ? 16 : 18, textView.measuredHeight(for: contentWidth))
       measuredWidth = width
       textNeedsLayout = false
     }
-    let header: CGFloat = segment.isCode ? 38 : 0
-    textView.frame = NSRect(x: inset, y: header, width: contentWidth, height: measuredHeight)
+    guard segment.isCode else {
+      textView.frame = NSRect(x: 0, y: 0, width: contentWidth, height: measuredHeight)
+      return measuredHeight
+    }
+    let header = Self.codeHeaderHeight
+    textView.frame = NSRect(x: inset, y: header + 10, width: contentWidth, height: measuredHeight)
     if let button = copyButton {
-      button.frame = NSRect(x: max(inset, width - inset - 92), y: 6, width: 92, height: 26)
-      languageLabel?.frame = NSRect(x: inset, y: 12, width: max(1, width - inset * 2 - 104), height: 16)
+      let size = button.buttonSize
+      button.frame = NSRect(x: width - size.width - 4, y: (header - size.height) / 2, width: size.width, height: size.height)
+      languageLabel?.frame = NSRect(x: inset, y: (header - 16) / 2, width: max(1, width - inset - size.width - 12), height: 16)
     }
-    return header + measuredHeight + (segment.isCode ? 12 : 0)
+    return header + 10 + measuredHeight + 12
   }
 
-  override func viewDidChangeEffectiveAppearance() {
-    super.viewDidChangeEffectiveAppearance()
-    updateColors()
-  }
-
-  private func updateColors() {
-    effectiveAppearance.performAsCurrentDrawingAppearance {
-      layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-      layer?.borderColor = NSColor.separatorColor.cgColor
-      layer?.borderWidth = 1
-    }
+  override func draw(_ dirtyRect: NSRect) {
+    guard segment.isCode else { return }
+    let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 8, yRadius: 8)
+    Theme.codeBackground.setFill()
+    shape.fill()
+    NSColor.separatorColor.setStroke()
+    shape.lineWidth = 1
+    shape.stroke()
+    // System separator colours carry their own alpha; replacing it would darken the line.
+    NSColor.separatorColor.setFill()
+    NSRect(x: 1, y: Self.codeHeaderHeight - 1, width: bounds.width - 2, height: 1).fill()
   }
 
   /// No streaming/render path writes the clipboard. This action runs only from the explicit button.
@@ -234,6 +297,7 @@ final class AnswerSegmentView: NSView {
     guard copyEnabled, case .code(let code, _, _) = segment else { return }
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(code, forType: .string)
+    copyButton?.showFeedback(symbol: "checkmark", title: "Copied", label: "Copied", color: .systemGreen)
   }
 
   func clear() {
@@ -241,50 +305,31 @@ final class AnswerSegmentView: NSView {
     textView.string = ""
     textView.undoManager?.removeAllActions()
     languageLabel?.stringValue = ""
+    copyButton?.cancelFeedback()
     copyButton?.isEnabled = false
     copyButton?.target = nil
     copyButton?.action = nil
   }
 }
 
-/// Native answer surface; owns scrolling, literal text selection and explicit per-code copying.
+/// One answer's prose and fenced code, laid out by its turn in the conversation.
 final class AnswerView: NSView {
-  let scrollView = NSScrollView(frame: .zero)
-  private let document = AnswerDocumentView(frame: .zero)
   private(set) var segmentViews: [AnswerSegmentView] = []
-  private var renderedText = ""
-  private var layingOut = false
+  private(set) var renderedText = ""
+  private(set) var isFinal = false
   var copyEnabled = true { didSet { segmentViews.forEach { $0.copyEnabled = copyEnabled } } }
-  var focusTarget: NSView { segmentViews.first?.textView ?? self }
-  override var acceptsFirstResponder: Bool { true }
-  override var canBecomeKeyView: Bool { segmentViews.isEmpty && !isHiddenOrHasHiddenAncestor }
+  override var isFlipped: Bool { true }
+  static let segmentSpacing: CGFloat = 12
 
-  override init(frame frameRect: NSRect) {
-    super.init(frame: frameRect)
-    scrollView.frame = bounds
-    scrollView.autoresizingMask = [.width, .height]
-    scrollView.hasVerticalScroller = true
-    scrollView.hasHorizontalScroller = false
-    scrollView.autohidesScrollers = true
-    scrollView.borderType = .bezelBorder
-    scrollView.drawsBackground = true
-    scrollView.backgroundColor = .textBackgroundColor
-    scrollView.documentView = document
-    scrollView.setAccessibilityLabel("Answer")
-    addSubview(scrollView)
-  }
-
-  required init?(coder: NSCoder) { nil }
-
-  override func viewDidMoveToWindow() {
-    super.viewDidMoveToWindow()
-    window?.recalculateKeyViewLoop()
-  }
-
-  func render(_ text: String) {
-    guard !text.utf16.elementsEqual(renderedText.utf16) else { return }
-    let position = scrollView.contentView.bounds.origin
-    let followBottom = isAtBottom && !hasSelection
+  /// Returns whether segment views were added or removed, which changes the key-view loop.
+  @discardableResult
+  func render(_ text: String, final: Bool) -> Bool {
+    let finalChanged = final != isFinal
+    isFinal = final
+    guard !text.utf16.elementsEqual(renderedText.utf16) else {
+      if finalChanged { segmentViews.forEach { $0.answerIsFinal = final } }
+      return false
+    }
     let segments = splitNativeAnswerSegments(text)
     var commonCount = 0
     while commonCount < min(segments.count, segmentViews.count),
@@ -293,79 +338,45 @@ final class AnswerView: NSView {
       commonCount += 1
     }
     let structureChanged = commonCount != segmentViews.count || commonCount != segments.count
-    for view in segmentViews.dropFirst(commonCount) { view.clear(); view.removeFromSuperview() }
+    for view in segmentViews.dropFirst(commonCount) {
+      if let responder = window?.firstResponder as? NSView, responder.isDescendant(of: view) {
+        window?.makeFirstResponder(nil)
+      }
+      view.clear()
+      view.removeFromSuperview()
+    }
     segmentViews.removeSubrange(commonCount...)
     for segment in segments.dropFirst(commonCount) {
       let view = AnswerSegmentView(segment: segment)
       view.copyEnabled = copyEnabled
-      document.addSubview(view)
+      addSubview(view)
       segmentViews.append(view)
     }
+    segmentViews.forEach { $0.answerIsFinal = final }
     renderedText = text
-    layoutSegments()
-    restoreScroll(position, followBottom: followBottom)
-    if structureChanged { window?.recalculateKeyViewLoop() }
-    if window?.firstResponder === self, let textView = segmentViews.first?.textView {
-      window?.makeFirstResponder(textView)
+    return structureChanged
+  }
+
+  func height(for width: CGFloat) -> CGFloat {
+    var y: CGFloat = 0
+    for (index, view) in segmentViews.enumerated() {
+      if index > 0 { y += Self.segmentSpacing }
+      let height = view.height(for: width)
+      view.frame = NSRect(x: 0, y: y, width: width, height: height)
+      y += height
     }
+    return y
   }
 
-  override func keyDown(with event: NSEvent) {
-    if event.keyCode == 48 && event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
-      if event.modifierFlags.contains(.shift) { window?.selectPreviousKeyView(self) }
-      else { window?.selectNextKeyView(self) }
-      return
-    }
-    // Before the first snapshot there is no text to scroll; retain this accessible focus target.
-    if segmentViews.isEmpty && [115, 116, 119, 121, 123, 124, 125, 126].contains(event.keyCode) { return }
-    super.keyDown(with: event)
-  }
-
-  private var hasSelection: Bool { segmentViews.contains { $0.textView.selectedRange().length > 0 } }
-  private var isAtBottom: Bool {
-    document.frame.height - scrollView.contentView.bounds.maxY <= 24
-  }
-
-  override func layout() {
-    let position = scrollView.contentView.bounds.origin
-    let followBottom = isAtBottom && !hasSelection
-    super.layout()
-    layoutSegments()
-    restoreScroll(position, followBottom: followBottom)
-  }
-
-  private func layoutSegments() {
-    guard !layingOut else { return }
-    layingOut = true
-    defer { layingOut = false }
-    scrollView.tile()
-    let width = max(1, scrollView.contentSize.width)
-    var y: CGFloat = 12
-    for view in segmentViews {
-      let height = view.height(for: max(1, width - 24))
-      view.frame = NSRect(x: 12, y: y, width: max(1, width - 24), height: height)
-      y += height + 12
-    }
-    document.frame = NSRect(x: 0, y: 0, width: width, height: max(scrollView.contentSize.height, y))
-  }
-
-  private func restoreScroll(_ position: NSPoint, followBottom: Bool) {
-    let maximum = max(0, document.frame.height - scrollView.contentSize.height)
-    scrollView.contentView.scroll(to: NSPoint(x: 0, y: followBottom ? maximum : min(position.y, maximum)))
-    scrollView.reflectScrolledClipView(scrollView.contentView)
-  }
+  var hasSelection: Bool { segmentViews.contains { $0.textView.selectedRange().length > 0 } }
 
   func clear() {
-    if let responder = window?.firstResponder as? NSView,
-      segmentViews.contains(where: { responder.isDescendant(of: $0) }) {
-      window?.makeFirstResponder(self)
+    if let responder = window?.firstResponder as? NSView, responder.isDescendant(of: self) {
+      window?.makeFirstResponder(nil)
     }
     for view in segmentViews { view.clear(); view.removeFromSuperview() }
     segmentViews.removeAll()
     renderedText = ""
-    document.frame = NSRect(origin: .zero, size: scrollView.contentSize)
-    scrollView.contentView.scroll(to: .zero)
-    scrollView.reflectScrolledClipView(scrollView.contentView)
-    window?.recalculateKeyViewLoop()
+    isFinal = false
   }
 }

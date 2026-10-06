@@ -19,8 +19,9 @@ const executable = resolve(bundle, 'Contents/MacOS/SnapScreenCompanion');
 await mkdir(resolve(bundle, 'Contents/MacOS'), { recursive: true });
 const result = spawnSync('xcrun', ['swiftc', '-swift-version', '5', '-O', '-framework', 'AppKit',
   ...(testHooks ? ['-D', 'SNAPSCREEN_TEST_HOOKS'] : []),
-  ...['Protocol.swift', 'Session.swift', 'Controls.swift', 'AnswerView.swift', 'SelectionView.swift',
-    'SelfTests.swift', 'AnswerViewTests.swift', 'SelectionViewTests.swift', 'main.swift'].map(file => resolve(root, file)),
+  ...['Protocol.swift', 'Session.swift', 'Geometry.swift', 'Controls.swift', 'AnswerView.swift',
+    'ConversationView.swift', 'Composer.swift', 'SelectionView.swift', 'SelfTests.swift', 'AnswerViewTests.swift',
+    'SelectionViewTests.swift', 'ConversationViewTests.swift', 'main.swift'].map(file => resolve(root, file)),
   '-o', executable], { stdio: 'inherit' });
 if (result.error) throw result.error;
 if (result.status !== 0) process.exit(result.status ?? 1);
@@ -34,7 +35,7 @@ await writeFile(resolve(bundle, 'Contents/Info.plist'), `<?xml version="1.0" enc
   <key>CFBundleDisplayName</key><string>${name}</string>
   <key>CFBundleExecutable</key><string>SnapScreenCompanion</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleVersion</key><string>2</string>
+  <key>CFBundleVersion</key><string>3</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
 </dict></plist>

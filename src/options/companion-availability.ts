@@ -10,9 +10,18 @@ export type CompanionAvailability =
   | 'unsupported'
   | 'unavailable'
   | 'missing'
+  | 'forbidden'
+  | 'failed-to-start'
   | 'incompatible'
   | 'disconnected'
   | 'timed-out';
+
+// Chrome's fixed connection errors for the common setup mistakes. Other text is never shown.
+const CHROME_ERRORS = new Map<string, CompanionAvailability>([
+  ['Specified native messaging host not found.', 'missing'],
+  ['Access to the specified native messaging host is forbidden.', 'forbidden'],
+  ['Failed to start native messaging host.', 'failed-to-start'],
+]);
 
 /** Explicit Settings diagnostic: no capture, session, credentials, or API request. */
 export async function checkCompanionAvailability(): Promise<CompanionAvailability> {
@@ -53,7 +62,7 @@ export async function checkCompanionAvailability(): Promise<CompanionAvailabilit
     function disconnected(): void {
       // Acknowledge Chrome's error, but never render host or transport error text.
       const error = chrome.runtime.lastError?.message;
-      finish(error === 'Specified native messaging host not found.' ? 'missing' : 'disconnected');
+      finish((error && CHROME_ERRORS.get(error)) || 'disconnected');
     }
 
     try {

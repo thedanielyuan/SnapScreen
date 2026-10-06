@@ -106,6 +106,9 @@ describe('Settings companion availability check', () => {
 
   it.each([
     ['Specified native messaging host not found.', 'missing'],
+    ['Access to the specified native messaging host is forbidden.', 'forbidden'],
+    ['Failed to start native messaging host.', 'failed-to-start'],
+    ['constructor', 'disconnected'],
     ['Native host has exited. sk-ant-do-not-render', 'disconnected'],
     [undefined, 'disconnected'],
   ])('acknowledges Chrome errors without exposing their text', async (message, outcome) => {

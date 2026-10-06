@@ -239,7 +239,7 @@ async function run(root) {
     };
 
     // Settings checks a real host only on request and closes it before any capture or API call.
-    await checkOptions('Companion connected and is compatible.', true);
+    await checkOptions('Companion is installed and responding.', true);
 
     // 1. A complete unattended exchange: select, answer, follow-up, answer, close.
     await writeFile(scenarioFile, 'exchange');
@@ -282,7 +282,21 @@ async function run(root) {
 
     // 3. A missing host reports an installation problem on the badge without any page UI.
     if (installer('--remove').status !== 0) throw new Error('Host registration removal failed.');
-    await checkOptions('Companion not found for this browser.', false);
+    await checkOptions('Companion not found for this browser', false);
+    // Settings matches Chrome's exact errors for the two common registration mistakes.
+    const registration = join(profile, 'NativeMessagingHosts', 'com.snapscreen.companion.json');
+    const register = (path, origin) => writeFile(registration, JSON.stringify({ name: 'com.snapscreen.companion',
+      description: 'SnapScreen live-test fixture', path, type: 'stdio', allowed_origins: [origin] }));
+    await register(hostExecutable, 'chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/');
+    await checkOptions('registered for a different extension ID', false);
+    // Chrome reports a missing executable as not found, and an unexecutable one as unstartable.
+    await register(join(root, 'missing-companion'), `chrome-extension://${extensionId}/`);
+    await checkOptions('Companion not found for this browser', false);
+    const unexecutable = join(root, 'unexecutable-companion');
+    await writeFile(unexecutable, '#!/bin/sh\n', { mode: 0o644 });
+    await register(unexecutable, `chrome-extension://${extensionId}/`);
+    await checkOptions("couldn't start it", false);
+    await rm(registration);
     await invoke();
     const title = await waitFor('the missing-host badge', () => worker.evaluate(async () => {
       const tabId = globalThis.__nativeLive.tabId;
@@ -323,5 +337,5 @@ if (failure) {
 }
 process.stdout.write('Native companion live test passed: Chrome-launched handshake, 10 MB capture, unattended '
   + 'selection, streamed answer, follow-up, Close and host exit; navigation expiry; missing-host badge; '
-  + 'explicit Settings availability checks with installed and missing hosts.\n');
+  + 'explicit Settings availability checks with installed, missing, moved, foreign-origin and unstartable hosts.\n');
 process.exit(0);

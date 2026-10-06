@@ -44,8 +44,10 @@ credentials and interface preferences, between regular and incognito use in the 
 This is a development companion, not a signed/notarized macOS release. The fitted frozen-image
 surface does not promise alignment with Chrome's content area. Phase 1's measured observations
 do not establish the completed companion's interaction behavior; modifier keys can still reach
-page handlers. The package retains the web-accessible resources required by its default
-injected mode. See [setup and remaining verification](native-phase2.md) and the
+page handlers. Escape and Command-W close a companion window when the key is released, so that
+release is not delivered to Chrome after the window disappears. The package retains the
+web-accessible resources required by its default injected mode. See
+[setup and remaining verification](native-phase2.md) and the
 [Phase 1 results](native-phase1-results.md).
 
 ## Local native interaction experiment

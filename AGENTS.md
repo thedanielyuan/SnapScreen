@@ -147,6 +147,10 @@ daily check from the repo's Actions tab.
   accurate. `nativeMessaging` stays required because a running worker's
   `chrome.runtime.connectNative` doesn't update when the permission changes at runtime; read
   `docs/chrome-web-store.md` before releasing.
+- `scripts/native-companion-build.mjs` compiles an explicit list of Swift files, so add new
+  companion sources there. Its panels never activate the app, so Chrome stays the active app:
+  close windows on key release (`CompanionPanel`), and give tracking areas `.activeAlways`.
+  The companion mirrors the In Chrome interface's wording and conversation behavior.
 - `npm run dev` doesn't work. The manifest's strict CSP blocks the crxjs dev server, so
   extension pages hang on its loading screen. It also overwrites `dist/` with a dev build that
   fails `test:browser` until you run `npm run build` again.

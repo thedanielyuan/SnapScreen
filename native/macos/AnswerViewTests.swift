@@ -50,7 +50,7 @@ func runAnswerViewTests() throws -> Int {
   // Initialize AppKit without opening, ordering or activating a window. Never touch the clipboard.
   _ = NSApplication.shared
   let view = AnswerView(frame: NSRect(x: 0, y: 0, width: 480, height: 240))
-  view.render("**Literal** <b>text</b>\n```swift\nlet n = 1")
+  view.render("**Literal** <b>text</b>\n```swift\nlet n = 1", final: false)
   try check(view.segmentViews.count == 2, "separate prose and code views")
   let prose = view.segmentViews[0]
   let block = view.segmentViews[1]
@@ -68,103 +68,53 @@ func runAnswerViewTests() throws -> Int {
     }
     return matches
   }
-  let proseFont = NSFont.systemFont(ofSize: 14)
-  let codeFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-  try check(hasTextAttributes(prose.textView, font: proseFont), "initial prose has system font and dynamic foreground")
-  try check(hasTextAttributes(block.textView, font: codeFont), "initial code has monospaced font and dynamic foreground")
-  try check(block.copyButton?.isEnabled == true && block.copyButton?.target === block,
-    "copy action belongs to its code block")
+  try check(hasTextAttributes(prose.textView, font: AnswerStyle.proseFont), "initial prose has system font and dynamic foreground")
+  try check(hasTextAttributes(block.textView, font: AnswerStyle.codeFont), "initial code has monospaced font and dynamic foreground")
+  try check(block.copyButton?.target === block, "copy action belongs to its code block")
+  try check(block.copyButton?.isHidden == true, "a streaming code block offers no partial Copy")
   block.textView.setSelectedRange(NSRange(location: 4, length: 1))
-  view.render("**Literal** <b>text</b>\n```swift\nlet n = 12\n```\nNext.")
+  view.render("**Literal** <b>text</b>\n```swift\nlet n = 12\n```\nNext.", final: false)
   try check(view.segmentViews[0] === prose && view.segmentViews[1] === block, "streaming reuses existing views")
   try check(block.textView.selectedRange() == NSRange(location: 4, length: 1), "streaming preserves text selection")
   try check(block.segment == .code("let n = 12", language: "swift", complete: true), "copy source updates with snapshot")
-  try check(hasTextAttributes(prose.textView, font: proseFont) && hasTextAttributes(block.textView, font: codeFont),
+  try check(block.copyButton?.isHidden == false && block.copyButton?.isEnabled == true, "a closed fence offers Copy")
+  try check(hasTextAttributes(prose.textView, font: AnswerStyle.proseFont) && hasTextAttributes(block.textView, font: AnswerStyle.codeFont),
     "streamed append preserves font and dynamic foreground on every character")
+  view.render("```js\nopen(", final: false)
+  try check(view.segmentViews[0].copyButton?.isHidden == true, "an unclosed fence hides Copy while streaming")
+  view.render("```js\nopen(", final: true)
+  try check(view.segmentViews[0].copyButton?.isHidden == false, "a stopped answer's unclosed fence offers Copy")
   block.appearance = NSAppearance(named: .darkAqua)
-  block.viewDidChangeEffectiveAppearance()
   var darkContrast = false
   block.effectiveAppearance.performAsCurrentDrawingAppearance {
     let foreground = NSColor.labelColor.usingColorSpace(.deviceRGB)!
-    let background = NSColor.windowBackgroundColor.usingColorSpace(.deviceRGB)!
+    let background = Theme.codeBackground.usingColorSpace(.deviceRGB)!
     darkContrast = foreground.redComponent > background.redComponent + 0.5
   }
-  try check(darkContrast && hasTextAttributes(block.textView, font: codeFont),
-    "dark appearance retains a legible dynamic label foreground")
-  try check(block.layer?.backgroundColor != nil && block.layer?.borderWidth == 1,
-    "code container has initialized background and border")
-  try check(view.focusTarget === prose.textView && block.copyButton?.acceptsFirstResponder == true,
-    "answer and copy expose keyboard focus targets")
+  try check(darkContrast, "dark appearance keeps code legible on its background")
   view.copyEnabled = false
-  try check(block.copyButton?.isEnabled == false, "copy disabled by session controls")
-  view.render("```\n\u{00E9}\n```")
+  view.render("```\n\u{00E9}\n```", final: true)
   let canonicalBlock = view.segmentViews[0]
-  view.render("```\ne\u{0301}\n```")
+  view.render("```\ne\u{0301}\n```", final: true)
   try check(canonicalBlock.textView.string.utf16.elementsEqual("e\u{0301}".utf16),
     "equivalent Unicode snapshots preserve exact code units for copying")
-  try check(hasTextAttributes(canonicalBlock.textView, font: codeFont),
+  try check(hasTextAttributes(canonicalBlock.textView, font: AnswerStyle.codeFont),
     "replacement content retains monospaced font and dynamic foreground")
   try check(canonicalBlock.copyButton?.isEnabled == false, "new blocks inherit disabled copy state")
-
+  let height = view.height(for: 400)
+  try check(height > 0 && canonicalBlock.frame.width == 400, "segments lay out to the answer width")
   view.clear()
-  let longText = (1...100).map { "Line \($0) of the answer." }.joined(separator: "\n")
-  view.render(longText)
-  let scroll = view.scrollView
-  try check(scroll.documentView!.frame.height > scroll.contentSize.height, "long answer scrolls")
-  scroll.contentView.scroll(to: NSPoint(x: 0, y: 90))
-  view.render(longText + "\nNew streamed line.")
-  try check(abs(scroll.contentView.bounds.minY - 90) < 1, "streaming preserves reader's scroll position")
-  scroll.contentView.scroll(to: NSPoint(x: 0,
-    y: scroll.documentView!.frame.height - scroll.contentSize.height))
-  view.render(longText + "\nNew streamed line.\nAnother line.")
-  try check(abs(scroll.contentView.bounds.maxY - scroll.documentView!.frame.height) < 1,
-    "streaming follows bottom when reader is there")
-  view.clear()
-  try check(view.segmentViews.isEmpty && view.focusTarget === view && scroll.contentView.bounds.origin == .zero,
-    "clear removes answer and resets scroll")
-  try check(block.textView.string.isEmpty && block.segment.text.isEmpty && block.copyButton?.target == nil,
-    "removed views release text and copy targets")
-  view.render("Replacement answer")
-  try check(view.segmentViews.count == 1 && view.segmentViews[0].textView.string == "Replacement answer",
-    "fresh generation renders after clear")
-  view.clear()
-  let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 240),
-    styleMask: [.borderless], backing: .buffered, defer: false)
-  window.contentView = view
-  view.copyEnabled = true
-  window.makeFirstResponder(view.focusTarget)
-  try check(window.firstResponder === view, "empty answer accepts keyboard focus")
-  view.render("First snapshot")
-  try check(window.firstResponder === view.segmentViews[0].textView,
-    "first snapshot transfers answer-owned focus to selectable text")
-  view.render("First snapshot\n```swift\nlet value = 1\n```")
-  let nextCopy = view.segmentViews[1].copyButton!
-  let firstText = view.segmentViews[0].textView
-  var reachable: [NSView] = []
-  var next = firstText.nextValidKeyView
-  for _ in 0..<8 {
-    guard let value = next, value !== firstText else { break }
-    reachable.append(value)
-    next = value.nextValidKeyView
-  }
-  try check(reachable.contains(where: { $0 === nextCopy }), "dynamic key loop includes code Copy without Full Keyboard Access")
-  try check(reachable.contains(where: { $0 === view.segmentViews[1].textView }), "dynamic key loop includes selectable code")
-  try check(!reachable.contains(where: { $0 === view }), "populated answer omits redundant empty focus target from Tab loop")
-  nextCopy.isEnabled = false
-  try check(!nextCopy.canBecomeKeyView, "disabled Copy is omitted from keyboard traversal")
-  view.clear()
-  try check(window.firstResponder === view, "clear returns removed text focus to stable empty answer")
-  view.render("First snapshot")
-  let unrelatedControl = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
-  view.addSubview(unrelatedControl)
-  window.makeFirstResponder(unrelatedControl)
-  let previousResponder = window.firstResponder
-  view.render("First snapshot continues")
-  try check(window.firstResponder === previousResponder, "streaming does not steal focus from an input")
-  view.clear()
-  try check(window.firstResponder === previousResponder, "clear does not steal focus from an input")
-  window.makeFirstResponder(nil)
-  window.contentView = nil
-  view.clear()
+  try check(view.segmentViews.isEmpty && view.renderedText.isEmpty, "clear removes answer")
+  try check(canonicalBlock.textView.string.isEmpty && canonicalBlock.segment.text.isEmpty &&
+    canonicalBlock.copyButton?.target == nil, "removed views release text and copy targets")
+  try check(ReadOnlyTextView.isTyping(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+    timestamp: 0, windowNumber: 0, context: nil, characters: "a", charactersIgnoringModifiers: "a",
+    isARepeat: false, keyCode: 0)!), "printable keys continue in the composer")
+  try check(!ReadOnlyTextView.isTyping(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.command],
+    timestamp: 0, windowNumber: 0, context: nil, characters: "c", charactersIgnoringModifiers: "c",
+    isARepeat: false, keyCode: 8)!), "Command shortcuts stay with the selected text")
+  try check(!ReadOnlyTextView.isTyping(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+    timestamp: 0, windowNumber: 0, context: nil, characters: "\u{F701}", charactersIgnoringModifiers: "\u{F701}",
+    isARepeat: false, keyCode: 125)!), "arrow keys stay with the selected text")
   return count
 }

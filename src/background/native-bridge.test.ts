@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExtensionToNativeMessage, NativeToExtensionMessage } from '../lib/native-protocol';
-import { MAX_NATIVE_ANSWER_LENGTH, NATIVE_HOST_NAME } from '../lib/native-protocol';
+import { MAX_NATIVE_ANSWER_LENGTH, NATIVE_HOST_NAME, NATIVE_PROTOCOL_VERSION } from '../lib/native-protocol';
 import { NativeBridge } from './native-bridge';
 
 const connectionId = 'connection-1';
-const base = { version: 2, connectionId } as const;
+const base = { version: NATIVE_PROTOCOL_VERSION, connectionId } as const;
 const session = { ...base, sessionId: 'session-1', requestId: 'request-1' };
 const ready = { ...base, type: 'ready' };
 

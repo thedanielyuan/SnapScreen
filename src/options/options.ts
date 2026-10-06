@@ -13,13 +13,15 @@ import { checkCompanionAvailability } from './companion-availability';
 import type { CompanionAvailability } from './companion-availability';
 
 const COMPANION_STATUS: Record<CompanionAvailability, string> = {
-  ready: 'Companion connected and is compatible. Check completed without starting a snip.',
-  unsupported: 'The companion is available only on macOS. Choose In Chrome to snip on this device.',
-  unavailable: 'Could not check the companion. Follow the setup guide to check its installation and registration, then try again.',
-  missing: 'Companion not found for this browser. Build and register it using the setup guide, then check again.',
-  incompatible: 'Companion returned an incompatible or invalid handshake. Rebuild and register the companion that matches this extension, then check again.',
-  disconnected: 'Companion stopped before the check finished. It may be incompatible or have crashed. Check its installation, then try again.',
-  'timed-out': 'Companion did not respond within five seconds. Check its installation, then try again.',
+  ready: 'Companion is installed and responding.',
+  unsupported: 'The companion runs only on macOS. Choose In Chrome on this device.',
+  unavailable: "Couldn't check the companion. Follow the setup guide, then try again.",
+  missing: 'Companion not found for this browser, or its app has moved. Build and register it with the setup guide, then check again.',
+  forbidden: "The companion is registered for a different extension ID. Register it again with this extension's ID.",
+  'failed-to-start': "Chrome found the companion but couldn't start it. Rebuild it with the setup guide, then check again.",
+  incompatible: "This companion doesn't match the extension. Rebuild and register it, then check again.",
+  disconnected: 'The companion closed before responding. Check its installation, then try again.',
+  'timed-out': "The companion didn't respond within 5 seconds. Check its installation, then try again.",
 };
 
 export async function initializeOptionsPage(doc: Document = document): Promise<void> {
@@ -33,6 +35,7 @@ export async function initializeOptionsPage(doc: Document = document): Promise<v
   const interfaceModeInput = doc.getElementById('interface-mode') as HTMLSelectElement;
   const checkCompanionBtn = doc.getElementById('check-companion') as HTMLButtonElement;
   const companionStatus = doc.getElementById('companion-status') as HTMLParagraphElement;
+  const companionSection = doc.getElementById('companion-section');
   const maxInputCharactersInput = doc.getElementById('max-input-characters') as HTMLInputElement;
   const maxScreenshotMegabytesInput = doc.getElementById('max-screenshot-megabytes') as HTMLInputElement;
   const maxScreenshotDimensionInput = doc.getElementById('max-screenshot-dimension') as HTMLInputElement;
@@ -227,15 +230,28 @@ export async function initializeOptionsPage(doc: Document = document): Promise<v
     void chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
   });
 
+  function showCompanionStatus(state: 'checking' | 'ready' | 'error', message: string): void {
+    companionStatus.dataset.state = state;
+    companionStatus.textContent = message;
+  }
+
+  // Companion details matter only once that interface is chosen, before or after saving.
+  function updateCompanionSection(): void {
+    if (companionSection) companionSection.hidden = interfaceModeInput.value !== 'native';
+  }
+
+  interfaceModeInput.addEventListener('change', updateCompanionSection);
+
   checkCompanionBtn.addEventListener('click', async () => {
     if (companionCheckPending) return;
     companionCheckPending = true;
     checkCompanionBtn.disabled = true;
-    companionStatus.textContent = 'Checking companion…';
+    showCompanionStatus('checking', 'Checking companion…');
     try {
-      companionStatus.textContent = COMPANION_STATUS[await checkCompanionAvailability()];
+      const availability = await checkCompanionAvailability();
+      showCompanionStatus(availability === 'ready' ? 'ready' : 'error', COMPANION_STATUS[availability]);
     } catch {
-      companionStatus.textContent = COMPANION_STATUS.unavailable;
+      showCompanionStatus('error', COMPANION_STATUS.unavailable);
     } finally {
       companionCheckPending = false;
       checkCompanionBtn.disabled = false;
@@ -323,6 +339,7 @@ export async function initializeOptionsPage(doc: Document = document): Promise<v
       apiKeyInput.value = settings.apiKey;
       promptInput.value = settings.defaultPrompt || DEFAULT_PROMPT;
       interfaceModeInput.value = interfaceMode;
+      updateCompanionSection();
       setLimitInputs(settings.limits);
       hasStoredApiKey = !!settings.apiKey;
     } catch (error) {

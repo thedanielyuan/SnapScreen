@@ -14,8 +14,10 @@ const OPTIONS_MARKUP = `
       <option value="extension">In Chrome</option>
       <option value="native">macOS companion</option>
     </select>
-    <button type="button" id="check-companion">Check companion</button>
-    <p id="companion-status" role="status" aria-live="polite">Companion availability has not been checked.</p>
+    <section id="companion-section" hidden>
+      <button type="button" id="check-companion">Check companion</button>
+      <p id="companion-status" role="status" aria-live="polite">Checking briefly starts the companion.</p>
+    </section>
     <details id="advanced-settings">
       <summary>Advanced</summary>
       <input id="max-input-characters" type="number" />
@@ -182,6 +184,7 @@ describe('options API-key controls', () => {
     await initializeOptionsPage(document);
     const interfaceMode = document.getElementById('interface-mode') as HTMLSelectElement;
     expect(interfaceMode.value).toBe('native');
+    expect(document.getElementById('companion-section')!.hidden).toBe(false);
 
     interfaceMode.value = 'extension';
     document.getElementById('settings-form')!.dispatchEvent(
@@ -204,8 +207,11 @@ describe('options API-key controls', () => {
     await initializeOptionsPage(document);
     const interfaceMode = document.getElementById('interface-mode') as HTMLSelectElement;
     const checkButton = document.getElementById('check-companion') as HTMLButtonElement;
+    const section = document.getElementById('companion-section')!;
+    expect(section.hidden).toBe(true);
     interfaceMode.value = 'native';
     interfaceMode.dispatchEvent(new Event('change'));
+    expect(section.hidden).toBe(false);
     expect(chrome.runtime.getPlatformInfo).not.toHaveBeenCalled();
     expect(chrome.runtime.connectNative).not.toHaveBeenCalled();
 
@@ -216,7 +222,11 @@ describe('options API-key controls', () => {
       expect(checkButton.disabled).toBe(false);
       expect(document.getElementById('companion-status')?.textContent).toContain('only on macOS');
     });
+    expect(document.getElementById('companion-status')?.dataset.state).toBe('error');
     expect(interfaceMode.value).toBe('native');
+    interfaceMode.value = 'extension';
+    interfaceMode.dispatchEvent(new Event('change'));
+    expect(section.hidden).toBe(true);
     expect(chrome.runtime.connectNative).not.toHaveBeenCalled();
     expect(setSettings).not.toHaveBeenCalled();
     expect(chrome.tabs.create).not.toHaveBeenCalled();
@@ -237,7 +247,8 @@ describe('options API-key controls', () => {
     resolvePlatform({ os: 'mac', arch: 'arm64', nacl_arch: 'arm' });
     await vi.waitFor(() => {
       expect(checkButton.disabled).toBe(false);
-      expect(document.getElementById('companion-status')?.textContent).toContain('Could not check the companion');
+      expect(document.getElementById('companion-status')?.textContent).toContain("Couldn't check the companion");
+      expect(document.getElementById('companion-status')?.dataset.state).toBe('error');
     });
     expect(status.textContent).toBe('API key works.');
     expect(document.body.textContent).not.toContain('sk-ant-sensitive');
