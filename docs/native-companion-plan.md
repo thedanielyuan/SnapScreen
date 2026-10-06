@@ -1,6 +1,6 @@
 # SnapScreen native companion implementation plan
 
-Status: Phase 1 complete; Phase 2 bridge and Phase 3 native interface implemented as an experimental explicit mode. Initial platform: macOS. Updated 6 October 2026.
+Status: Phase 1 complete; Phase 2 bridge and Phase 3 native interface implemented as an experimental explicit mode. Phase 4 packaging and verification in progress. Initial platform: macOS. Updated 6 October 2026.
 
 Phase 1 outcome: the final prototype keeps page focus and visibility and keeps native clicks,
 drags, scrolling, resizing, and typed characters away from the page in the tested setups.
@@ -9,8 +9,10 @@ key handlers: the activation shortcut's ⌥⇧ and ⌘ used for native shortcuts
 the user accepted that limitation and approved Phase 2 on the narrowed claim; see
 [Phase 1 results](native-phase1-results.md). Phase 2 adds the extension bridge and development
 companion described in [native setup and implementation notes](native-phase2.md). Phase 3 adds
-[native interface controls and availability checks](native-phase3.md). Phase 4 packaged physical
-acceptance and signing remain. The new implementation has no additional focus-preservation claim until those interactions are measured.
+[native interface controls and availability checks](native-phase3.md). Phase 4 now includes
+[production packaging, managed installation, and packaged integration checks](native-phase4.md).
+Physical acceptance and actual signing/notarization remain. The new implementation has no
+additional focus-preservation claim until those interactions are measured.
 
 Build a small desktop companion that displays the snipping overlay and answer window outside
 the webpage. Keep screenshot capture, API credentials, and Claude requests in the Chrome
@@ -241,15 +243,18 @@ remain absent from web-accessible resources.
 
 ## Phase 4 Verify and distribute
 
+Implementation status and commands: [Phase 4 distribution notes](native-phase4.md). Automated
+packaged transport checks and a physical observation runner are available; unperformed physical
+trials and credentialed release checks remain explicit gates.
+
 Add native-protocol tests, mocked extension-to-companion integration coverage, crop-mapping
 tests, and native interaction tests. Extend the browser suite to assert that native mode
 never injects its page host or opens a workspace, including failure paths. Preserve all
 existing confidentiality tests for any retained extension-only mode.
 
-Add a macOS CI job that builds the Swift/AppKit target and runs native protocol validation,
-message-framing, and session-lifecycle tests. The current Ubuntu job and npm checks cover the
-extension only. Define reproducible native build/test commands when introducing the target,
-and document and run them in that job.
+The macOS CI job builds the Swift/AppKit target and runs native protocol validation,
+message-framing, session-lifecycle, real Chrome-launched, and packaged-host tests alongside
+the Ubuntu extension checks. Keep the reproducible commands documented and run them in CI.
 
 Add an integration fixture that installs a test host and performs a real `connectNative()`
 launch, version handshake, streaming exchange, and disconnect. Use a stable test extension ID,
@@ -258,8 +263,10 @@ browser's actual user-data directory and remove the fixture afterward; do not de
 developer's Chrome installation. Chrome, Chrome for Testing, and Chromium can use different
 host registration locations.
 [Native host registration](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging#native-messaging-host-location)
-`npm run test:native-live` provides this fixture for the development companion, using a
-test-hooks build that confirms its own selection; the packaged app still needs it.
+`npm run test:native-live` provides the full streamed exchange with a test-hooks build that
+confirms its own selection. `npm run test:native-packaged` exercises the extracted production
+archive and installer through real Chrome connections; physical selection and streaming
+acceptance of that app use the separate observation runner.
 
 Repeat the Phase 1 observation matrix against the packaged app and built extension. Include
 navigation during capture, expired permissions, missing hosts, incompatible versions,

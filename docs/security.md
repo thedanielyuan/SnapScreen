@@ -41,7 +41,11 @@ answers cannot cross sessions or browsing contexts. Chrome shares local storage,
 credentials and interface preferences, between regular and incognito use in the same profile.
 [Chrome incognito behavior](https://developer.chrome.com/docs/extensions/reference/manifest/incognito)
 
-This is a development companion, not a signed/notarized macOS release. The fitted frozen-image
+This is an experimental companion, not yet a signed/notarized macOS release. Phase 4 packages
+include a separate user-local installer. It writes the app, a receipt of its version/digest and
+browser registration paths, and exact-origin native host manifests. These files contain no
+screenshots, API credentials, or conversation content. There is no automatic updater. See
+[packaging and removal](native-phase4.md). The fitted frozen-image
 surface does not promise alignment with Chrome's content area. Phase 1's measured observations
 do not establish the completed companion's interaction behavior; modifier keys can still reach
 page handlers. Escape and Command-W close a companion window when the key is released, so that

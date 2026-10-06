@@ -20,8 +20,10 @@ npm run build                        # tsc --noEmit && vite build → dist/ (nev
 npm run test:browser                 # Playwright smoke test of dist/; mocked API, no key needed
 npm run package                      # zip the built dist/ into release/ for the Chrome Web Store
 npm run build:native                 # macOS: build the companion app into native/macos/build/
-npm run test:native                  # macOS: companion self-tests and installer test
+npm run test:native                  # macOS: companion self-tests and installer/package tests
 npm run test:native-live             # macOS: real Chrome-launched companion sessions; needs dist/
+npm run package:native               # macOS: unsigned production app archive for local acceptance
+npm run test:native-packaged         # macOS: extracted archive + installed host; needs package and dist/
 ```
 
 Before finishing any change, run lint, typecheck, test, build, then test:browser (under 10 s in
@@ -32,6 +34,12 @@ windows for about 10 s. CI (`.github/workflows/ci.yml`) runs the same steps plus
 `npm audit --audit-level=moderate`, which can turn red from a new upstream advisory with no code
 change, and a macOS job runs the native checks. There is no formatter; match the
 surrounding style (2-space indent, single quotes, semicolons, trailing commas).
+
+For native build, packaging, or installer changes, also run package:native then
+test:native-packaged. The latter uses the shipped installer and production app in disposable
+browser roots. Physical focus acceptance uses `experiment:native-packaged -- --app <path>`;
+read `docs/native-phase4-acceptance.md` before collecting evidence. Signing/notarization is
+explicit opt-in (`docs/native-phase4.md`); default packages are unsigned local acceptance builds.
 
 Unit and smoke tests mock the API, so only `src/lib/anthropic.live.test.ts` catches the real API
 rejecting a model, beta header, or request field. `npm test` skips it unless

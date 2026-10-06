@@ -11,7 +11,8 @@ if (result.stdout.includes('test hooks')) {
   console.error('The production companion build contains live-test hooks. Run npm run build:native.');
   process.exit(1);
 }
-const installerTest = fileURLToPath(new URL('./native-companion-install.node-test.mjs', import.meta.url));
-const installer = spawnSync(process.execPath, ['--test', installerTest], { stdio: 'inherit' });
+const testFiles = ['native-companion-install.node-test.mjs', 'native-companion-package.node-test.mjs',
+  'native-companion-acceptance.node-test.mjs'].map(file => fileURLToPath(new URL(file, import.meta.url)));
+const installer = spawnSync(process.execPath, ['--test', ...testFiles], { stdio: 'inherit' });
 if (installer.error) throw installer.error;
 process.exit(installer.status ?? 1);

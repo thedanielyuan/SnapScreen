@@ -10,9 +10,9 @@ native bridge, Phase 3 interface, and local development build. It requires separ
 and an explicit selection in Settings. See [setup and current limitations](docs/native-phase2.md),
 the [implementation plan](docs/native-companion-plan.md), and
 [Phase 1 interaction results](docs/native-phase1-results.md). See
-[Phase 3 controls](docs/native-phase3.md). Packaged physical acceptance, signing, and distribution
-remain future work; modifier keys may still reach the
-page.
+[Phase 3 controls](docs/native-phase3.md) and [Phase 4 packaging and acceptance](docs/native-phase4.md).
+Unsigned local packages and install/upgrade/uninstall tooling are available. Physical acceptance
+and a signed, notarized release remain pending; modifier keys may still reach the page.
 
 ## License
 

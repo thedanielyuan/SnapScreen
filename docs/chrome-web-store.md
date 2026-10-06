@@ -6,8 +6,11 @@ handling change.
 
 The package now includes an explicit, experimental macOS companion mode alongside the default
 **In Chrome** interface. The declarations below cover its `nativeMessaging` permission and
-local recipient. The companion is a separate development installation; signing, distribution,
-and final physical interaction acceptance remain future work. This change does not mean a
+local recipient. The companion has an unsigned local acceptance package and separate
+install/upgrade/uninstall tooling. An actual signed/notarized release and final physical
+interaction acceptance remain pending; see [Phase 4](native-phase4.md). The installer stores
+only app/version/checksum and registration metadata locally, with no content or credentials.
+This change does not mean a
 store release has been submitted. The isolated
 [Phase 1 prototype](../experiments/native-phase1/README.md) remains a separate unpacked test
 extension and must not be submitted as the store package.
