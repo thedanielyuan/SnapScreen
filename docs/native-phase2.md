@@ -76,18 +76,30 @@ Navigation or source-tab closure before crop acceptance invalidates selection. A
 acceptance, the captured conversation and follow-ups remain usable even if that tab navigates
 or closes. The companion has no recapture command: invoke the extension again on the desired
 source for a new snip. Every native session owns its own connection and host process; there is
-no shared app relay or additional local IPC endpoint. Regular and incognito contexts are
-separate, while Chrome shares the stored key and settings within a profile.
+no shared app relay or additional local IPC endpoint. Sessions from incognito windows also get
+their own connection and process, while Chrome shares the stored key and settings within a
+profile.
 
-Up to four native sessions can remain open in each extension context. Close an existing
-window before starting a fifth. An unfinished selection expires after two minutes.
+Up to four native sessions can remain open at once, across regular and incognito windows.
+Close an existing window before starting a fifth. An unfinished selection expires after two
+minutes.
 
 Missing hosts, failed handshakes, unsupported versions, invalid transport messages, and
 connection loss end the affected session. An extension badge reports failures without
 injecting a page toast, opening a workspace or Settings, or switching interfaces. Inspect the
-toolbar action's title for the error text. Reinstallation or reconnection requires a fresh
-extension invocation and never replays a capture or API request. A worker restart also loses
-the authoritative session; native windows cannot resume it.
+toolbar action's title for the error text; the badge and title clear after five seconds. A
+companion that is missing, incompatible, or silent during the handshake reports that it could
+not start; losing it after the capture reports that the session ended. Navigation, a newer
+invocation on the same tab, and the selection timeout end an unfinished selection without a
+badge. Reinstallation or reconnection requires a fresh extension invocation and never replays
+a capture or API request. A worker restart also loses the authoritative session; native
+windows cannot resume it.
+
+Chrome ends a host process about two seconds after its connection closes, so the companion's
+interruption notice is only brief; the badge is the lasting signal. When older turns are
+removed to stay within the conversation limit, the companion shows a notice under its status
+line. As in the In Chrome interface, text streamed before a refusal is discarded rather than
+kept as an answer or sent back with a follow-up.
 
 ## Data boundary
 
@@ -101,7 +113,7 @@ timeout, keepalive, and error sanitization. See the
 
 ## Verification and remaining work
 
-Run the extension checks in order, because the smoke test reads the freshly built `dist/`:
+Run the checks in order, because the smoke and live tests read the freshly built `dist/`:
 
 ```bash
 npm run lint
@@ -109,21 +121,29 @@ npm run typecheck
 npm test
 npm run build
 npm run test:browser
+npm run build:native
 npm run test:native
+npm run test:native-live
 ```
 
-Phase 2 automated verification covers the local macOS build and native protocol/framing and
-lifecycle self-tests, plus the built extension's mocked browser flow. These checks use no API
-key and do not install a host in your existing browser. A real Chrome-launched companion
-session has not been verified for this implementation; the browser smoke test substitutes a
-mock native port. A paid live API test is not needed for a bridge-only change and must still
-be approved before it is run.
+`test:native` runs the companion's protocol, framing, and lifecycle self-tests and the
+installer test. `test:native-live` launches Playwright's Chromium with a disposable profile,
+registers a test build of the companion only in that profile, and runs real Chrome-launched
+sessions against mocked answers. It covers the handshake, a 10 MB capture, a selection, a
+streamed answer, a follow-up, Close and host exit, navigation before acceptance, and a missing
+host. Companion windows appear on screen for a few seconds. That test build (`--test-hooks`)
+confirms the default selection and asks the follow-up by itself. `npm run build:native` never
+compiles those hooks, and `test:native` fails if the registered build contains them. None of
+these checks uses an API key or registers a host in your own browser. The browser smoke test
+still substitutes a mock native port for its page-isolation checks. A paid live API test is
+not needed for a bridge-only change and must still be approved before it is run.
 
-Phase 3 must finish and polish the native UI, including accessibility and any remaining
-selection, preview, or per-code-block controls. Phase 4 must exercise the real browser/host
-launch in a disposable profile, repeat the physical interaction matrix against the completed
-companion, and cover concurrent profiles/incognito, restarts, navigation, timeouts, and
-oversized or malformed messages. Automated DOM assertions cannot establish native focus
+Because the live test confirms selections programmatically, it establishes transport and
+lifecycle behavior, not native focus behavior. Phase 3 must finish and polish the native UI,
+including accessibility and any remaining selection, preview, or per-code-block controls.
+Phase 4 must repeat the physical interaction matrix against the completed companion and cover
+concurrent profiles/incognito, restarts, timeouts, and oversized or malformed messages from a
+real host. Automated DOM assertions cannot establish native focus
 behavior. Signing, notarization, upgrade/uninstall distribution, and cross-platform support
 are not provided by this development build. The retained extension mode still needs its
 web-accessible frame and icon resources.

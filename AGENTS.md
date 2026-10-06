@@ -19,12 +19,18 @@ npx vitest run src/lib/crop.test.ts  # one file; add -t "<test name>" for one te
 npm run build                        # tsc --noEmit && vite build → dist/ (never hand-edit)
 npm run test:browser                 # Playwright smoke test of dist/; mocked API, no key needed
 npm run package                      # zip the built dist/ into release/ for the Chrome Web Store
+npm run build:native                 # macOS: build the companion app into native/macos/build/
+npm run test:native                  # macOS: companion self-tests and installer test
+npm run test:native-live             # macOS: real Chrome-launched companion sessions; needs dist/
 ```
 
 Before finishing any change, run lint, typecheck, test, build, then test:browser (under 10 s in
-total). The smoke test runs whatever is in `dist/`, so it needs a fresh build. CI
-(`.github/workflows/ci.yml`) runs the same steps plus `npm audit --audit-level=moderate`, which
-can turn red from a new upstream advisory with no code change. There is no formatter; match the
+total). The smoke test runs whatever is in `dist/`, so it needs a fresh build. If you touch the
+native companion (`native/`, `src/lib/native-protocol.ts`, `src/background/native-*.ts`), also
+run build:native, test:native, then test:native-live on macOS; the live test shows companion
+windows for about 10 s. CI (`.github/workflows/ci.yml`) runs the same steps plus
+`npm audit --audit-level=moderate`, which can turn red from a new upstream advisory with no code
+change, and a macOS job runs the native checks. There is no formatter; match the
 surrounding style (2-space indent, single quotes, semicolons, trailing commas).
 
 Unit and smoke tests mock the API, so only `src/lib/anthropic.live.test.ts` catches the real API
@@ -45,7 +51,10 @@ daily check from the repo's Actions tab.
 - `src/ui/` — extension-origin iframe that renders all injected UI
 - `src/workspace/` — extension tab that shows the capture when a page rejects injection; reuses
   the content script's capture controller and rendering code
-- `src/options/` — options page: API key, default prompt, limits
+- `src/options/` — options page: API key, default prompt, limits, interface choice
+- `native/macos/` — Swift/AppKit companion for the experimental native interface. Chrome launches
+  one host process per session over Native Messaging; `src/background/native-session.ts` owns
+  the session, crop, conversation, and API calls
 - `src/lib/` — shared: Anthropic client, system prompt, crop math, storage, limits, protocols
 
 ## Conventions
@@ -59,6 +68,10 @@ daily check from the repo's Actions tab.
   workspace relays `messages.ts` traffic, so new variants there also need a case in
   `workspace-protocol.ts`: `isControllerMessage` (`CsToBgMessage`) or `isControllerEvent`
   (`BgToCsMessage`).
+- The native protocol is validated on both sides: `src/lib/native-protocol.ts` and
+  `native/macos/Protocol.swift`, with the companion's state machine in `Session.swift`. Every
+  variant has exact keys, so change both sides and their tests (`native-protocol.test.ts`,
+  `SelfTests.swift`) together.
 - Surface failures as `AnthropicError(code, friendlyMessage)`. Provider/API text must pass
   through `sanitizeProviderMessage` in `src/lib/anthropic.ts` (key redaction, control-char
   strip, length cap) before it can reach the UI.
@@ -83,6 +96,9 @@ daily check from the repo's Actions tab.
   events, or attributes.
 - `src/workspace/workspace.html` must never be web-accessible. It gets its capture by claiming
   a one-time capability over a runtime port.
+- The native companion receives screenshots, crops, answers, and follow-ups, never the API key,
+  system prompt, or API history. Its test hooks (`SNAPSCREEN_TEST_HOOKS`) compile only into the
+  live test's build; `test:native` fails if the default build has them.
 - `npm run test:browser` enforces parts of this (hostile-page probe, closed shadow root,
   non-web-accessible workspace). `docs/security.md` is the full contract; update it when you
   change a boundary.
@@ -125,6 +141,11 @@ daily check from the repo's Actions tab.
 - Answers are plain text except fenced code blocks: the prompt asks for fences,
   `src/lib/code-blocks.ts` parses them, and the result panel gives each block its own Copy
   button. Change the prompt's formatting rules and the parser together.
+- In native mode the badge title is the only lasting failure signal: Chrome ends a host about
+  2 s after its port closes, and badges clear after 5 s. Keep `native-session.ts` messages
+  accurate. `nativeMessaging` stays required because a running worker's
+  `chrome.runtime.connectNative` doesn't update when the permission changes at runtime; read
+  `docs/chrome-web-store.md` before releasing.
 - `npm run dev` doesn't work. The manifest's strict CSP blocks the crxjs dev server, so
   extension pages hang on its loading screen. It also overwrites `dist/` with a dev build that
   fails `test:browser` until you run `npm run build` again.

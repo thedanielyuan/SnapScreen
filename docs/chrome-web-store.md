@@ -12,6 +12,15 @@ store release has been submitted. The isolated
 [Phase 1 prototype](../experiments/native-phase1/README.md) remains a separate unpacked test
 extension and must not be submitted as the store package.
 
+Decide before the next store submission whether the package ships native mode.
+`nativeMessaging` adds the install warning "Communicate with cooperating native applications".
+Chrome disables an installed extension when an update adds a warning, until the user accepts
+it, so publishing this package would disable SnapScreen for existing users until they approve.
+The permission stays required rather than optional because a running service worker's
+`chrome.runtime.connectNative` did not update when the permission changed at runtime (tested in
+Chromium 149). A grant from Settings might therefore not take effect until the worker restarts.
+Alternatives are a separate native build or a reworked optional-permission flow.
+
 ## Single purpose
 
 > SnapScreen answers questions about part of the current tab: the user snips a region of the

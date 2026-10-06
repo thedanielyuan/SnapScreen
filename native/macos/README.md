@@ -44,7 +44,8 @@ nor building/testing automatically registers a host with the user's Chrome insta
 
 The UI reuses Phase 1's nonactivating panels, keyboard selection, release-to-submit region
 selection, edge-resize pointer shield, scrolling, Copy, preview and follow-up entry. Stop and
-Retry are included. The full screenshot is fitted inside a native selection window, not
+Retry are included. Notices from the extension, such as removed older turns, appear under the
+status line, and a refused answer's streamed text is cleared as it is in the extension. The full screenshot is fitted inside a native selection window, not
 aligned over the browser viewport. The host discards its full image when selection is sent;
 only the crop subsequently accepted by the extension is available for preview. Answers use
 plain text; fenced code styling and per-block Copy remain Phase 3 work.
@@ -57,9 +58,18 @@ capture authorization, API credentials, request execution, limits and error sani
 
 The companion writes no screenshots, answers, drafts, clipboard probes or input telemetry to
 disk or logs. Copy is an explicit clipboard write. EOF, malformed input, a handshake/wait
-timeout or expiry clears all image, answer, draft and control references. A surviving panel
-contains only an interrupted-session notice and its window Close control. It cannot reconnect
-or replay a request. A fresh extension invocation creates a fresh process and session.
+timeout or expiry clears all image, answer, draft and control references and leaves only an
+interrupted-session notice in a visible panel. Chrome ends the host process about two seconds
+after its connection closes, so that notice is brief; the extension badge reports the failure.
+The process cannot reconnect or replay a request. A fresh extension invocation creates a fresh
+process and session.
+
+`npm run test:native-live` (after `npm run build`) builds a separate test variant with
+`node scripts/native-companion-build.mjs --test-hooks --bundle <path>` in a temporary
+directory, registers it only in a disposable Chromium profile, and drives complete sessions.
+The hooks confirm the default selection, ask one follow-up, and close; they read their scenario
+from a file named by `SNAPSCREEN_TEST_SCENARIO_FILE`. `--test-hooks` requires an explicit
+`--bundle`, so the default build never contains them, and `npm run test:native` fails if it does.
 
 The Phase 1 focus observations are bounded evidence, not an undetectability promise. A
 packaged native build still needs the physical interaction matrix repeated. Phase 2 does

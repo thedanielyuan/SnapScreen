@@ -116,8 +116,8 @@ events already recorded by the page.
 Current implementation: Settings explicitly selects native mode, with **In Chrome** remaining
 the default. Each native session owns one Chrome-launched AppKit host process and port, with
 no separate app relay or local IPC. The host registration permits one exact extension origin.
-The manifest uses split incognito contexts; local credentials and preferences are still
-shared within a Chrome profile. Native sessions never inject page UI or automatically open a
+Regular and incognito sessions each get their own connection and process; local credentials
+and preferences are still shared within a Chrome profile. Native sessions never inject page UI or automatically open a
 workspace or Settings. The initial selection surface fits the frozen image in a native
 window; it does not claim viewport alignment. Source navigation after crop acceptance keeps
 the conversation alive, but every new capture requires another extension invocation.
@@ -254,6 +254,8 @@ browser's actual user-data directory and remove the fixture afterward; do not de
 developer's Chrome installation. Chrome, Chrome for Testing, and Chromium can use different
 host registration locations.
 [Native host registration](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging#native-messaging-host-location)
+`npm run test:native-live` provides this fixture for the development companion, using a
+test-hooks build that confirms its own selection; the packaged app still needs it.
 
 Repeat the Phase 1 observation matrix against the packaged app and built extension. Include
 navigation during capture, expired permissions, missing hosts, incompatible versions,
