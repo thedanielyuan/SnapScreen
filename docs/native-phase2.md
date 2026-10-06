@@ -2,8 +2,9 @@
 
 Phase 2 introduces an optional development macOS companion. The default interface remains
 **In Chrome**. Native mode uses Chrome's capture authorization and background API client while
-showing a fitted frozen screenshot and answers in a local AppKit process. Phase 3 interface
-polish and Phase 4 physical acceptance, signing, and distribution remain outstanding.
+showing a fitted frozen screenshot and answers in a local AppKit process.
+[Phase 3](native-phase3.md) adds code blocks, selection feedback, keyboard controls, and an
+explicit availability check. Phase 4 physical acceptance, signing, and distribution remain.
 
 The [Phase 1 observations](native-phase1-results.md) belong to the prototype and tested
 conditions. They do not validate every interaction in this implementation. In particular,
@@ -139,8 +140,9 @@ still substitutes a mock native port for its page-isolation checks. A paid live 
 not needed for a bridge-only change and must still be approved before it is run.
 
 Because the live test confirms selections programmatically, it establishes transport and
-lifecycle behavior, not native focus behavior. Phase 3 must finish and polish the native UI,
-including accessibility and any remaining selection, preview, or per-code-block controls.
+lifecycle behavior, not native focus behavior. [Phase 3](native-phase3.md) implements the
+selection, preview, and per-code-block controls with accessibility metadata; physical
+accessibility and focus acceptance remain unverified.
 Phase 4 must repeat the physical interaction matrix against the completed companion and cover
 concurrent profiles/incognito, restarts, timeouts, and oversized or malformed messages from a
 real host. Automated DOM assertions cannot establish native focus

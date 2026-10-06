@@ -9,6 +9,18 @@ import {
   saveSettings,
 } from '../lib/storage';
 import { MEGABYTE, countTextCharacters } from '../lib/request-limits';
+import { checkCompanionAvailability } from './companion-availability';
+import type { CompanionAvailability } from './companion-availability';
+
+const COMPANION_STATUS: Record<CompanionAvailability, string> = {
+  ready: 'Companion connected and is compatible. Check completed without starting a snip.',
+  unsupported: 'The companion is available only on macOS. Choose In Chrome to snip on this device.',
+  unavailable: 'Could not check the companion. Follow the setup guide to check its installation and registration, then try again.',
+  missing: 'Companion not found for this browser. Build and register it using the setup guide, then check again.',
+  incompatible: 'Companion returned an incompatible or invalid handshake. Rebuild and register the companion that matches this extension, then check again.',
+  disconnected: 'Companion stopped before the check finished. It may be incompatible or have crashed. Check its installation, then try again.',
+  'timed-out': 'Companion did not respond within five seconds. Check its installation, then try again.',
+};
 
 export async function initializeOptionsPage(doc: Document = document): Promise<void> {
   const form = doc.getElementById('settings-form') as HTMLFormElement;
@@ -19,6 +31,8 @@ export async function initializeOptionsPage(doc: Document = document): Promise<v
   const saveBtn = doc.getElementById('save-settings') as HTMLButtonElement;
   const promptInput = doc.getElementById('default-prompt') as HTMLTextAreaElement;
   const interfaceModeInput = doc.getElementById('interface-mode') as HTMLSelectElement;
+  const checkCompanionBtn = doc.getElementById('check-companion') as HTMLButtonElement;
+  const companionStatus = doc.getElementById('companion-status') as HTMLParagraphElement;
   const maxInputCharactersInput = doc.getElementById('max-input-characters') as HTMLInputElement;
   const maxScreenshotMegabytesInput = doc.getElementById('max-screenshot-megabytes') as HTMLInputElement;
   const maxScreenshotDimensionInput = doc.getElementById('max-screenshot-dimension') as HTMLInputElement;
@@ -34,6 +48,7 @@ export async function initializeOptionsPage(doc: Document = document): Promise<v
   let removalPending = false;
   let savePending = false;
   let testPending = false;
+  let companionCheckPending = false;
   let pendingSave: Promise<void> | null = null;
   let removalEpoch = 0;
   let settingsEpoch = 0;
@@ -210,6 +225,21 @@ export async function initializeOptionsPage(doc: Document = document): Promise<v
 
   openShortcutsBtn.addEventListener('click', () => {
     void chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
+  });
+
+  checkCompanionBtn.addEventListener('click', async () => {
+    if (companionCheckPending) return;
+    companionCheckPending = true;
+    checkCompanionBtn.disabled = true;
+    companionStatus.textContent = 'Checking companion…';
+    try {
+      companionStatus.textContent = COMPANION_STATUS[await checkCompanionAvailability()];
+    } catch {
+      companionStatus.textContent = COMPANION_STATUS.unavailable;
+    } finally {
+      companionCheckPending = false;
+      checkCompanionBtn.disabled = false;
+    }
   });
 
   promptInput.value = DEFAULT_PROMPT;

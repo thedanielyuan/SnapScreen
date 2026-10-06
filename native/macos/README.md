@@ -1,6 +1,6 @@
 # macOS native companion
 
-Development Phase 2 host for `com.snapscreen.companion`, protocol version 2. Chrome launches
+Development Phase 3 host for `com.snapscreen.companion`, protocol version 2. Chrome launches
 the executable and that process owns its AppKit panels directly. There is one session per
 process, no local server or shared application relay. Every new capture opens a new native
 connection/process; closing the session ends the process.
@@ -15,8 +15,9 @@ npm run test:native
 The output is `native/macos/build/SnapScreenCompanion.app/Contents/MacOS/SnapScreenCompanion`.
 The build targets the current machine's architecture and SDK. It is a local development
 build, without a distribution signing or notarization flow. The self-test command runs
-protocol, frame, PNG bounds, session-lifecycle and fitted-image geometry checks without
-creating windows, installing a host, connecting to Chrome or requesting an API answer.
+protocol, frame, PNG bounds, session-lifecycle, fitted-image geometry and answer-rendering
+checks without showing windows, installing a host, connecting to Chrome or requesting an API
+answer. Focus tests use hidden windows and do not establish Chrome focus preservation.
 
 To register a built host, first find the extension's exact ID in `chrome://extensions` and
 the browser's **Profile Path** in `chrome://version`. Supply the profile's parent user-data
@@ -48,7 +49,10 @@ Retry are included. Notices from the extension, such as removed older turns, app
 status line, and a refused answer's streamed text is cleared as it is in the extension. The full screenshot is fitted inside a native selection window, not
 aligned over the browser viewport. The host discards its full image when selection is sent;
 only the crop subsequently accepted by the extension is available for preview. Answers use
-plain text; fenced code styling and per-block Copy remain Phase 3 work.
+selectable plain text and fenced code, with language labels and per-block Copy. Incremental
+updates preserve the reading position when scrolled up. Selection includes pixel feedback
+and an explicit confirmation button; preview has its own Close control. See the
+[Phase 3 notes](../../docs/native-phase3.md) for keyboard controls and remaining acceptance.
 
 Both transport directions and message variants are bounded and validated. `Protocol.swift`
 defines exact fields; `Session.swift` rejects stale generation and cross-connection/session
@@ -72,6 +76,6 @@ from a file named by `SNAPSCREEN_TEST_SCENARIO_FILE`. `--test-hooks` requires an
 `--bundle`, so the default build never contains them, and `npm run test:native` fails if it does.
 
 The Phase 1 focus observations are bounded evidence, not an undetectability promise. A
-packaged native build still needs the physical interaction matrix repeated. Phase 2 does
+packaged native build still needs the physical interaction matrix repeated. This development build does
 not establish broader macOS/Chrome version support, alternate layouts/input methods or
 multiple-display acceptance.

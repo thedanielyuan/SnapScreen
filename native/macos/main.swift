@@ -13,6 +13,7 @@ let testScenario: TestScenario? = ProcessInfo.processInfo.environment["SNAPSCREE
 final class CompanionPanel: NSPanel {
   override var canBecomeKey: Bool { true }
   override var canBecomeMain: Bool { false }
+  override func cancelOperation(_ sender: Any?) { performClose(sender) }
 }
 
 /// Kept below the active panel, click-through except during an edge resize. This preserves
@@ -22,113 +23,18 @@ final class PointerShield: NSPanel {
   override var canBecomeMain: Bool { false }
 }
 
-final class SelectionView: NSView {
-  var image: NSImage?
-  var selection = CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
-  var onConfirm: ((NormalizedRect) -> Void)?
-  var onCancel: (() -> Void)?
-  private var anchor: CGPoint?
-  override var isFlipped: Bool { true }
-  override var acceptsFirstResponder: Bool { true }
-
-  var imageRect: CGRect {
-    guard let image = image else { return .zero }
-    return fittedImageRect(image.size, in: bounds)
-  }
-
-  override func draw(_ dirtyRect: NSRect) {
-    NSColor.windowBackgroundColor.setFill()
-    bounds.fill()
-    let fitted = imageRect
-    image?.draw(in: fitted, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
-    let selected = CGRect(x: fitted.minX + selection.minX * fitted.width,
-      y: fitted.minY + selection.minY * fitted.height,
-      width: selection.width * fitted.width, height: selection.height * fitted.height)
-    let shade = NSBezierPath(rect: fitted)
-    shade.appendRect(selected)
-    shade.windingRule = .evenOdd
-    NSColor.black.withAlphaComponent(0.42).setFill()
-    shade.fill()
-    NSColor.systemYellow.setStroke()
-    let outline = NSBezierPath(rect: selected)
-    outline.lineWidth = 3
-    outline.stroke()
-  }
-
-  private func normalizedPoint(_ event: NSEvent) -> CGPoint {
-    let point = convert(event.locationInWindow, from: nil)
-    let fitted = imageRect
-    return CGPoint(x: max(0, min(1, (point.x - fitted.minX) / max(1, fitted.width))),
-      y: max(0, min(1, (point.y - fitted.minY) / max(1, fitted.height))))
-  }
-
-  override func mouseDown(with event: NSEvent) {
-    window?.makeFirstResponder(self)
-    guard imageRect.contains(convert(event.locationInWindow, from: nil)) else { return }
-    anchor = normalizedPoint(event)
-  }
-
-  override func mouseDragged(with event: NSEvent) {
-    guard let anchor = anchor else { return }
-    let point = normalizedPoint(event)
-    selection = CGRect(x: min(point.x, anchor.x), y: min(point.y, anchor.y),
-      width: abs(point.x - anchor.x), height: abs(point.y - anchor.y))
-    needsDisplay = true
-  }
-
-  override func mouseUp(with event: NSEvent) {
-    guard anchor != nil else { return }
-    mouseDragged(with: event)
-    anchor = nil
-    // As in the extension's snip overlay, releasing a drag submits it and a click or tiny drag cancels.
-    if selectionMeetsMinimum(selection, in: imageRect) { confirm() } else { onCancel?() }
-  }
-
-  override func keyDown(with event: NSEvent) {
-    switch event.keyCode {
-    case 36, 76: confirm()
-    case 53: onCancel?()
-    case 123, 124, 125, 126:
-      let fitted = imageRect
-      let dx: CGFloat = event.keyCode == 123 ? -1 / max(1, fitted.width) :
-        (event.keyCode == 124 ? 1 / max(1, fitted.width) : 0)
-      let dy: CGFloat = event.keyCode == 126 ? -1 / max(1, fitted.height) :
-        (event.keyCode == 125 ? 1 / max(1, fitted.height) : 0)
-      if event.modifierFlags.contains(.shift) {
-        selection.size.width = max(1 / max(1, fitted.width), min(1 - selection.minX, selection.width + dx))
-        selection.size.height = max(1 / max(1, fitted.height), min(1 - selection.minY, selection.height + dy))
-      } else {
-        selection.origin.x = max(0, min(1 - selection.width, selection.minX + dx))
-        selection.origin.y = max(0, min(1 - selection.height, selection.minY + dy))
-      }
-      needsDisplay = true
-    default:
-      // Selection owns keyboard input. Do not forward unknown keys to Chrome.
-      break
-    }
-  }
-
-  @objc func confirm() {
-    let x = max(0, min(1, selection.minX))
-    let y = max(0, min(1, selection.minY))
-    let rect = NormalizedRect(x: x, y: y,
-      width: min(1 - x, selection.width), height: min(1 - y, selection.height))
-    guard rect.isValid else { return }
-    onConfirm?(rect)
-  }
-}
-
-final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewDelegate {
+final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewDelegate, NSTextFieldDelegate {
   private var session = NativeSession()
   private var panel: CompanionPanel?
   private var previewPanel: CompanionPanel?
   private var selectionView: SelectionView?
   private var cropImage: NSImage?
-  private var answerView: NSTextView?
+  private var answerView: AnswerView?
   private var followupField: NSTextField?
   private var followupEditor: NSTextView?
   private var statusLabel: NSTextField?
   private var noticeLabel: NSTextField?
+  private var inputHintLabel: NSTextField?
   private var askButton: NSButton?
   private var stopButton: NSButton?
   private var retryButton: NSButton?
@@ -187,6 +93,15 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
 
   private func installEditingMenu() {
     let mainMenu = NSMenu(title: "Main")
+    // AppKit reserves the first menu for the application. Keep File and Edit separate.
+    let appItem = NSMenuItem(title: "SnapScreen Companion", action: nil, keyEquivalent: "")
+    appItem.submenu = NSMenu(title: "SnapScreen Companion")
+    mainMenu.addItem(appItem)
+    let fileItem = NSMenuItem(title: "File", action: nil, keyEquivalent: "")
+    let fileMenu = NSMenu(title: "File")
+    fileMenu.addItem(withTitle: "Close window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+    fileItem.submenu = fileMenu
+    mainMenu.addItem(fileItem)
     let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
     let editMenu = NSMenu(title: "Edit")
     editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
@@ -228,7 +143,7 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
       armTimeout(seconds: 30)
     case .started:
       answerText = ""
-      answerView?.string = ""
+      answerView?.clear()
       showNotice("")
       statusLabel?.stringValue = "Thinking…"
       // The extension's API timeout is 240 seconds. This only handles a lost authoritative worker.
@@ -239,7 +154,7 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
       showNotice(message)
     case .answer(let text, let status):
       answerText = text
-      answerView?.string = text
+      answerView?.render(text)
       switch status {
       case .streaming: statusLabel?.stringValue = "Answering…"
       case .done:
@@ -257,7 +172,7 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
       // The extension drops refused text from the conversation, so the window does too.
       if code == "refusal" {
         answerText = ""
-        answerView?.string = ""
+        answerView?.clear()
       }
       // The extension sanitizes provider messages before crossing this boundary.
       if selectionView != nil {
@@ -286,9 +201,10 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
     value.hidesOnDeactivate = false
     value.becomesKeyOnlyIfNeeded = false
     value.isReleasedWhenClosed = false
+    value.autorecalculatesKeyViewLoop = true
     value.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     value.acceptsMouseMovedEvents = true
-    value.minSize = NSSize(width: answer ? 560 : 450, height: 350)
+    value.minSize = NSSize(width: answer ? 560 : 450, height: answer ? 440 : 350)
     value.center()
     value.delegate = self
     return value
@@ -303,8 +219,6 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
     let view = SelectionView()
     view.image = image
     view.translatesAutoresizingMaskIntoConstraints = false
-    view.setAccessibilityLabel("Frozen screenshot region selection")
-    view.setAccessibilityRole(.image)
     view.onCancel = { [weak self] in self?.cancel() }
     view.onConfirm = { [weak self] rect in self?.selected(rect) }
     root.addSubview(view)
@@ -313,8 +227,20 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
     hint.maximumNumberOfLines = 3
     hint.lineBreakMode = .byWordWrapping
     hint.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-    let footer = NSStackView(views: [hint, button("Cancel selection", #selector(cancel))])
-    footer.orientation = .horizontal
+    let summary = NSTextField(labelWithString: view.selectionSummary)
+    summary.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+    summary.setAccessibilityLabel("Selected region")
+    view.onSelectionChange = { [weak summary] value in summary?.stringValue = value }
+    let guidance = NSStackView(views: [summary, hint])
+    guidance.orientation = .vertical
+    guidance.alignment = .leading
+    guidance.spacing = 4
+    let confirm = button("Use selection", #selector(confirmSelection))
+    let actions = NSStackView(views: [confirm, button("Cancel selection", #selector(cancel))])
+    actions.spacing = 8
+    let footer = NSStackView(views: [guidance, actions])
+    footer.orientation = .vertical
+    footer.alignment = .leading
     footer.spacing = 10
     footer.translatesAutoresizingMaskIntoConstraints = false
     root.addSubview(footer)
@@ -324,6 +250,8 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
       footer.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
       footer.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
       footer.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -12),
+      guidance.widthAnchor.constraint(equalTo: footer.widthAnchor),
+      hint.widthAnchor.constraint(equalTo: guidance.widthAnchor),
     ])
     panel = window
     selectionView = view
@@ -347,8 +275,11 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
     armTimeout(seconds: 30)
   }
 
+  @objc private func confirmSelection() { selectionView?.confirm() }
+
   private func releaseSelection() {
     selectionView?.image = nil
+    selectionView?.onSelectionChange = nil
     selectionView?.onCancel = nil
     selectionView?.onConfirm = nil
     selectionView = nil
@@ -360,7 +291,7 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
   }
 
   private func button(_ title: String, _ selector: Selector) -> NSButton {
-    let value = NSButton(title: title, target: self, action: selector)
+    let value = CompanionButton(title: title, target: self, action: selector)
     value.bezelStyle = .rounded
     value.setAccessibilityLabel(title)
     return value
@@ -376,25 +307,17 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
     notice.font = .systemFont(ofSize: 12)
     notice.textColor = .secondaryLabelColor
     notice.isHidden = true
-    let scroll = NSScrollView()
-    scroll.hasVerticalScroller = true
-    scroll.borderType = .bezelBorder
-    let text = NSTextView(frame: NSRect(x: 0, y: 0, width: 640, height: 350))
-    text.isEditable = false
-    text.isSelectable = true
-    text.font = .systemFont(ofSize: 15)
-    text.textContainerInset = NSSize(width: 12, height: 12)
-    text.autoresizingMask = [.width]
-    text.isVerticallyResizable = true
-    text.isHorizontallyResizable = false
-    text.textContainer?.widthTracksTextView = true
-    text.setAccessibilityLabel("Answer text")
-    scroll.documentView = text
+    let answer = AnswerView()
     let field = NSTextField()
     field.placeholderString = "Ask a follow-up"
     field.setAccessibilityLabel("Follow-up question")
     field.target = self
     field.action = #selector(submitFollowup)
+    field.delegate = self
+    let inputHint = NSTextField(labelWithString: "")
+    inputHint.font = .systemFont(ofSize: 11)
+    inputHint.textColor = .secondaryLabelColor
+    inputHint.setAccessibilityLabel("Follow-up length")
     let ask = button("Ask", #selector(submitFollowup))
     let entry = NSStackView(views: [field, ask])
     entry.spacing = 8
@@ -407,7 +330,7 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
     let controls = NSStackView(views: [copy, preview, stop, retry, button("Close", #selector(closeAnswer))])
     controls.spacing = 8
     controls.orientation = .horizontal
-    let stack = NSStackView(views: [status, notice, scroll, entry, controls])
+    let stack = NSStackView(views: [status, notice, answer, entry, inputHint, controls])
     stack.orientation = .vertical
     stack.alignment = .leading
     stack.spacing = 12
@@ -420,16 +343,17 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
       stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16),
       status.widthAnchor.constraint(equalTo: stack.widthAnchor),
       notice.widthAnchor.constraint(equalTo: stack.widthAnchor),
-      scroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
+      answer.widthAnchor.constraint(equalTo: stack.widthAnchor),
       entry.widthAnchor.constraint(equalTo: stack.widthAnchor),
       controls.widthAnchor.constraint(equalTo: stack.widthAnchor),
-      scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 180),
+      answer.heightAnchor.constraint(greaterThanOrEqualToConstant: 180),
     ])
     panel = window
-    answerView = text
+    answerView = answer
     followupField = field
     statusLabel = status
     noticeLabel = notice
+    inputHintLabel = inputHint
     askButton = ask
     stopButton = stop
     retryButton = retry
@@ -438,7 +362,7 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
     updateControls()
     window.makeKeyAndOrderFront(nil)
     placeShield(below: window)
-    window.makeFirstResponder(text)
+    window.makeFirstResponder(answer.focusTarget)
   }
 
   private func showNotice(_ message: String) {
@@ -457,13 +381,21 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
   #endif
 
   private func updateControls() {
-    askButton?.isEnabled = session.canFollowup
+    let draft = trimProtocolText(followupField?.stringValue ?? "")
+    askButton?.isEnabled = session.canFollowup && !draft.isEmpty
+      && inputFitsLimits(draft, maximum: session.maxInputCharacters)
+    let characters = (followupField?.stringValue ?? "").unicodeScalars.count
+    inputHintLabel?.stringValue = "\(characters) / \(session.maxInputCharacters) characters · Return to ask"
+    answerView?.copyEnabled = session.active
     followupField?.isEnabled = session.canFollowup
     stopButton?.isEnabled = session.canStop
     retryButton?.isEnabled = session.canRetry
     copyButton?.isEnabled = session.active && !answerText.isEmpty
     previewButton?.isEnabled = session.active && cropImage != nil
+    panel?.recalculateKeyViewLoop()
   }
+
+  func controlTextDidChange(_ notification: Notification) { updateControls() }
 
   func windowWillReturnFieldEditor(_ sender: NSWindow, to client: Any?) -> Any? {
     guard let field = followupField, (client as? NSTextField) === field else { return nil }
@@ -483,7 +415,11 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
     guard affectedCharRange.location != NSNotFound, affectedCharRange.location <= current.length,
       affectedCharRange.length <= current.length - affectedCharRange.location else { return false }
     let proposed = current.replacingCharacters(in: affectedCharRange, with: replacementString ?? "")
-    return inputFitsLimits(proposed, maximum: session.maxInputCharacters)
+    let fits = inputFitsLimits(proposed, maximum: session.maxInputCharacters)
+    if !fits {
+      inputHintLabel?.stringValue = "Follow-up is too long (limit: \(session.maxInputCharacters) characters)."
+    }
+    return fits
   }
 
   @objc private func submitFollowup() {
@@ -516,17 +452,19 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
     guard session.active, !answerText.isEmpty else { return }
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(answerText, forType: .string)
+    copyButton?.title = "Copied"
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+      self?.copyButton?.title = "Copy answer"
+    }
   }
 
   @objc private func showPreview() {
     guard session.active, let image = cropImage else { return }
     if let existing = previewPanel { existing.makeKeyAndOrderFront(nil); return }
     let window = makePanel(title: "SnapScreen — Screenshot preview", size: NSSize(width: 580, height: 420))
-    let imageView = NSImageView()
-    imageView.image = image
-    imageView.imageScaling = .scaleProportionallyUpOrDown
-    imageView.setAccessibilityLabel("Selected screenshot preview")
-    window.contentView = imageView
+    let preview = PreviewView(image: image)
+    preview.onClose = { [weak self] in self?.previewPanel?.performClose(nil) }
+    window.contentView = preview
     previewPanel = window
     window.makeKeyAndOrderFront(nil)
     placeShield(below: window)
@@ -534,7 +472,7 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
 
   func windowShouldClose(_ sender: NSWindow) -> Bool {
     if sender === previewPanel {
-      (previewPanel?.contentView as? NSImageView)?.image = nil
+      (previewPanel?.contentView as? PreviewView)?.image = nil
       previewPanel?.delegate = nil
       previewPanel = nil
       return true
@@ -565,24 +503,27 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
     shield?.orderOut(nil)
     selectionView?.image = nil
     selectionView?.onConfirm = nil
+    selectionView?.onSelectionChange = nil
     selectionView?.onCancel = nil
     selectionView = nil
-    (previewPanel?.contentView as? NSImageView)?.image = nil
+    (previewPanel?.contentView as? PreviewView)?.image = nil
     previewPanel?.contentView = nil
     previewPanel?.delegate = nil
     previewPanel?.close()
     previewPanel = nil
     cropImage = nil
     answerText = ""
-    answerView?.string = ""
-    answerView?.undoManager?.removeAllActions()
+    answerView?.clear()
     answerView = nil
     followupField?.stringValue = ""
     followupEditor?.string = ""
     followupEditor?.undoManager?.removeAllActions()
     followupEditor?.delegate = nil
     followupEditor = nil
+    followupField?.delegate = nil
     followupField = nil
+    inputHintLabel?.stringValue = ""
+    inputHintLabel = nil
     statusLabel?.stringValue = ""
     statusLabel = nil
     noticeLabel?.stringValue = ""
@@ -676,7 +617,8 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextViewD
 
 if CommandLine.arguments.contains("--self-test") {
   do {
-    let count = try runProtocolSelfTests()
+    _ = NSApplication.shared
+    let count = try runProtocolSelfTests() + runAnswerViewTests() + runSelectionViewTests()
     #if SNAPSCREEN_TEST_HOOKS
     print("Native companion self-test: \(count) checks passed (test hooks build)")
     #else

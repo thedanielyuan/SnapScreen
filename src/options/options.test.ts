@@ -14,6 +14,8 @@ const OPTIONS_MARKUP = `
       <option value="extension">In Chrome</option>
       <option value="native">macOS companion</option>
     </select>
+    <button type="button" id="check-companion">Check companion</button>
+    <p id="companion-status" role="status" aria-live="polite">Companion availability has not been checked.</p>
     <details id="advanced-settings">
       <summary>Advanced</summary>
       <input id="max-input-characters" type="number" />
@@ -41,6 +43,10 @@ beforeEach(() => {
     defaultPrompt: 'Old prompt',
   });
   vi.stubGlobal('chrome', {
+    runtime: {
+      getPlatformInfo: vi.fn().mockResolvedValue({ os: 'mac' }),
+      connectNative: vi.fn(),
+    },
     storage: {
       local: {
         get: getStoredSettings,
@@ -188,6 +194,54 @@ describe('options API-key controls', () => {
       }));
     });
     expect(connectNative).not.toHaveBeenCalled();
+    expect(chrome.tabs.create).not.toHaveBeenCalled();
+  });
+
+  it('keeps availability checks explicit and reports unsupported platforms without changing mode', async () => {
+    vi.mocked(chrome.runtime.getPlatformInfo).mockImplementation(() => Promise.resolve({
+      os: 'linux', arch: 'x86-64', nacl_arch: 'x86-64',
+    }));
+    await initializeOptionsPage(document);
+    const interfaceMode = document.getElementById('interface-mode') as HTMLSelectElement;
+    const checkButton = document.getElementById('check-companion') as HTMLButtonElement;
+    interfaceMode.value = 'native';
+    interfaceMode.dispatchEvent(new Event('change'));
+    expect(chrome.runtime.getPlatformInfo).not.toHaveBeenCalled();
+    expect(chrome.runtime.connectNative).not.toHaveBeenCalled();
+
+    checkButton.click();
+    expect(checkButton.disabled).toBe(true);
+    expect(document.getElementById('companion-status')?.textContent).toBe('Checking companion…');
+    await vi.waitFor(() => {
+      expect(checkButton.disabled).toBe(false);
+      expect(document.getElementById('companion-status')?.textContent).toContain('only on macOS');
+    });
+    expect(interfaceMode.value).toBe('native');
+    expect(chrome.runtime.connectNative).not.toHaveBeenCalled();
+    expect(setSettings).not.toHaveBeenCalled();
+    expect(chrome.tabs.create).not.toHaveBeenCalled();
+  });
+
+  it('allows one explicit check at a time and keeps its failure separate from API-key status', async () => {
+    let resolvePlatform!: (platform: chrome.runtime.PlatformInfo) => void;
+    vi.mocked(chrome.runtime.getPlatformInfo).mockImplementation(() => new Promise((resolve) => { resolvePlatform = resolve; }));
+    vi.mocked(chrome.runtime.connectNative).mockImplementation(() => { throw new Error('sk-ant-sensitive'); });
+    await initializeOptionsPage(document);
+    const checkButton = document.getElementById('check-companion') as HTMLButtonElement;
+    const status = document.getElementById('status')!;
+    status.textContent = 'API key works.';
+
+    checkButton.click();
+    checkButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(chrome.runtime.getPlatformInfo).toHaveBeenCalledTimes(1);
+    resolvePlatform({ os: 'mac', arch: 'arm64', nacl_arch: 'arm' });
+    await vi.waitFor(() => {
+      expect(checkButton.disabled).toBe(false);
+      expect(document.getElementById('companion-status')?.textContent).toContain('Could not check the companion');
+    });
+    expect(status.textContent).toBe('API key works.');
+    expect(document.body.textContent).not.toContain('sk-ant-sensitive');
+    expect(setSettings).not.toHaveBeenCalled();
     expect(chrome.tabs.create).not.toHaveBeenCalled();
   });
 

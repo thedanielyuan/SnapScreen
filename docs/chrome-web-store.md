@@ -34,7 +34,7 @@ Alternatives are a separate native build or a reworked optional-permission flow.
 | `activeTab` | Captures the visible part of the current tab, only after the user clicks the toolbar icon or presses the SnapScreen shortcut. |
 | `scripting` | Injects SnapScreen's snipping overlay and answer panel into the current tab when the user invokes the default In Chrome mode. Native mode does not inject page UI. |
 | `storage` | Saves the user's Anthropic API key and settings on the device, and temporary data that reconnects SnapScreen's workspace tab. |
-| `nativeMessaging` | Connects to the separately installed local macOS companion only for a user-invoked native session. Sends the captured screenshot, crop, and streamed answers and receives selection/follow-up actions. The host is restricted to the exact extension origin and receives no API key. |
+| `nativeMessaging` | Connects to the separately installed local macOS companion for a user-invoked native session or an explicit Settings availability check (version handshake only, with no capture or API data). Sends the captured screenshot, crop, and streamed answers and receives selection/follow-up actions. The host is restricted to the exact extension origin and receives no API key. |
 | Host permission `https://api.anthropic.com/*` | Sends the selected region and the user's question to Anthropic's API, which writes the answer. |
 | Optional host permission `file:///*` | Requested only when the user invokes SnapScreen on a local `file://` page, so it can capture that page. |
 

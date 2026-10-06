@@ -1,6 +1,6 @@
 # SnapScreen native companion implementation plan
 
-Status: Phase 1 complete; Phase 2 bridge implemented as an experimental explicit mode. Initial platform: macOS. Updated 6 October 2026.
+Status: Phase 1 complete; Phase 2 bridge and Phase 3 native interface implemented as an experimental explicit mode. Initial platform: macOS. Updated 6 October 2026.
 
 Phase 1 outcome: the final prototype keeps page focus and visibility and keeps native clicks,
 drags, scrolling, resizing, and typed characters away from the page in the tested setups.
@@ -8,9 +8,9 @@ Fullscreen resizing now uses native edges plus a pointer shield. Modifier keys s
 key handlers: the activation shortcut's ⌥⇧ and ⌘ used for native shortcuts. On 6 October 2026
 the user accepted that limitation and approved Phase 2 on the narrowed claim; see
 [Phase 1 results](native-phase1-results.md). Phase 2 adds the extension bridge and development
-companion described in [native setup and implementation notes](native-phase2.md). Phase 3 UI
-completion and polish, and Phase 4 packaged physical acceptance and signing, remain. The new
-implementation has no additional focus-preservation claim until those interactions are measured.
+companion described in [native setup and implementation notes](native-phase2.md). Phase 3 adds
+[native interface controls and availability checks](native-phase3.md). Phase 4 packaged physical
+acceptance and signing remain. The new implementation has no additional focus-preservation claim until those interactions are measured.
 
 Build a small desktop companion that displays the snipping overlay and answer window outside
 the webpage. Keep screenshot capture, API credentials, and Claude requests in the Chrome
@@ -205,6 +205,10 @@ request limits, and provider-error sanitization. Move reusable conversation logi
 content-specific ownership where necessary, with one authoritative session controller.
 
 ## Phase 3 Complete the native interface and migration
+
+Development implementation: [Phase 3 notes](native-phase3.md). Both explicit modes remain
+in one package, with In Chrome as the default. Physical accessibility and focus acceptance
+of the completed controls remain part of Phase 4.
 
 Implement the tested snipping controls, streamed plain text and fenced code, code Copy,
 Stop, Retry, preview, and follow-ups. Keep native activation behavior explicit; a window can

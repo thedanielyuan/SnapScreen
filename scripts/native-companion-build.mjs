@@ -19,7 +19,8 @@ const executable = resolve(bundle, 'Contents/MacOS/SnapScreenCompanion');
 await mkdir(resolve(bundle, 'Contents/MacOS'), { recursive: true });
 const result = spawnSync('xcrun', ['swiftc', '-swift-version', '5', '-O', '-framework', 'AppKit',
   ...(testHooks ? ['-D', 'SNAPSCREEN_TEST_HOOKS'] : []),
-  ...['Protocol.swift', 'Session.swift', 'SelfTests.swift', 'main.swift'].map(file => resolve(root, file)),
+  ...['Protocol.swift', 'Session.swift', 'Controls.swift', 'AnswerView.swift', 'SelectionView.swift',
+    'SelfTests.swift', 'AnswerViewTests.swift', 'SelectionViewTests.swift', 'main.swift'].map(file => resolve(root, file)),
   '-o', executable], { stdio: 'inherit' });
 if (result.error) throw result.error;
 if (result.status !== 0) process.exit(result.status ?? 1);

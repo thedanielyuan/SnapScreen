@@ -164,6 +164,17 @@ a {
   margin-top: 24px;
 }
 
+.companion-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.companion-check-hint {
+  margin-bottom: 6px;
+}
+
 .btn-primary {
   padding: 10px 20px;
   border: none;

@@ -140,7 +140,8 @@ daily check from the repo's Actions tab.
   every model accepts one.
 - Answers are plain text except fenced code blocks: the prompt asks for fences,
   `src/lib/code-blocks.ts` parses them, and the result panel gives each block its own Copy
-  button. Change the prompt's formatting rules and the parser together.
+  button. The native equivalent is `native/macos/AnswerView.swift`. Change the prompt's formatting
+  rules and both parsers together.
 - In native mode the badge title is the only lasting failure signal: Chrome ends a host about
   2 s after its port closes, and badges clear after 5 s. Keep `native-session.ts` messages
   accurate. `nativeMessaging` stays required because a running worker's

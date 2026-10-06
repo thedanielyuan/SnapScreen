@@ -53,6 +53,21 @@
           is unavailable, the extension badge reports the error without switching interfaces.
           Saving this choice applies to your next snip and does not launch the companion.
         </p>
+        <div class="companion-actions">
+          <button type="button" id="check-companion" class="btn-secondary" aria-describedby="companion-check-hint">
+            Check companion
+          </button>
+          <a href="https://github.com/thedanielyuan/SnapScreen/blob/main/docs/native-phase2.md#local-setup" target="_blank" rel="noopener noreferrer">
+            Companion setup guide
+          </a>
+        </div>
+        <p id="companion-check-hint" class="hint companion-check-hint">
+          Checking briefly starts the companion without opening a window, capturing a screenshot,
+          or using your API key. Setup is a separate step.
+        </p>
+        <p id="companion-status" class="hint" role="status" aria-live="polite">
+          Companion availability has not been checked.
+        </p>
 
         <details id="advanced-settings" class="advanced-section">
           <summary>Advanced</summary>
