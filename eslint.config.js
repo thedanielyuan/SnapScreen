@@ -4,7 +4,7 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['dist/**'],
+    ignores: ['dist/**', 'experiments/native-phase1/build/**'],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
@@ -34,7 +34,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['scripts/**/*.mjs'],
+    files: ['scripts/**/*.mjs', 'experiments/native-phase1/**/*.mjs', 'experiments/native-phase1/fixture/*.js'],
     languageOptions: {
       globals: {
         ...globals.browser,

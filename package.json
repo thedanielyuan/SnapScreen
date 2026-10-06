@@ -10,6 +10,9 @@
     "test": "vitest run",
     "build": "tsc --noEmit && vite build",
     "test:browser": "node scripts/extension-smoke.mjs",
+    "build:native-prototype": "node scripts/native-phase1-build.mjs && sh experiments/native-phase1/native/build.sh",
+    "test:native-prototype": "node --test experiments/native-phase1/extension/*.node-test.mjs && experiments/native-phase1/build/SnapScreenPhase1.app/Contents/MacOS/SnapScreenPhase1 --self-test",
+    "experiment:native": "node scripts/native-phase1-session.mjs",
     "package": "node scripts/package-extension.mjs",
     "preview": "vite preview"
   },

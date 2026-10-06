@@ -4,6 +4,16 @@ Answers for the **Privacy practices** tab in the Chrome Web Store Developer Dash
 in sync with [PRIVACY.md](../PRIVACY.md) and `src/manifest.json` whenever permissions or data
 handling change.
 
+The local [Phase 1 native prototype](../experiments/native-phase1/README.md) is a separate
+unpacked experiment and must not be submitted as the store package. Its additional
+`nativeMessaging` permission sends screenshots and follow-up text only to its local test
+host; it uses mocked answers and has no API credentials or network provider access. The
+local experiment logs numeric window/scroll geometry, input-source identifiers, modifier-key
+names, and tested-build hashes alongside event metadata; screenshots, typed text, and clipboard
+contents are excluded from those logs. The
+production manifest and the store declarations below remain for the shipping extension.
+A future native release needs revised recipient/permission declarations before submission.
+
 ## Single purpose
 
 > SnapScreen answers questions about part of the current tab: the user snips a region of the
