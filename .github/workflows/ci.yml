@@ -33,6 +33,7 @@ jobs:
 
   native:
     runs-on: macos-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -46,3 +47,6 @@ jobs:
       - run: npx playwright install --no-shell chromium
       # Real Chrome-launched companion sessions with mocked answers; needs the runner's GUI session.
       - run: npm run test:native-live
+      # Test the extracted production archive and its shipped installer, without native test hooks.
+      - run: npm run package:native
+      - run: npm run test:native-packaged

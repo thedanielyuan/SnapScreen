@@ -38,6 +38,13 @@ app relay is involved. The optional **Check companion** button in Settings brief
 local host for a version handshake, then disconnects. It opens no native window and transfers
 no screenshots, questions, answers, or API credentials.
 
+The separate companion installer stores the app and a receipt containing its version,
+checksum, and chosen browser registration paths under your user account. It registers the
+exact extension ID in each browser root you choose. This installation metadata contains no
+screenshots, questions, answers, or API key. The companion has no automatic update service.
+Remove it separately using the [uninstall instructions](docs/native-phase4.md#install-upgrade-and-remove);
+uninstalling the Chrome extension does not remove the companion app or its registration.
+
 Both processes release the full screenshot when the crop is accepted. The selected region and
 conversation stay in memory until the session closes or disconnects. Follow-ups can continue
 after the source page navigates or closes. Lost sessions are not restored or replayed. Copy
@@ -64,6 +71,13 @@ text with the copied mock answer in memory and logs only whether they match. Rep
 the tested executable and extension files by their SHA-256 hashes.
 The runner registers the host only in a temporary test browser profile and removes that
 profile when it exits normally.
+
+The Phase 4 packaged acceptance runner similarly uses an isolated browser profile, the
+production companion, and a disposable copy of the extension with canned answers. Its reports
+save page-event metadata, message types/IDs/timing, versions, and artifact hashes, without
+screenshots, question/answer text, or API credentials. It does not contact Anthropic. These
+diagnostic reports are local files retained until you remove them; they are not generated
+during ordinary use.
 
 ## Anthropic
 

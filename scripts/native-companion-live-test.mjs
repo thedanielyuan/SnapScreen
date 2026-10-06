@@ -5,6 +5,7 @@ import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { chromium } from 'playwright';
+import { EXTENSION_KEY, EXTENSION_ID } from '../experiments/native-phase1/extension/config.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const DIST = join(ROOT, 'dist');
@@ -48,6 +49,8 @@ async function waitFor(description, predicate, timeout = STEP_TIMEOUT_MS) {
 async function prepareExtension(directory) {
   await cp(DIST, directory, { recursive: true });
   const manifest = JSON.parse(await readFile(join(directory, 'manifest.json'), 'utf8'));
+  manifest.key = EXTENSION_KEY;
+  await writeFile(join(directory, 'manifest.json'), JSON.stringify(manifest));
   const loaderPath = join(directory, manifest.background.service_worker);
   await writeFile(join(directory, 'native-live-original-worker.js'), await readFile(loaderPath, 'utf8'));
   // Records the real action callback so the test can invoke it; only this disposable copy has it.
@@ -104,6 +107,7 @@ async function run(root) {
     });
     const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
     const extensionId = new URL(worker.url()).host;
+    if (extensionId !== EXTENSION_ID) throw new Error('Unexpected live-test extension ID.');
     const installer = (...extra) => spawnSync(process.execPath, [join(ROOT, 'scripts/native-companion-install.mjs'),
       '--extension-id', extensionId, '--user-data-dir', profile, '--executable', hostExecutable, ...extra],
     { encoding: 'utf8' });

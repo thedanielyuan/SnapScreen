@@ -1,5 +1,9 @@
 # macOS native companion
 
+For versioned packages, managed install/upgrade/uninstall, and release gates, see
+[Phase 4 distribution](../../docs/native-phase4.md) and the
+[physical acceptance runner](../../docs/native-phase4-acceptance.md).
+
 Development Phase 3 host for `com.snapscreen.companion`, protocol version 3. Chrome launches
 the executable and that process owns its AppKit panels directly. There is one session per
 process, no local server or shared application relay. Every new capture opens a new native
