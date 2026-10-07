@@ -18,6 +18,8 @@ npm test                             # Vitest: every co-located *.test.ts
 npx vitest run src/lib/crop.test.ts  # one file; add -t "<test name>" for one test
 npm run build                        # tsc --noEmit && vite build → dist/ (never hand-edit)
 npm run test:browser                 # Playwright smoke test of dist/; mocked API, no key needed
+npm run build:extension-native       # separate native-only Chrome extension → dist-native/
+npm run test:browser-native          # native-only package/browser checks; needs both fresh builds
 npm run package                      # zip the built dist/ into release/ for the Chrome Web Store
 npm run build:native                 # macOS: build the companion app into native/macos/build/
 npm run test:native                  # macOS: companion self-tests and installer/package tests
@@ -34,6 +36,13 @@ windows for about 10 s. CI (`.github/workflows/ci.yml`) runs the same steps plus
 `npm audit --audit-level=moderate`, which can turn red from a new upstream advisory with no code
 change, and a macOS job runs the native checks. There is no formatter; match the
 surrounding style (2-space indent, single quotes, semicolons, trailing commas).
+
+For native-only build or shared background/Settings changes, also run build:extension-native
+then test:browser-native after the ordinary build/browser checks. The native-only build has its
+own manifest, worker, Settings bootstrap, and Vite config; never import the ordinary worker
+into it or include the content script, result frame, workspace, or web-accessible resources.
+Its worker ignores interfaceMode. Existing native runners still use dist/ until they gain
+explicit variant selection; native-only browser tests use mocked capture/host/API transport.
 
 For native build, packaging, or installer changes, also run package:native then
 test:native-packaged. The latter uses the shipped installer and production app in disposable

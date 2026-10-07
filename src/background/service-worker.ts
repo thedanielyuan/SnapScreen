@@ -30,12 +30,14 @@ import {
   type WorkspaceError,
   type WorkspaceInitialMessage,
 } from '../lib/workspace-protocol';
-import { ActiveTabChangedError, captureInitiatingViewport } from './capture-session';
+import { ActiveTabChangedError } from './capture-session';
+import { ActionFeedback } from './action-feedback';
+import { CaptureSourceTracker, getActiveTab } from './capture-source';
 import { GenerationRegistry, type ActiveGeneration } from './generation-registry';
 import { getDocumentMessageOptions, type DocumentTarget } from './document-target';
 import { UiCapabilityRegistry } from './ui-capability-registry';
 import { keepAliveUntilSettled } from './worker-keepalive';
-import { NativeSessionController } from './native-session';
+import { NativeCaptureController } from './native-capture';
 
 const generations = new GenerationRegistry();
 const uiCapabilities = new UiCapabilityRegistry();
@@ -86,35 +88,18 @@ const frozenCaptureById = new Map<string, FrozenCapture>();
 const workspaceBySession = new Map<string, WorkspaceRecord>();
 const workspaceSessionBySourceTab = new Map<number, string>();
 const workspaceSessionByTab = new Map<number, string>();
-const activationVersionByWindow = new Map<number, number>();
-const badgeClearTimers = new Map<number, ReturnType<typeof setTimeout>>();
-const actionFeedbackVersionByTab = new Map<number, number>();
-let nextActionFeedbackVersion = 0;
+const captureSources = new CaptureSourceTracker();
+const actionFeedback = new ActionFeedback();
 
 const GENERIC_CAPTURE_ERROR =
   'SnapScreen could not capture that region. Please try again.';
 const GENERIC_GENERATION_ERROR =
   'SnapScreen could not complete this request. Please try again.';
-const DEFAULT_ACTION_TITLE = 'SnapScreen – Snip and analyze';
 const SNIP_START_TIMEOUT_MS = 5_000;
 const WORKSPACE_CLAIM_TIMEOUT_MS = 30_000;
 const WORKSPACE_DISCONNECT_TIMEOUT_MS = 5_000;
 const WORKSPACE_STORAGE_PREFIX = 'snapscreenWorkspace:';
-const documentVersionByTab = new Map<number, number>();
-
-const nativeSessions = new NativeSessionController({
-  capture: (source, isCurrent) => captureInitiatingViewport({
-    getActiveTab: async (windowId) => {
-      const [tab] = await chrome.tabs.query({ active: true, windowId });
-      return tab ?? null;
-    },
-    getActivationVersion: (windowId) => activationVersionByWindow.get(windowId) ?? 0,
-    captureVisibleTab: (windowId) => chrome.tabs.captureVisibleTab(windowId, { format: 'png' }),
-  }, { ...source, isCurrent }),
-  isSourceCurrent: (source) =>
-    (documentVersionByTab.get(source.tabId) ?? 0) === source.documentVersion,
-  report: showActionBadge,
-});
+const nativeSessions = new NativeCaptureController(captureSources, showActionBadge);
 
 void initializeStorageAccess();
 
@@ -155,15 +140,7 @@ function isCurrentCapture(endpoint: SessionEndpoint, captureId: string): boolean
 function clearTabState(tabId: number): void {
   generations.clearTab(tabId);
   uiCapabilities.clearTab(tabId);
-  const hadActionFeedback = actionFeedbackVersionByTab.delete(tabId);
-  const badgeTimer = badgeClearTimers.get(tabId);
-  if (badgeTimer !== undefined) {
-    clearTimeout(badgeTimer);
-    badgeClearTimers.delete(tabId);
-  }
-  if (hadActionFeedback || badgeTimer !== undefined) {
-    void clearActionFeedback(tabId);
-  }
+  actionFeedback.clear(tabId);
   for (const key of captureIdByEndpoint.keys()) {
     if (key.startsWith(`content:${tabId}:`) || key.startsWith(`workspace:${tabId}:`)) {
       captureIdByEndpoint.delete(key);
@@ -177,13 +154,6 @@ function clearTabState(tabId: number): void {
       frozenCaptureById.delete(captureId);
     }
   }
-}
-
-async function clearActionFeedback(tabId: number): Promise<void> {
-  await Promise.allSettled([
-    chrome.action.setBadgeText({ tabId, text: '' }),
-    chrome.action.setTitle({ tabId, title: DEFAULT_ACTION_TITLE }),
-  ]);
 }
 
 function getSenderUrl(sender: chrome.runtime.MessageSender): URL | null {
@@ -376,35 +346,8 @@ function makeThinkingRelay(
   };
 }
 
-async function showActionBadge(tabId: number, message: string): Promise<void> {
-  const feedbackVersion = ++nextActionFeedbackVersion;
-  actionFeedbackVersionByTab.set(tabId, feedbackVersion);
-  const previousTimer = badgeClearTimers.get(tabId);
-  if (previousTimer !== undefined) {
-    clearTimeout(previousTimer);
-    badgeClearTimers.delete(tabId);
-  }
-
-  const results = await Promise.allSettled([
-    chrome.action.setBadgeText({ tabId, text: '!' }),
-    chrome.action.setTitle({ tabId, title: message }),
-  ]);
-  if (actionFeedbackVersionByTab.get(tabId) !== feedbackVersion) return;
-  if (results.every((result) => result.status === 'rejected')) {
-    actionFeedbackVersionByTab.delete(tabId);
-    return;
-  }
-
-  const timer = setTimeout(() => {
-    if (
-      badgeClearTimers.get(tabId) !== timer
-      || actionFeedbackVersionByTab.get(tabId) !== feedbackVersion
-    ) return;
-    badgeClearTimers.delete(tabId);
-    actionFeedbackVersionByTab.delete(tabId);
-    void clearActionFeedback(tabId);
-  }, 5000);
-  badgeClearTimers.set(tabId, timer);
+function showActionBadge(tabId: number, message: string): Promise<void> {
+  return actionFeedback.show(tabId, message);
 }
 
 async function showPageToast(tabId: number, message: string): Promise<void> {
@@ -743,7 +686,7 @@ async function injectContentEndpoint(
       }),
       SNIP_START_TIMEOUT_MS,
     );
-    if ((documentVersionByTab.get(tabId) ?? 0) !== expectedDocumentVersion) return null;
+    if (captureSources.documentVersion(tabId) !== expectedDocumentVersion) return null;
     const topFrameResult = injectionResults.find((result) => result.frameId === 0);
     return topFrameResult?.documentId
       ? getContentEndpoint(tabId, topFrameResult.documentId)
@@ -758,27 +701,7 @@ function captureVisibleViewport(
   windowId: number,
   expectedDocumentVersion: number,
 ): Promise<string> {
-  return captureInitiatingViewport(
-    {
-      getActiveTab: async (targetWindowId) => {
-        const [activeTab] = await chrome.tabs.query({
-          active: true,
-          windowId: targetWindowId,
-        });
-        return activeTab ?? null;
-      },
-      getActivationVersion: (targetWindowId) =>
-        activationVersionByWindow.get(targetWindowId) ?? 0,
-      captureVisibleTab: (targetWindowId) =>
-        chrome.tabs.captureVisibleTab(targetWindowId, { format: 'png' }),
-    },
-    {
-      tabId,
-      windowId,
-      isCurrent: () =>
-        (documentVersionByTab.get(tabId) ?? 0) === expectedDocumentVersion,
-    },
-  );
+  return captureSources.capture({ tabId, windowId, documentVersion: expectedDocumentVersion });
 }
 
 async function ensureFileAccess(url?: string): Promise<boolean> {
@@ -804,7 +727,7 @@ async function startSnip(
   try {
     dataUrl = await captureVisibleViewport(tabId, windowId, expectedDocumentVersion);
   } catch (error) {
-    if ((documentVersionByTab.get(tabId) ?? 0) !== expectedDocumentVersion) {
+    if (captureSources.documentVersion(tabId) !== expectedDocumentVersion) {
       await showActionBadge(
         tabId,
         'SnapScreen did not start because the page changed. Try again on the current page.',
@@ -833,7 +756,7 @@ async function startSnip(
     };
 
     const contentEndpoint = await injectContentEndpoint(tabId, expectedDocumentVersion);
-    if ((documentVersionByTab.get(tabId) ?? 0) !== expectedDocumentVersion) {
+    if (captureSources.documentVersion(tabId) !== expectedDocumentVersion) {
       throw new ActiveTabChangedError();
     }
     if (contentEndpoint) {
@@ -857,7 +780,7 @@ async function startSnip(
     });
     await deliverWorkspaceStart(workspace, startMessage);
   } catch {
-    if ((documentVersionByTab.get(tabId) ?? 0) !== expectedDocumentVersion) {
+    if (captureSources.documentVersion(tabId) !== expectedDocumentVersion) {
       await showActionBadge(
         tabId,
         'SnapScreen did not start because the page changed. Try again on the current page.',
@@ -871,16 +794,11 @@ async function startSnip(
   }
 }
 
-async function getActiveTab(): Promise<chrome.tabs.Tab | null> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tab ?? null;
-}
-
 async function handleStartSnip(tab?: chrome.tabs.Tab): Promise<void> {
   const resolved = tab ?? (await getActiveTab());
   if (typeof resolved?.id !== 'number') return;
 
-  const expectedDocumentVersion = documentVersionByTab.get(resolved.id) ?? 0;
+  const expectedDocumentVersion = captureSources.documentVersion(resolved.id);
   // Native mode branches before any page message, injection, permission prompt, or workspace.
   let mode: Awaited<ReturnType<typeof getInterfaceMode>>;
   try {
@@ -890,14 +808,7 @@ async function handleStartSnip(tab?: chrome.tabs.Tab): Promise<void> {
     return;
   }
   if (mode === 'native') {
-    if (resolved.url?.startsWith('file:')
-      && !(await chrome.extension.isAllowedFileSchemeAccess().catch(() => false))) {
-      await showActionBadge(resolved.id,
-        'Enable “Allow access to file URLs” for SnapScreen, then invoke it again.');
-      return;
-    }
-    await nativeSessions.start({ tabId: resolved.id, windowId: resolved.windowId,
-      documentVersion: expectedDocumentVersion });
+    await nativeSessions.start(resolved, expectedDocumentVersion);
     return;
   }
   if (!(await ensureFileAccess(resolved.url))) {
@@ -962,7 +873,7 @@ async function recaptureWorkspace(
     return { error: message };
   }
 
-  const currentVersion = documentVersionByTab.get(record.sourceTabId) ?? 0;
+  const currentVersion = captureSources.documentVersion(record.sourceTabId);
   const storedOrigin = getUrlOrigin(record.sourceUrl);
   const currentOrigin = getUrlOrigin(sourceTab.url);
   if (
@@ -1033,7 +944,7 @@ async function handleControllerMessage(
         await startSnip(
           ownerTabId,
           senderTab.windowId,
-          documentVersionByTab.get(ownerTabId) ?? 0,
+          captureSources.documentVersion(ownerTabId),
           message.sessionSettings,
           senderTab.url,
         );
@@ -1280,15 +1191,12 @@ chrome.tabs.onRemoved.addListener((tabId) => {
       message: 'The source tab was closed. Follow-up questions still work, but a new snip is unavailable.',
     });
   }
-  documentVersionByTab.delete(tabId);
+  captureSources.removed(tabId);
   clearTabState(tabId);
 });
 
 chrome.tabs.onActivated.addListener(({ windowId }) => {
-  activationVersionByWindow.set(
-    windowId,
-    (activationVersionByWindow.get(windowId) ?? 0) + 1,
-  );
+  captureSources.activated(windowId);
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
@@ -1303,7 +1211,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     ) {
       cleanupWorkspace(workspaceSessionId);
     }
-    documentVersionByTab.set(tabId, (documentVersionByTab.get(tabId) ?? 0) + 1);
+    captureSources.navigated(tabId);
     const sourceWorkspaceSessionId = workspaceSessionBySourceTab.get(tabId);
     const sourceWorkspace = sourceWorkspaceSessionId
       ? workspaceBySession.get(sourceWorkspaceSessionId)

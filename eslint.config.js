@@ -4,7 +4,7 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['dist/**', 'experiments/native-phase1/build/**', 'native/macos/build/**'],
+    ignores: ['dist/**', 'dist-native/**', 'experiments/native-phase1/build/**', 'native/macos/build/**'],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,

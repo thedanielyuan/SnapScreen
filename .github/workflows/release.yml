@@ -33,6 +33,8 @@ jobs:
       - run: npm run build
       - run: npx playwright install --with-deps --no-shell chromium
       - run: npm run test:browser
+      - run: npm run build:extension-native
+      - run: npm run test:browser-native
       - run: npm run package
       - name: Publish the GitHub release
         env:

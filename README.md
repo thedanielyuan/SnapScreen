@@ -14,6 +14,38 @@ the [implementation plan](docs/native-companion-plan.md), and
 Unsigned local packages and install/upgrade/uninstall tooling are available. Physical acceptance
 and a signed, notarized release remain pending; modifier keys may still reach the page.
 
+## Native-only development build
+
+The separate **SnapScreen Native** extension always uses the macOS companion. It includes
+trusted Settings but no injected UI, workspace, `scripting` permission, or web-accessible
+resources. Build it independently of the ordinary `dist/` extension:
+
+```bash
+npm run build:extension-native
+npm run build:native
+```
+
+Load `dist-native/` through **chrome://extensions → Developer mode → Load unpacked**.
+Use a separate browser user-data root when trying both variants: a profile folder inside the
+same root does not isolate host registration. Copy the native-only extension's ID and follow
+the [host registration instructions](docs/native-phase2.md#local-setup) for that browser root.
+The existing installer rejects a conflicting registration. To migrate one browser root,
+explicitly remove the old registration with the old extension ID before registering the new
+ID; see the same setup instructions. Registration authorizes one exact extension origin.
+
+Configure your key, prompt, and limits in Settings and use **Check companion** to verify the
+installation. There is no interface selector. First installation opens Settings; later toolbar
+and shortcut invocations start capture, with badge feedback for failures. For local files,
+enable **Allow access to file URLs** in Chrome's extension management page first.
+
+After a fresh ordinary `npm run build` and `npm run test:browser`, run
+`npm run build:extension-native` and `npm run test:browser-native`. The latter uses both build
+outputs for resource-probe controls and mocks capture, the native host, and API responses.
+Existing native live/packaged/physical runners still select `dist/`; variant selection and
+native-only archive packaging are subsequent work. Physical focus and input acceptance for
+the native-only candidate remain pending. `npm run build:native` continues to build the Swift
+companion, and `npm run package` continues to archive the ordinary extension.
+
 ## License
 
 [MIT](LICENSE)
