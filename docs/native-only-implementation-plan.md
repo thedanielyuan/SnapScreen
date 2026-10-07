@@ -1,13 +1,15 @@
 # Native-only extension and physical acceptance plan
 
-Status: first implementation milestone complete; later milestones remain proposed. Updated 7 October 2026.
+Status: first and second implementation milestones complete; later milestones remain proposed. Updated 7 October 2026.
 
 This document specifies a separate native-only SnapScreen extension build and the evidence
 needed to assess its interaction behavior. Build separation, the native-only worker and
 Settings, and initial package/browser regression checks are implemented. `build:extension-native`
 produces `dist-native/`; `test:browser-native` checks its boundaries against the ordinary build.
-Both variants are covered by the CI verification steps. Extension archive packaging, explicit
-native-runner variant selection, broader lifecycle/browser coverage, and physical acceptance
+Both variants are covered by the CI verification steps. The native-only gate now creates and
+extracts a temporary ZIP, verifies its complete asset graph and checksums, and exercises the
+extracted assets through mocked native session lifecycles and a real worker stop/restart.
+Release archive tooling, explicit native-runner variant selection, and physical acceptance
 remain pending. This document does not record a completed physical acceptance run. Other new
 commands and runner flags below remain proposals unless explicitly described as existing.
 
@@ -106,10 +108,26 @@ a protocol change, update both validators, both test suites, and the version han
 
 ## 2. Add automated package and behavior gates
 
-The initial `npm run test:browser-native` suite checks build exclusions, Settings, controlled
-resource probes, and mocked native success/host-failure paths with stale interface preferences.
-The existing browser suite remains for the normal build. Extend this coverage to the full
-package and lifecycle gates below, including extracted archives once packaging exists.
+`npm run test:browser-native` checks the build and a temporary ZIP extracted into a disposable
+directory, then runs the browser against a copy of those extracted assets. The unmodified
+assets are inspected before adding capture, native-transport, and API mocks. The existing
+browser suite remains for the normal build. Both suites run in CI.
+
+Milestone two coverage is implemented in:
+
+| Gate | Coverage |
+| --- | --- |
+| `scripts/extension-native-package.mjs` and its Node tests | Manifest, strict CSP, bundled local asset graph, version/protocol alignment, excluded UI/test hooks, extracted-file SHA-256 equality, and negative controls |
+| `scripts/extension-native-smoke.mjs` | Extracted Settings, compiled worker/Settings protocol handshakes, stale preferences, resource probes with accessible/inaccessible controls |
+| `scripts/extension-native-lifecycle.mjs` | Real crop/SSE/conversation code with mocked transport: streaming, follow-ups, cancellation, Stop/Retry, provider sanitization, host failures, navigation/closure, concurrent sessions, cleanup, and CDP worker stop/restart without replay |
+| `src/background/service-worker-native.integration.test.ts` | Source invalidation races through crop acceptance, session limits/supersession, stale identities, listener/timer cleanup, late answers, and separate first-install onboarding |
+
+Shared protocol, provider-sanitization, storage, and exact-origin native installer tests remain
+in the normal unit/native suites. Archive generation here is a disposable test gate; the
+user-facing release command and runner variant selection remain milestone three. API responses
+are synthetic and the fixture blocks outbound API fetches. Worker restart is a debugger-driven
+lifecycle diagnostic, not evidence of natural suspension, real host-process cleanup, genuine
+toolbar/shortcut authorization, or physical focus/input behavior.
 
 ### Package checks
 
@@ -307,7 +325,7 @@ undetectability guarantee.
 ## Implementation order
 
 1. Complete: build separation, manifests, native-only bootstrap, and Settings behavior.
-2. Extend initial build/resource/browser checks to finished archives and the full lifecycle coverage.
+2. Complete: extend build/resource/browser checks to extracted temporary archives and full mocked lifecycle coverage.
 3. Parameterize native runners and extension packaging; cover argument/variant mistakes.
 4. Run both variants' checks, package candidates, and update security/distribution documentation.
 5. Collect positive controls and physical trials with the human operator.

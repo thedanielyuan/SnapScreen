@@ -40,9 +40,13 @@ enable **Allow access to file URLs** in Chrome's extension management page first
 
 After a fresh ordinary `npm run build` and `npm run test:browser`, run
 `npm run build:extension-native` and `npm run test:browser-native`. The latter uses both build
-outputs for resource-probe controls and mocks capture, the native host, and API responses.
+outputs for resource-probe controls, verifies a temporary ZIP and its extracted asset graph,
+and runs the extracted extension with mocked capture, native host, and API responses. It covers
+streaming, follow-ups, Stop/Retry, failures, source invalidation, concurrent sessions, connection
+cleanup, and an actual worker stop/restart without replay. The restart is a debugger-driven
+diagnostic; it does not establish natural suspension or physical focus behavior.
 Existing native live/packaged/physical runners still select `dist/`; variant selection and
-native-only archive packaging are subsequent work. Physical focus and input acceptance for
+native-only release archive packaging are subsequent work. Physical focus and input acceptance for
 the native-only candidate remain pending. `npm run build:native` continues to build the Swift
 companion, and `npm run package` continues to archive the ordinary extension.
 
