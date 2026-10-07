@@ -14,7 +14,7 @@ npm ci
 npx playwright install --no-shell chromium
 npm run lint
 npm run typecheck
-npm test
+env -u SNAPSCREEN_LIVE_API_KEY npm test
 npm run build
 npm run test:browser
 npm run build:native
@@ -41,6 +41,13 @@ absolute path, original file/aggregate SHA-256 hashes, and disposable fixture ha
 `package:extension-native` writes `release/snapscreen-native-only-<version>.zip` and prints
 the archive and aggregate extension SHA-256 checksums after validating the build and extracted
 archive. It does not publish an artifact.
+
+The extension and companion archives are separate; neither includes or installs the other.
+Package both from the same reviewed source and retain their exact command-reported paths and
+checksums. Keep paid live API tests disabled during candidate verification. The
+[native-only candidate verification record](native-only-candidate-verification.md) identifies
+the selected source and artifacts and records their automated results. Physical acceptance
+requires the extracted production companion and separately recorded human-operated trials.
 
 The companion package command prints the archive, staged app, metadata, and SHA-256 checksum paths.
 Outputs live under `native/macos/build/package/` and are ignored by Git. Each archive contains
@@ -175,6 +182,9 @@ not establish interaction acceptance, which stays explicitly pending in the pack
 
 ## Evidence and remaining gates
 
+The following earlier Phase 4 companion evidence predates the native-only candidate run;
+its counts and checksum do not identify that candidate. Use the
+[candidate verification record](native-only-candidate-verification.md) for the latter.
 Local verification on 7 October 2026 used macOS 27.0 on arm64. Automated suites used
 Chromium 149.0.7827.55; the acceptance runner was also started with Google Chrome 154.0.8037.98:
 
@@ -209,8 +219,8 @@ malformed/version/oversized rejection, capture disconnection, worker restart wit
 and uninstall. Neither suite spends API credit or installs in everyday browser
 profiles. The browser suite continues to enforce native-mode non-injection and retained
 In Chrome confidentiality boundaries. Linux CI also verifies the distinct native-only
-extension archive command. These automated checks do not complete the native-only candidate
-or physical acceptance milestones.
+extension archive command. These automated checks do not establish physical focus or input
+acceptance.
 
 Use the [packaged physical acceptance runner](native-phase4-acceptance.md) to collect the
 remaining interaction matrix. It uses the production app with no native test hooks, a disposable

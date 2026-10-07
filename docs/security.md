@@ -20,11 +20,22 @@ first installation only. Native capture failures use badge feedback and never op
 tab, or a permission dialog. Local-file capture requires the user to enable file access in
 Chrome's extension management page before invoking capture.
 
+The native-only extension ZIP from `npm run package:extension-native` and the companion ZIP
+from `npm run package:native` are separate artifacts. The extension packager validates the
+build and extracted archive before accepting it, including the excluded UI and test shims.
+Packaged and physical native runners reject companion builds with live-test hooks. The default
+companion archive is unsigned and intended for local acceptance; creating the archives does
+not publish or notarize them. Candidate hashes and automated check results belong to the
+[candidate verification record](native-only-candidate-verification.md).
+
 The native-only build requires its own exact extension ID in the host registration. It cannot
-implicitly share or replace another variant's registration. See [local setup](../README.md#native-only-development-build).
-Automated package and mocked browser checks establish these build boundaries; physical focus
-and input acceptance remain separate, pending work. Removing web-accessible resources does
-not establish universal undetectability or focus preservation.
+implicitly share or replace another variant's registration. Each browser user-data root has
+one registration; a second Chrome profile within that root does not isolate it. Use separate
+browser roots, or explicitly remove the old ID's registration before adding the new one as
+described in the [variant-switch procedure](native-phase4.md#switch-extension-variants).
+Automated package and mocked browser checks cover these build boundaries; physical focus and
+input acceptance remain separate, pending work. Removing web-accessible resources does not
+establish universal undetectability or focus preservation.
 
 ## Optional macOS companion
 

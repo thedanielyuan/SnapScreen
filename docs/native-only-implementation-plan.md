@@ -1,6 +1,6 @@
 # Native-only extension and physical acceptance plan
 
-Status: first three implementation milestones complete; candidate verification and physical acceptance remain pending. Updated 7 October 2026.
+Status: first four implementation milestones complete; physical acceptance and trace review remain pending. Updated 7 October 2026.
 
 This document specifies a separate native-only SnapScreen extension build and the evidence
 needed to assess its interaction behavior. Build separation, the native-only worker and
@@ -11,8 +11,11 @@ extracts a temporary ZIP, verifies its complete asset graph and checksums, and e
 extracted assets through mocked native session lifecycles and a real worker stop/restart.
 Milestone three adds a separate native-only release archive command, explicit native-runner
 variant selection, and original/fixture artifact identities. CI checks both variants explicitly.
-Candidate verification and physical acceptance remain later milestones; this document does
-not record a completed physical acceptance run.
+Milestone four verified both variants and the extracted native-only release ZIP with the
+packaged production companion, retained candidate archives and checksums, and completed the
+security/distribution documentation. See the [candidate verification record](native-only-candidate-verification.md).
+Physical acceptance remains a later milestone; this document does not record a completed
+physical acceptance run.
 
 ## Objective and limits
 
@@ -191,6 +194,11 @@ A Chrome profile directory inside the same root does not isolate host registrati
 
 ## 4. Build and verify the candidate
 
+Completed on 7 October 2026 for source commit `f120ea5fef71ecda7295d8d6ee783d059fb03b37`.
+The [verification record](native-only-candidate-verification.md) identifies the retained archives,
+extracted production app, checksums, environment, and passing automated checks. It records
+local unsigned acceptance artifacts, not a published release or physical acceptance result.
+
 Use macOS with Xcode command-line tools and Node.js 22 or later. Install dependencies with
 `npm ci` and the test browser with `npx playwright install --no-shell chromium` when needed.
 
@@ -336,6 +344,6 @@ undetectability guarantee.
 1. Complete: build separation, manifests, native-only bootstrap, and Settings behavior.
 2. Complete: extend build/resource/browser checks to extracted temporary archives and full mocked lifecycle coverage.
 3. Complete: explicit native-runner variant selection, separate extension packaging, argument/variant checks, and artifact identities.
-4. Pending: verify a reviewed candidate with both variants' checks, package candidates, and complete security/distribution documentation.
+4. Complete: verified both variants and the extracted native-only candidate ZIP with the packaged production companion; retained archives/checksums and completed security/distribution documentation. See the [verification record](native-only-candidate-verification.md).
 5. Pending: collect positive controls and physical trials with the human operator.
 6. Pending: review traces, repair measured defects, repeat affected trials, and publish bounded results.

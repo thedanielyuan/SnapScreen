@@ -60,11 +60,16 @@ npm run package:extension-native
 
 The final command validates the built and extracted assets and writes the distinct
 `release/snapscreen-native-only-<version>.zip`, then prints archive and extension SHA-256
-checksums. The tag release workflow
-continues to publish only the ordinary extension. `npm run build:native` still builds the Swift
-companion, and `npm run package` still archives the ordinary extension. The live suite uses a
-disposable test-hook app; packaged and physical runners require the production app.
+checksums. The companion is a separate archive produced by `npm run package:native` under
+`native/macos/build/package/`; the command prints its exact path and checksum. Neither archive
+contains or installs the other. The default companion package is unsigned and intended for
+local acceptance. The tag release workflow continues to publish only the ordinary extension.
+`npm run build:native` still builds the Swift companion, and `npm run package` still archives
+the ordinary extension. The live suite uses a disposable test-hook app; packaged and physical
+runners require the production app.
 
+See the [candidate verification record](docs/native-only-candidate-verification.md) for the
+reviewed source, automated results, and checksums identifying both candidate artifacts.
 Physical focus and input acceptance for the native-only candidate remain pending. Use the
 [physical acceptance procedure](docs/native-phase4-acceptance.md) with `--extension-dir dist-native`
 and the extracted production companion to collect evidence with a human operator.
