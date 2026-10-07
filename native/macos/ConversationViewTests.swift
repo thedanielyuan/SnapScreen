@@ -296,7 +296,12 @@ func runConversationViewTests() throws -> Int {
   try check(counter.count == 4, "the close button closes at once")
   panel.sendEvent(key(.keyDown, 53, "\u{1B}"))
   panel.resignKey()
-  RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+  // The close is queued on the main queue. Wait for it rather than a fixed slice, since slow CI
+  // runners can miss a short one, but stop well before the 4 s release fallback could close it.
+  let resignDeadline = Date(timeIntervalSinceNow: 1)
+  while counter.count < 5, Date() < resignDeadline {
+    RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.01))
+  }
   try check(counter.count == 5, "losing the keyboard while Escape is held closes, since the release cannot arrive")
   panel.delegate = nil
 
