@@ -3,7 +3,6 @@ import {
   appendAssistantMessage,
   appendGenerationStoppedMessage,
   appendUserMessage,
-  settleStoppedGeneration,
   settleStoppedConversation,
   settleFailedFirstAnswer,
   settleFailedFollowUp,
@@ -14,7 +13,7 @@ import {
   clearIncompleteInitialFailure,
   createInitialDisplay,
 } from './conversation-state';
-import type { AnthropicContentBlock, AnthropicMessage, DisplayMessage } from '../lib/messages';
+import type { AnthropicContentBlock, AnthropicMessage, DisplayMessage } from './messages';
 
 describe('conversation display state', () => {
   it('starts automatic screenshot analysis without a visible prompt', () => {
@@ -64,18 +63,6 @@ describe('conversation display state', () => {
     ]);
     expect(messages[0].content).not.toContain('reasoning');
     expect(messages[0].content).not.toContain('scratchpad');
-  });
-
-  it('shows stopped message when stopped before clean final text streams', () => {
-    expect(settleStoppedGeneration([], '')).toEqual([
-      { role: 'assistant', content: 'Generation stopped.' },
-    ]);
-  });
-
-  it('keeps partial clean final text when stopped after answer streaming starts', () => {
-    expect(settleStoppedGeneration([], '  The answer is 42.  ')).toEqual([
-      { role: 'assistant', content: 'The answer is 42.' },
-    ]);
   });
 });
 

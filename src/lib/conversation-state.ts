@@ -33,18 +33,6 @@ export function appendGenerationStoppedMessage(
   return appendAssistantMessage(messages, 'Generation stopped.');
 }
 
-export function settleStoppedGeneration(
-  messages: DisplayMessage[],
-  partialAnswer: string,
-): DisplayMessage[] {
-  const cleanPartial = partialAnswer.trim();
-  if (cleanPartial) {
-    return appendAssistantMessage(messages, cleanPartial);
-  }
-
-  return appendGenerationStoppedMessage(messages);
-}
-
 export interface StoppedConversationInput {
   kind: 'initial' | 'follow-up';
   baseDisplayMessages: DisplayMessage[];

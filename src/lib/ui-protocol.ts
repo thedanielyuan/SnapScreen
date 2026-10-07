@@ -61,7 +61,6 @@ export type ControllerToFrameMessage =
       sessionId: string;
       message: string;
     }
-  | { type: 'SNAPSCREEN_UI_DISPOSE_RESULT'; sessionId: string }
   | { type: 'SNAPSCREEN_UI_DISPOSE_ALL'; sessionId: string };
 
 export type FrameToControllerMessage =
@@ -234,7 +233,6 @@ export function isControllerToFrameMessage(
 
   switch (value.type) {
     case 'SNAPSCREEN_UI_DISPOSE_SNIP':
-    case 'SNAPSCREEN_UI_DISPOSE_RESULT':
     case 'SNAPSCREEN_UI_DISPOSE_ALL':
     case 'SNAPSCREEN_UI_SHOW_THINKING':
       return true;

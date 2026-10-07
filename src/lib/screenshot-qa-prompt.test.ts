@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  SCREENSHOT_QA_SYSTEM_PROMPT,
-  buildScreenshotQaSystemPrompt,
-} from './screenshot-qa-prompt';
+import { SCREENSHOT_QA_SYSTEM_PROMPT } from './screenshot-qa-prompt';
 
 describe('screenshot QA prompt', () => {
   it('guides careful screenshot question answering', () => {
@@ -59,17 +56,4 @@ describe('screenshot QA prompt', () => {
     expect(followUpRules).toContain('which language to use');
     expect(followUpRules).toContain('reply with the complete code');
   });
-
-  it('appends saved default prompt as hidden extra guidance', () => {
-    const prompt = buildScreenshotQaSystemPrompt('Prefer concise answers.');
-
-    expect(prompt).toContain(SCREENSHOT_QA_SYSTEM_PROMPT);
-    expect(prompt).toContain('Additional hidden user guidance:');
-    expect(prompt).toContain('Prefer concise answers.');
-  });
-
-  it('does not append empty extra guidance', () => {
-    expect(buildScreenshotQaSystemPrompt('   ')).toBe(SCREENSHOT_QA_SYSTEM_PROMPT);
-  });
-
 });

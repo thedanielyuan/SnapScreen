@@ -182,10 +182,6 @@ export class ResultFrameHost {
     return this.#disposed;
   }
 
-  get isReady(): boolean {
-    return this.#buffer.isReady;
-  }
-
   /** Internal test seam; production code never exposes the closed root. */
   getFrameForTesting(): HTMLIFrameElement {
     return this.#frame;

@@ -368,8 +368,6 @@ final class AnswerView: NSView {
     return y
   }
 
-  var hasSelection: Bool { segmentViews.contains { $0.textView.selectedRange().length > 0 } }
-
   func clear() {
     if let responder = window?.firstResponder as? NSView, responder.isDescendant(of: self) {
       window?.makeFirstResponder(nil)

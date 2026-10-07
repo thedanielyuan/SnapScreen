@@ -26,14 +26,11 @@ import {
   WORKSPACE_PATH,
   WORKSPACE_PORT_NAME,
   isWorkspaceToBackgroundMessage,
+  type BackgroundToWorkspaceMessage,
   type WorkspaceError,
   type WorkspaceInitialMessage,
 } from '../lib/workspace-protocol';
-import {
-  ActiveTabChangedError,
-  CaptureSupersededError,
-  captureInitiatingViewport,
-} from './capture-session';
+import { ActiveTabChangedError, captureInitiatingViewport } from './capture-session';
 import { GenerationRegistry, type ActiveGeneration } from './generation-registry';
 import { getDocumentMessageOptions, type DocumentTarget } from './document-target';
 import { UiCapabilityRegistry } from './ui-capability-registry';
@@ -54,11 +51,6 @@ interface WorkspaceEndpoint {
 }
 
 type SessionEndpoint = ContentEndpoint | WorkspaceEndpoint;
-
-interface CaptureRecord {
-  captureId: string;
-  endpointKey: string;
-}
 
 interface FrozenCapture {
   dataUrl: string;
@@ -89,7 +81,7 @@ interface WorkspaceRecord extends WorkspaceMetadata {
   requestIds?: Set<string>;
 }
 
-const captureByEndpoint = new Map<string, CaptureRecord>();
+const captureIdByEndpoint = new Map<string, string>();
 const frozenCaptureById = new Map<string, FrozenCapture>();
 const workspaceBySession = new Map<string, WorkspaceRecord>();
 const workspaceSessionBySourceTab = new Map<number, string>();
@@ -130,13 +122,6 @@ function isAbortError(err: unknown): boolean {
   return err instanceof DOMException && err.name === 'AbortError';
 }
 
-function getPublicCaptureError(err: unknown): { code: string; message: string } {
-  if (err instanceof ActiveTabChangedError) {
-    return { code: 'active_tab_changed', message: err.message };
-  }
-  return { code: 'capture', message: GENERIC_CAPTURE_ERROR };
-}
-
 function getPublicGenerationError(err: unknown): { code: string; message: string } {
   if (err instanceof AnthropicError) {
     return { code: err.code, message: err.message };
@@ -158,13 +143,13 @@ function endpointDocumentId(endpoint: SessionEndpoint): string | undefined {
 
 function beginCapture(endpoint: SessionEndpoint, captureId: string): boolean {
   const key = endpointKey(endpoint);
-  if (captureByEndpoint.get(key)?.captureId === captureId) return false;
-  captureByEndpoint.set(key, { endpointKey: key, captureId });
+  if (captureIdByEndpoint.get(key) === captureId) return false;
+  captureIdByEndpoint.set(key, captureId);
   return true;
 }
 
 function isCurrentCapture(endpoint: SessionEndpoint, captureId: string): boolean {
-  return captureByEndpoint.get(endpointKey(endpoint))?.captureId === captureId;
+  return captureIdByEndpoint.get(endpointKey(endpoint)) === captureId;
 }
 
 function clearTabState(tabId: number): void {
@@ -179,9 +164,9 @@ function clearTabState(tabId: number): void {
   if (hadActionFeedback || badgeTimer !== undefined) {
     void clearActionFeedback(tabId);
   }
-  for (const [key] of captureByEndpoint) {
+  for (const key of captureIdByEndpoint.keys()) {
     if (key.startsWith(`content:${tabId}:`) || key.startsWith(`workspace:${tabId}:`)) {
-      captureByEndpoint.delete(key);
+      captureIdByEndpoint.delete(key);
     }
   }
   for (const [captureId, capture] of frozenCaptureById) {
@@ -344,7 +329,7 @@ function sendToEndpoint(
       type: 'SNAPSCREEN_WORKSPACE_EVENT',
       sessionId: endpoint.sessionId,
       message,
-    });
+    } satisfies BackgroundToWorkspaceMessage);
     return Promise.resolve();
   } catch (error) {
     return Promise.reject(error);
@@ -424,7 +409,7 @@ async function showActionBadge(tabId: number, message: string): Promise<void> {
 
 async function showPageToast(tabId: number, message: string): Promise<void> {
   try {
-    await chrome.tabs.sendMessage(tabId, { type: 'SHOW_ERROR', message });
+    await chrome.tabs.sendMessage(tabId, { type: 'SHOW_ERROR', message } satisfies BgToCsMessage);
   } catch {
     // If the isolated UI is unavailable, keep feedback in browser chrome.
     await showActionBadge(tabId, message);
@@ -689,7 +674,7 @@ function postWorkspaceReady(record: WorkspaceRecord): void {
     reconnectToken,
     initialMessage,
     error,
-  });
+  } satisfies BackgroundToWorkspaceMessage);
 }
 
 async function deliverWorkspaceStart(
@@ -1081,19 +1066,14 @@ async function handleControllerMessage(
             captureId: message.captureId,
           });
           return { ok: true };
-        } catch (error) {
-          if (error instanceof CaptureSupersededError) {
-            return { ok: false, stale: true };
-          }
-
-          const failure = getPublicCaptureError(error);
+        } catch {
           await safeSendToEndpoint(endpoint, {
             type: 'CAPTURE_ERROR',
-            code: failure.code,
-            message: failure.message,
+            code: 'capture',
+            message: GENERIC_CAPTURE_ERROR,
             captureId: message.captureId,
           });
-          return { error: failure.message };
+          return { error: GENERIC_CAPTURE_ERROR };
         }
       }
 
@@ -1230,7 +1210,7 @@ async function handleControllerMessage(
         const key = endpointKey(endpoint);
         frozenCaptureById.delete(message.captureId);
         if (isCurrentCapture(endpoint, message.captureId)) {
-          captureByEndpoint.delete(key);
+          captureIdByEndpoint.delete(key);
         }
         generations.cancelCapture(ownerTabId, message.captureId);
         return { ok: true };
@@ -1456,7 +1436,7 @@ chrome.runtime.onConnect.addListener((port) => {
           sessionId: record.sessionId,
           requestId: value.requestId,
           response: { error: 'Duplicate workspace request.' },
-        });
+        } satisfies BackgroundToWorkspaceMessage);
         return;
       }
       if (requestIds.size >= 200) {
@@ -1475,7 +1455,7 @@ chrome.runtime.onConnect.addListener((port) => {
         sessionId: record.sessionId,
         requestId: value.requestId,
         response,
-      });
+      } satisfies BackgroundToWorkspaceMessage);
     })().catch(() => {
       port.disconnect();
     });

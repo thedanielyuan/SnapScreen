@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizePlainText, stripMarkdown } from './plain-text';
+import { normalizePlainText } from './plain-text';
 
 describe('normalizePlainText', () => {
   it('preserves Markdown-looking characters that may be meaningful syntax', () => {
@@ -29,9 +29,5 @@ describe('normalizePlainText', () => {
 
   it('leaves plain text untouched', () => {
     expect(normalizePlainText('2 + 2 = 4')).toBe('2 + 2 = 4');
-  });
-
-  it('retains the old export as a compatibility alias', () => {
-    expect(stripMarkdown('`code_value`')).toBe('`code_value`');
   });
 });

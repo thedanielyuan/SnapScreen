@@ -9,7 +9,7 @@ import {
   settleSuccessfulConversation,
   settleStoppedConversation,
   type FailedFollowUpState,
-} from './conversation-state';
+} from '../lib/conversation-state';
 import {
   matchesActiveGeneration,
   matchesPendingCapture,
@@ -459,7 +459,6 @@ export function createCaptureController(
       }
     }
 
-    displayMessages = baseDisplayMessages;
     conversationHistory = baseHistory;
     displayMessages = appendUserMessage(baseDisplayMessages, text);
     renderPanel({ pending: true });

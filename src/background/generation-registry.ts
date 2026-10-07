@@ -1,7 +1,6 @@
 export interface ActiveGeneration {
   captureId: string;
   controller: AbortController;
-  documentId?: string;
   requestId: string;
 }
 
@@ -30,7 +29,6 @@ export class GenerationRegistry {
     const generation = {
       captureId,
       controller: new AbortController(),
-      documentId,
       requestId,
     };
     this.activeByTab.set(tabId, generation);

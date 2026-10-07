@@ -156,7 +156,7 @@ export interface PrunedTurns<T> {
  * Keeps the pinned first turn and newest complete turns, reserving one turn for
  * the request about to be appended. It never returns an unmatched message.
  */
-export function pruneForNewestTurn<T extends { role: 'user' | 'assistant' }>(
+function pruneForNewestTurn<T extends { role: 'user' | 'assistant' }>(
   messages: readonly T[],
   maxConversationTurns: number,
 ): PrunedTurns<T> {
