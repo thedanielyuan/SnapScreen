@@ -1,5 +1,3 @@
-import type { Rect } from '../lib/messages';
-
 export class CaptureSupersededError extends Error {
   constructor() {
     super('Capture was superseded by a newer selection.');
@@ -18,17 +16,12 @@ export interface CaptureTabDependencies {
   getActiveTab: (windowId: number) => Promise<{ id?: number } | null>;
   getActivationVersion: (windowId: number) => number;
   captureVisibleTab: (windowId: number) => Promise<string>;
-  cropImage: (dataUrl: string, normalizedRect: Rect) => Promise<string>;
 }
 
 export interface CaptureViewportInput {
   tabId: number;
   windowId: number;
   isCurrent: () => boolean;
-}
-
-export interface CaptureTabInput extends CaptureViewportInput {
-  normalizedRect: Rect;
 }
 
 async function assertInitiatingTabIsActive(
@@ -44,17 +37,8 @@ function assertCurrent(isCurrent: () => boolean): void {
   if (!isCurrent()) throw new CaptureSupersededError();
 }
 
-export async function captureInitiatingTab(
-  deps: CaptureTabDependencies,
-  input: CaptureTabInput,
-): Promise<string> {
-  const dataUrl = await captureInitiatingViewport(deps, input);
-  assertCurrent(input.isCurrent);
-  return deps.cropImage(dataUrl, input.normalizedRect);
-}
-
 export async function captureInitiatingViewport(
-  deps: Omit<CaptureTabDependencies, 'cropImage'>,
+  deps: CaptureTabDependencies,
   input: CaptureViewportInput,
 ): Promise<string> {
   assertCurrent(input.isCurrent);

@@ -1,7 +1,7 @@
 import { closeOpenCodeFence } from './code-blocks';
 import type { AnthropicMessage } from './messages';
 import { normalizePlainText } from './plain-text';
-import { buildScreenshotQaSystemPrompt } from './screenshot-qa-prompt';
+import { SCREENSHOT_QA_SYSTEM_PROMPT } from './screenshot-qa-prompt';
 import {
   API_REQUEST_TIMEOUT_MS,
   RequestLimitError,
@@ -194,7 +194,7 @@ async function callApi(
         // misses the cache, which is why first answers and follow-ups share one
         // system prompt.
         cache_control: { type: 'ephemeral' },
-        system: buildScreenshotQaSystemPrompt(),
+        system: SCREENSHOT_QA_SYSTEM_PROMPT,
         messages,
       },
       requestSignal,

@@ -6,6 +6,3 @@
 export function normalizePlainText(text: string): string {
   return text.replace(/\r\n?/g, '\n');
 }
-
-/** @deprecated Use normalizePlainText. Retained for internal compatibility. */
-export const stripMarkdown = normalizePlainText;

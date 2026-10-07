@@ -1,22 +1,23 @@
 # Production remediation plan
 
 From a production-readiness audit of `main` at `dcd04a6` on 2026-10-01, assuming the goal is a
-public Chrome Web Store listing. File links point at lines in that commit.
+public Chrome Web Store listing. Line numbers in file links are from that commit.
 
 **Verdict: not ready to publish yet, but close.** The code passes every check (lint, typecheck,
 285 unit tests, build, smoke test, `npm audit`), git history has no real API keys, and the
 security design is solid. The gaps are in shipping and running it in public. The before-launch
 work is about 2–3 days; the first-month items add about a day.
 
-**Status (2026-10-01):** the code and docs for 1.1–1.4 are done on branch
-`chore/launch-readiness`. The unchecked items below need you: store dashboard, API key, repo
-settings, and testing on real hardware.
+**Status (2026-10-07):** the code and docs for 1.1–1.4 merged in
+[PR #15](https://github.com/thedanielyuan/SnapScreen/pull/15), `main` is protected, and the daily
+live API check is green. The unchecked items below need you: store dashboard, the first tagged
+release, failure alerts, and testing on real hardware.
 
 | #   | Item                                          | When          | Effort  | Status            |
 | --- | --------------------------------------------- | ------------- | ------- | ----------------- |
 | 1.1 | Privacy policy and store disclosures          | Before launch | ½ day   | Dashboard left    |
-| 1.2 | Versioned, CI-built releases                  | Before launch | ½–1 day | Branch rule left  |
-| 1.3 | Daily check against the real Anthropic API    | Before launch | 2–4 h   | API key left      |
+| 1.2 | Versioned, CI-built releases                  | Before launch | ½–1 day | Release left      |
+| 1.3 | Daily check against the real Anthropic API    | Before launch | 2–4 h   | Alerts left       |
 | 1.4 | Shrink large snips instead of rejecting them  | Before launch | 2–4 h   | Done              |
 | 1.5 | Manual test pass                              | Before launch | ½ day   | To do             |
 | 2.1 | Diagnostics and a support channel             | First month   | ½ day   | To do             |
@@ -37,7 +38,7 @@ Store requires you to declare that and link a privacy policy, or the listing is 
 - [ ] Paste those answers into the dashboard's Privacy practices tab.
 - [x] Add `homepage_url` to [src/manifest.json](src/manifest.json), and an install section to the
       README.
-- [ ] Once the listing is live, add the store link to the README's install section.
+- [ ] Once the listing is live, add the store link to the README.
 
 **Done when:** the listing passes review.
 
@@ -53,10 +54,10 @@ previous version in one click, without review.
       writes it into the manifest, so the two can't drift.
 - [x] Add `npm run package`, which zips the built `dist/` into `release/`.
 - [x] Add [.github/workflows/release.yml](.github/workflows/release.yml): on a `v*` tag it checks
-      the tag matches `package.json`, runs every CI step, and attaches the zip to a GitHub
-      release with generated notes (instead of a `CHANGELOG.md`).
+      the tag matches `package.json`, runs the CI `verify` checks, and attaches the zip to a
+      GitHub release with generated notes (instead of a `CHANGELOG.md`).
 - [ ] Only upload zips from that workflow to the store, never local builds.
-- [ ] Protect `main` so the CI `verify` job must pass before merging.
+- [x] Protect `main` so the CI `verify` job must pass before merging.
 
 **Done when:** pushing a tag produces a zip on a GitHub release, and that zip is what's in the
 store.
@@ -69,7 +70,7 @@ store.
 retires the model or beta, or changes a parameter, every answer fails for every user while CI
 stays green, and the fix waits on store review.
 
-- [ ] Create a dedicated Anthropic API key with a low spend limit and save it as the
+- [x] Create a dedicated Anthropic API key with a low spend limit and save it as the
       `SNAPSCREEN_LIVE_API_KEY` repository secret.
 - [x] Add [.github/workflows/live-api.yml](.github/workflows/live-api.yml) (daily, plus manual
       runs) and [src/lib/anthropic.live.test.ts](src/lib/anthropic.live.test.ts), which sends the
@@ -123,7 +124,8 @@ you anything you can act on.
 - [ ] Show the extension version on the options page (`chrome.runtime.getManifest().version`).
 - [ ] Add a "Report a problem" link that opens a prefilled GitHub issue with the version,
       browser, OS and last error code, but no screenshot, key or answer.
-- [ ] Keep all of it local, so the README's "No SnapScreen servers" promise stays true.
+- [ ] Keep all of it local, so the privacy policy's "SnapScreen has no servers" promise stays
+      true.
 
 **Done when:** a user's bug report includes the version and an error code.
 
@@ -158,6 +160,7 @@ only in [docs/security.md](docs/security.md).
       store review.
 - [ ] Keep every release zip on GitHub releases, so you always know what each version shipped.
 - [ ] Repeat the manual test pass (1.5) before each release.
-- [ ] Keep Dependabot and the `npm audit` gate, and add `github-actions` to
-      [.github/dependabot.yml](.github/dependabot.yml) so workflow actions stay current.
+- [ ] Keep Dependabot and the `npm audit` gate.
+- [x] Add `github-actions` to [.github/dependabot.yml](.github/dependabot.yml) so workflow
+      actions stay current.
 - [ ] Update the privacy policy and `docs/security.md` whenever data handling changes.

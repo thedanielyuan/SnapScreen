@@ -31,7 +31,6 @@ const testLimits = {
 };
 
 vi.mock('../content/index.ts?script&iife', () => ({ default: 'content-script.js' }));
-vi.mock('../content/overlay.css?inline', () => ({ default: '/* content styles */' }));
 vi.mock('../lib/crop', () => ({
   cropImage: dependencies.cropImage,
   fitHistoryScreenshotsToLimits: dependencies.fitHistoryScreenshotsToLimits,

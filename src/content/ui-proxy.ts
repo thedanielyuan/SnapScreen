@@ -246,5 +246,3 @@ export function disposeResultPanel(): void {
   host.send({ type: 'SNAPSCREEN_UI_DISPOSE_ALL' });
   host.dispose();
 }
-
-export type { SnipOverlayDisposer } from './snip-overlay';

@@ -116,10 +116,6 @@ if (bootstrap) {
         showErrorToast(value.message);
         break;
 
-      case 'SNAPSCREEN_UI_DISPOSE_RESULT':
-        disposeResultPanel();
-        break;
-
       case 'SNAPSCREEN_UI_DISPOSE_ALL':
         disposeFrameUi();
         controllerPort?.close();

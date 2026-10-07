@@ -95,7 +95,7 @@ cached for about 5 minutes after its last use.
 - **nativeMessaging:** connects to the separately installed local macOS companion when you
   explicitly choose native mode and invoke SnapScreen, or choose **Check companion** in
   Settings for a data-free version handshake. Native sessions transfer screenshots and answer
-  data to that process and receives selection and follow-up actions; it never transfers keys.
+  data to that process and receive selection and follow-up actions; they never transfer keys.
 - **Access to `api.anthropic.com`:** sends your snip and question to Anthropic.
 - **Access to local files (optional):** requested only when you use SnapScreen on a `file://`
   page.

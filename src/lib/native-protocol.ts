@@ -74,11 +74,7 @@ function isNonemptyText(value: unknown, maximum: number): value is string {
 function isImageDataUrl(value: unknown): value is string {
   if (!isText(value, MAX_IMAGE_DATA_URL_BYTES) || !value.startsWith(PNG_PREFIX)) return false;
   const payload = value.slice(PNG_PREFIX.length);
-  // A regex `$` also matches before a final newline; require the match to consume every byte.
-  const match = /^[A-Za-z0-9+/]+={0,2}$/u.exec(payload);
-  return payload.length > 0
-    && payload.length % 4 === 0
-    && match?.[0].length === payload.length;
+  return payload.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/u.test(payload);
 }
 
 function isWithinFrameLimit(value: Record<string, unknown>, maximum: number): boolean {

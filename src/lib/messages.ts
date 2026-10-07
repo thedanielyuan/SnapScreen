@@ -105,5 +105,3 @@ export type CsToBgMessage =
   | { type: 'SNIP_CANCELLED'; captureId: string }
   | { type: 'UI_UNAVAILABLE' }
   | { type: 'OPEN_SETTINGS' };
-
-export type RuntimeMessage = BgToCsMessage | CsToBgMessage;
