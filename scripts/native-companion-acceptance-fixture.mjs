@@ -1,9 +1,11 @@
+import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { cp, readFile, readdir, writeFile } from 'node:fs/promises';
-import { dirname, join, relative, resolve } from 'node:path';
+import { cp, readFile, realpath, writeFile } from 'node:fs/promises';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { EXTENSION_ID, EXTENSION_KEY } from '../experiments/native-phase1/extension/config.mjs';
+import { hashFiles, hashSummary, selectNativeExtension } from './native-extension-artifact.mjs';
 
-export { EXTENSION_ID };
+export { EXTENSION_ID, hashFiles };
 
 // This function is serialized into the disposable extension, never the shipped build. It
 // deliberately has no passthrough fetch: fixture mistakes cannot spend API credit.
@@ -130,39 +132,58 @@ export function installAcceptanceShim() {
   });
 }
 
-export async function hashFiles(directory) {
-  const result = {};
-  async function visit(current) {
-    for (const entry of (await readdir(current, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
-      const path = join(current, entry.name);
-      if (entry.isSymbolicLink()) throw new Error(`Artifact contains a symbolic link: ${path}`);
-      if (entry.isDirectory()) await visit(path);
-      else if (entry.isFile()) result[relative(directory, path)] = createHash('sha256').update(await readFile(path)).digest('hex');
-    }
+// The selected extension path is canonical, so compare the not-yet-created destination
+// through its existing parents too (for example macOS /var -> /private/var).
+async function canonicalPath(path) {
+  try { return await realpath(path); }
+  catch (error) {
+    if (error.code !== 'ENOENT' || dirname(path) === path) throw error;
+    return join(await canonicalPath(dirname(path)), basename(path));
   }
-  await visit(directory);
-  return result;
 }
 
 export async function prepareAcceptanceExtension(source, destination) {
   const derivedId = createHash('sha256').update(Buffer.from(EXTENSION_KEY, 'base64')).digest('hex')
     .slice(0, 32).replace(/[0-9a-f]/g, digit => String.fromCharCode(97 + parseInt(digit, 16)));
   if (derivedId !== EXTENSION_ID) throw new Error('Fixture extension key and ID disagree.');
-  const originalHashes = await hashFiles(source);
-  await cp(source, destination, { recursive: true });
-  const manifest = JSON.parse(await readFile(join(destination, 'manifest.json'), 'utf8'));
-  if (!manifest.permissions?.includes('nativeMessaging') || manifest.background?.type !== 'module') {
-    throw new Error('Build the current SnapScreen extension before running acceptance.');
-  }
+  // Validate the untouched production artifact, including native-only exclusions, before
+  // adding any fixture code. Never relax the package gate to accommodate instrumentation.
+  const originalExtension = await selectNativeExtension(source);
+  const originalHashes = originalExtension.hashes;
+  destination = await canonicalPath(resolve(destination));
+  const manifest = structuredClone(originalExtension.manifest);
   const worker = resolve(destination, manifest.background.service_worker);
-  if (!worker.startsWith(`${resolve(destination)}/`)) throw new Error('The worker must be inside the extension.');
+  if (!worker.startsWith(`${destination}/`)) throw new Error('The worker must be inside the extension.');
+  if (destination === originalExtension.directory || destination.startsWith(`${originalExtension.directory}/`)) {
+    throw new Error('The acceptance fixture must be outside the production extension.');
+  }
+  const originalWorker = join(dirname(worker), 'native-acceptance-original-worker.js');
+  const shim = join(dirname(worker), 'native-acceptance-shim.js');
+  if ([originalWorker, shim].some(path => Object.hasOwn(originalHashes, relative(destination, path)))) {
+    throw new Error('The production extension already contains acceptance fixture files.');
+  }
+  await cp(originalExtension.directory, destination, { recursive: true, errorOnExist: true, force: false });
+  assert.deepEqual(await hashFiles(destination), originalHashes,
+    'The copied acceptance extension differs from the selected production artifact.');
+  const modifications = [];
+  const currentHashes = { ...originalHashes };
+  async function modify(path, contents, description) {
+    const file = relative(destination, path);
+    await writeFile(path, contents);
+    const afterSha256 = createHash('sha256').update(contents).digest('hex');
+    modifications.push({ path: file, description, beforeSha256: currentHashes[file] ?? null, afterSha256 });
+    currentHashes[file] = afterSha256;
+  }
   manifest.key = EXTENSION_KEY;
+  await modify(join(destination, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'Set the public fixture extension key');
   manifest.name = 'SnapScreen — packaged companion acceptance';
-  await writeFile(join(destination, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
-  await writeFile(join(dirname(worker), 'native-acceptance-original-worker.js'), await readFile(worker));
-  await writeFile(join(dirname(worker), 'native-acceptance-shim.js'), `(${installAcceptanceShim.toString()})();\n`);
-  await writeFile(worker, "import './native-acceptance-shim.js';\nimport './native-acceptance-original-worker.js';\n");
-  return { originalHashes, fixtureHashes: await hashFiles(destination), extensionId: EXTENSION_ID,
-    modifications: ['Public fixture key and display name', 'Worker loader imports mock-only API and metadata observer shim'],
-    manifest };
+  await modify(join(destination, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'Set the fixture display name');
+  await modify(originalWorker, await readFile(worker), 'Preserve the byte-identical production worker beside its loader');
+  await modify(shim, `(${installAcceptanceShim.toString()})();\n`, 'Add mock-only API responses and metadata observation');
+  await modify(worker, "import './native-acceptance-shim.js';\nimport './native-acceptance-original-worker.js';\n",
+    'Load the fixture shim before the unmodified production worker');
+  const fixtureHashes = await hashFiles(destination);
+  assert.deepEqual(fixtureHashes, currentHashes, 'The acceptance fixture modifications do not match the recorded hashes.');
+  return { originalExtension, originalHashes, fixtureHashes, fixtureSha256: hashSummary(fixtureHashes),
+    extensionId: EXTENSION_ID, modifications, manifest };
 }

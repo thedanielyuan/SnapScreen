@@ -12,6 +12,7 @@
     "build:extension-native": "tsc --noEmit && vite build --config vite.native.config.ts",
     "test:browser": "node scripts/extension-smoke.mjs",
     "test:browser-native": "node --test scripts/extension-native-package.node-test.mjs && node scripts/extension-native-smoke.mjs",
+    "test:extension-artifacts": "node --test scripts/native-extension-artifact.node-test.mjs",
     "build:native": "node scripts/native-companion-build.mjs",
     "test:native": "node scripts/native-companion-test.mjs",
     "test:native-live": "node scripts/native-companion-live-test.mjs",
@@ -23,6 +24,7 @@
     "test:native-prototype": "node --test experiments/native-phase1/extension/*.node-test.mjs && experiments/native-phase1/build/SnapScreenPhase1.app/Contents/MacOS/SnapScreenPhase1 --self-test",
     "experiment:native": "node scripts/native-phase1-session.mjs",
     "package": "node scripts/package-extension.mjs",
+    "package:extension-native": "node scripts/package-extension.mjs --variant native-only",
     "preview": "vite preview"
   },
   "devDependencies": {

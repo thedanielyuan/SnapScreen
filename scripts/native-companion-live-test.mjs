@@ -1,14 +1,25 @@
 // Real Chrome-launched companion test: a disposable browser profile and host registration, mocked
 // API answers, and an unattended companion build (test hooks). Companion windows appear briefly.
+import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { parseArgs } from 'node:util';
 import { chromium } from 'playwright';
 import { EXTENSION_KEY, EXTENSION_ID } from '../experiments/native-phase1/extension/config.mjs';
+import { describeFileChanges, hashFiles, hashSummary, selectNativeExtension } from './native-extension-artifact.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
-const DIST = join(ROOT, 'dist');
+const { values } = parseArgs({ options: {
+  'extension-dir': { type: 'string' },
+  help: { type: 'boolean', default: false },
+} });
+if (values.help) {
+  console.log('Usage: node scripts/native-companion-live-test.mjs [--extension-dir directory] (default: dist/)');
+  process.exit(0);
+}
+const selectedExtension = await selectNativeExtension(values['extension-dir']);
 const FIXTURE_URL = 'https://api.anthropic.com/snapscreen-native-live';
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const TEST_API_KEY = 'sk-ant-snapscreen-native-live-only-5D21C8';
@@ -47,14 +58,16 @@ async function waitFor(description, predicate, timeout = STEP_TIMEOUT_MS) {
 }
 
 async function prepareExtension(directory) {
-  await cp(DIST, directory, { recursive: true });
+  await cp(selectedExtension.directory, directory, { recursive: true });
+  assert.deepEqual(await hashFiles(directory), selectedExtension.hashes,
+    'The copied extension differs from the selected build.');
   const manifest = JSON.parse(await readFile(join(directory, 'manifest.json'), 'utf8'));
   manifest.key = EXTENSION_KEY;
   await writeFile(join(directory, 'manifest.json'), JSON.stringify(manifest));
   const loaderPath = join(directory, manifest.background.service_worker);
-  await writeFile(join(directory, 'native-live-original-worker.js'), await readFile(loaderPath, 'utf8'));
+  await writeFile(join(dirname(loaderPath), 'native-live-original-worker.js'), await readFile(loaderPath, 'utf8'));
   // Records the real action callback so the test can invoke it; only this disposable copy has it.
-  await writeFile(join(directory, 'native-live-action-shim.js'), `
+  await writeFile(join(dirname(loaderPath), 'native-live-action-shim.js'), `
 const addActionListener = chrome.action.onClicked.addListener.bind(chrome.action.onClicked);
 globalThis.__nativeLiveActionListeners = [];
 chrome.action.onClicked.addListener = (listener) => {
@@ -63,16 +76,13 @@ chrome.action.onClicked.addListener = (listener) => {
 };
 `);
   await writeFile(loaderPath, "import './native-live-action-shim.js';\nimport './native-live-original-worker.js';\n");
+  const fixtureHashes = await hashFiles(directory);
+  return { originalExtension: selectedExtension, fixtureHashes, fixtureSha256: hashSummary(fixtureHashes),
+    modifications: describeFileChanges(selectedExtension.hashes, fixtureHashes) };
 }
 
 async function run(root) {
-  let manifest;
-  try {
-    manifest = JSON.parse(await readFile(join(DIST, 'manifest.json'), 'utf8'));
-  } catch (error) {
-    throw new Error('Could not read dist/manifest.json. Run npm run build first.', { cause: error });
-  }
-  if (!manifest.permissions?.includes('nativeMessaging')) throw new Error('dist/ lacks nativeMessaging.');
+  const { manifest } = selectedExtension;
 
   const bundle = join(root, 'SnapScreenCompanionTest.app');
   const build = spawnSync(process.execPath, [join(ROOT, 'scripts/native-companion-build.mjs'),
@@ -85,7 +95,7 @@ async function run(root) {
   const extension = join(root, 'extension');
   const profile = join(root, 'profile');
   const scenarioFile = join(root, 'scenario.txt');
-  await prepareExtension(extension);
+  const extensionEvidence = await prepareExtension(extension);
   await writeFile(scenarioFile, 'hold');
 
   const apiRequests = [];
@@ -97,6 +107,8 @@ async function run(root) {
     env: { ...process.env, SNAPSCREEN_TEST_SCENARIO_FILE: scenarioFile },
   });
   try {
+    // Block unmatched provider requests, including accidental endpoint changes.
+    await context.route('https://api.anthropic.com/**', route => route.abort());
     await context.route(FIXTURE_URL, route => route.fulfill({
       body: '<!doctype html><html><body><h1>What is 2 + 2?</h1></body></html>', contentType: 'text/html' }));
     await context.route(API_URL, async (route) => {
@@ -312,6 +324,8 @@ async function run(root) {
     if (leaks.length) throw new Error(`The API key reached the companion in: ${leaks.join(', ')}.`);
     if (apiRequests.length !== 2) throw new Error('A failed or expired session made an API request.');
     if (page.frames().length !== 1) throw new Error('Native mode attached a frame to the page.');
+    console.log(JSON.stringify({ passed: true, extension: extensionEvidence,
+      nativeApp: 'disposable test-hook build', physicalAcceptance: 'not measured' }, null, 2));
   } finally {
     await context.close().catch(() => undefined);
     for (const pid of hostPids()) spawnSync('kill', [pid]);

@@ -12,8 +12,22 @@ Stop, Retry, and Close actions must use the shipping AppKit controls.
 ```bash
 npm run build
 npx playwright install --no-shell chromium
-node scripts/native-companion-acceptance.mjs --app "/absolute/path/SnapScreenCompanion.app"
+npm run experiment:native-packaged -- --app "/absolute/path/SnapScreenCompanion.app"
 ```
+
+To collect evidence for the native-only extension, build and select it explicitly:
+
+```bash
+npm run build:extension-native
+npm run experiment:native-packaged -- --extension-dir dist-native \
+  --app "/absolute/path/SnapScreenCompanion.app"
+```
+
+`--extension-dir` defaults to the repository `dist/`; explicit relative paths resolve from the
+current working directory. A missing or invalid selected build fails before the browser starts.
+The runner validates the built variant and records its absolute source path, original per-file
+and aggregate SHA-256 hashes, and the fixture's hashes. Use the same candidate and companion
+artifacts as the automated packaged tests; a report for one variant does not establish the other.
 
 The default browser is Playwright's installed Chromium binary, launched directly with a fresh
 profile. `--browser /absolute/path/to/browser` selects another Chromium-based executable, such
@@ -27,7 +41,7 @@ version.
 `native/macos/build/acceptance-results`). `--trial-seconds 90` extends the default 45-second
 action window; values from 10 to 300 seconds are accepted.
 
-The temporary extension copies freshly built `dist/`, adds a stable public fixture key and
+The temporary extension copies the selected fresh build, adds a stable public fixture key and
 display name, and wraps the production worker with a mock-only fetch and metadata observer.
 It keeps the real action/shortcut callbacks, `activeTab` authorization, capture, crop, native
 bridge, conversation controller, and API stream parser. The shim seeds a dummy key and native
@@ -35,7 +49,8 @@ mode only in that disposable profile. Every worker `fetch` is either the locally
 Anthropic-shaped response or a blocked request; it never falls through to the network. A
 successful capture therefore requires a real toolbar or keyboard invocation. These fixture
 changes are named and separately hashed in every report, alongside all packaged app files and
-the original `dist/` files.
+the original selected extension files. Source validation precedes fixture instrumentation.
+The live functional suite uses its own disposable test-hook app; that app is not accepted here.
 
 Only this browser profile registers `com.snapscreen.companion`, with the absolute executable
 path and one exact fixture extension origin. `quit`, Ctrl+C, and normal error cleanup close

@@ -5,14 +5,25 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { access, cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { chromium } from 'playwright';
 import { EXTENSION_KEY, EXTENSION_ID } from '../experiments/native-phase1/extension/config.mjs';
+import { describeFileChanges, hashFiles, hashSummary, selectNativeExtension } from './native-extension-artifact.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const { version } = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8'));
-const { values } = parseArgs({ options: { archive: { type: 'string' } } });
+const { values } = parseArgs({ options: {
+  archive: { type: 'string' },
+  'extension-dir': { type: 'string' },
+  help: { type: 'boolean', default: false },
+} });
+if (values.help) {
+  console.log('Usage: node scripts/native-companion-packaged-test.mjs [--archive file.zip] [--extension-dir directory] (default: dist/)');
+  process.exit(0);
+}
+const selectedExtension = await selectNativeExtension(values['extension-dir']);
+const { protocolVersion } = selectedExtension;
 const architecture = process.arch === 'arm64' ? 'arm64' : 'x86_64';
 const archive = resolve(values.archive ?? join(ROOT, 'native/macos/build/package',
   `SnapScreenCompanion-${version}-macos-${architecture}-unsigned.zip`));
@@ -54,21 +65,23 @@ try {
   const build = JSON.parse(await readFile(join(app, 'Contents/Resources/snapscreen-build.json'), 'utf8'));
   assert.equal(build.testHooks, false);
   assert.equal(build.version, version);
-  assert.equal(build.protocolVersion, 3);
+  assert.equal(build.protocolVersion, selectedExtension.protocolVersion);
   const selfTest = command(join(app, 'Contents/MacOS/SnapScreenCompanion'), ['--self-test']);
   assert.match(selfTest, /checks passed/);
   assert.doesNotMatch(selfTest, /test hooks/);
 
   const extension = join(root, 'extension');
-  await cp(join(ROOT, 'dist'), extension, { recursive: true });
+  await cp(selectedExtension.directory, extension, { recursive: true });
+  assert.deepEqual(await hashFiles(extension), selectedExtension.hashes,
+    'The copied extension differs from the selected build.');
   const manifestPath = join(extension, 'manifest.json');
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   assert.equal(manifest.version, version);
   manifest.key = EXTENSION_KEY;
   await writeFile(manifestPath, JSON.stringify(manifest));
   const loader = join(extension, manifest.background.service_worker);
-  await writeFile(join(extension, 'packaged-original-worker.js'), await readFile(loader));
-  await writeFile(join(extension, 'packaged-action-shim.js'), `
+  await writeFile(join(dirname(loader), 'packaged-original-worker.js'), await readFile(loader));
+  await writeFile(join(dirname(loader), 'packaged-action-shim.js'), `
 const addListener = chrome.action.onClicked.addListener.bind(chrome.action.onClicked);
 globalThis.__packagedAction = [];
 chrome.action.onClicked.addListener = listener => {
@@ -77,6 +90,10 @@ chrome.action.onClicked.addListener = listener => {
 };
 `);
   await writeFile(loader, "import './packaged-action-shim.js';\nimport './packaged-original-worker.js';\n");
+  const fixtureHashes = await hashFiles(extension);
+  const extensionEvidence = { originalExtension: selectedExtension,
+    fixtureHashes, fixtureSha256: hashSummary(fixtureHashes),
+    modifications: describeFileChanges(selectedExtension.hashes, fixtureHashes) };
   // The documented commands use the default location, whose "Application Support" path has a space.
   const home = join(root, 'home');
   await mkdir(home);
@@ -104,7 +121,7 @@ chrome.action.onClicked.addListener = listener => {
     await worker.evaluate(() => { globalThis.__packaged = new Map(); });
   }
   const workers = contexts.map(context => context.serviceWorkers()[0]);
-  const connect = (worker, id, message = { type: 'hello', version: 3, connectionId: id }) =>
+  const connect = (worker, id, message = { type: 'hello', version: protocolVersion, connectionId: id }) =>
     worker.evaluate(({ id, message }) => {
       const port = chrome.runtime.connectNative('com.snapscreen.companion');
       const state = { port, messages: [], disconnected: false };
@@ -123,7 +140,7 @@ chrome.action.onClicked.addListener = listener => {
   const ready = async (worker, id) => {
     await connect(worker, id);
     await waitFor(`ready ${id}`, async () => (await state(worker, id)).messages.length > 0);
-    assert.deepEqual((await state(worker, id)).messages, [{ type: 'ready', version: 3, connectionId: id }]);
+    assert.deepEqual((await state(worker, id)).messages, [{ type: 'ready', version: protocolVersion, connectionId: id }]);
   };
   const disconnect = (worker, id) => worker.evaluate(id => globalThis.__packaged.get(id).port.disconnect(), id);
 
@@ -140,8 +157,8 @@ chrome.action.onClicked.addListener = listener => {
   // Invalid requests must terminate the real host before any capture can be processed.
   for (const [id, message] of [
     ['version', { type: 'hello', version: 999, connectionId: 'version' }],
-    ['extra_key', { type: 'hello', version: 3, connectionId: 'extra_key', unexpected: true }],
-    ['oversized', { type: 'hello', version: 3, connectionId: 'oversized', padding: 'x'.repeat(32 * 1024 * 1024) }],
+    ['extra_key', { type: 'hello', version: protocolVersion, connectionId: 'extra_key', unexpected: true }],
+    ['oversized', { type: 'hello', version: protocolVersion, connectionId: 'oversized', padding: 'x'.repeat(32 * 1024 * 1024) }],
   ]) {
     await connect(workers[0], id, message);
     await waitFor(`rejection of ${id}`, async () => (await state(workers[0], id)).disconnected);
@@ -151,15 +168,15 @@ chrome.action.onClicked.addListener = listener => {
 
   // Production selection surface receives a real PNG. A transport loss releases it and exits.
   await ready(workers[0], 'capture');
-  await workers[0].evaluate(async () => {
+  await workers[0].evaluate(async (version) => {
     const canvas = new OffscreenCanvas(800, 600);
     const paint = canvas.getContext('2d');
     paint.fillStyle = '#ffffff'; paint.fillRect(0, 0, 800, 600);
     const png = new Uint8Array(await (await canvas.convertToBlob()).arrayBuffer());
     const imageDataUrl = `data:image/png;base64,${btoa(String.fromCharCode(...png))}`;
-    globalThis.__packaged.get('capture').port.postMessage({ type: 'capture', version: 3,
+    globalThis.__packaged.get('capture').port.postMessage({ type: 'capture', version,
       connectionId: 'capture', sessionId: 'session', requestId: 'request', imageDataUrl });
-  });
+  }, protocolVersion);
   await delay(300);
   assert.equal((await state(workers[0], 'capture')).disconnected, false);
   assert.equal(hostPids().length, 1);
@@ -229,6 +246,7 @@ chrome.action.onClicked.addListener = listener => {
     }
   }
   console.log(JSON.stringify({ passed: true, archive, archiveSha256: archiveHash, version,
+    extension: extensionEvidence,
     browserVersion, architecture: process.arch, macOS: command('sw_vers', ['-productVersion']),
     checks: ['production self-tests', 'packaged install at the default path', 'real Chrome handshake', 'two profiles',
       'version and shape rejection', 'oversized malformed request rejection', 'capture disconnect',
