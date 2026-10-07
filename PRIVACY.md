@@ -1,6 +1,6 @@
 # SnapScreen privacy policy
 
-Last updated: October 6, 2026
+Last updated: October 7, 2026
 
 SnapScreen is a Chrome extension that answers questions about part of a web page. This policy
 explains what it handles, where that data goes, and what stays on your device.
@@ -8,8 +8,9 @@ explains what it handles, where that data goes, and what stays on your device.
 ## Summary
 
 - SnapScreen has no servers. It sends your snips and questions to Anthropic, the AI provider
-  that writes the answers. Optional native mode also gives screenshot and conversation data
-  to the separately installed SnapScreen companion on your Mac.
+  that writes the answers. Native mode also gives screenshot and conversation data
+  to the separately installed SnapScreen companion on your Mac. Native mode is optional in
+  the ordinary extension and required in the separate native-only development build.
 - It doesn't collect analytics, show ads, or sell or share your data with anyone else.
 - Your API key and settings stay in Chrome on your device.
 
@@ -29,8 +30,10 @@ SnapScreen never writes screenshots or conversations to disk.
 
 ### Optional macOS companion
 
-The **In Chrome** interface is the default. To use native mode, install the companion and
-explicitly select it in Settings. Chrome starts a separate local process for each native
+The **In Chrome** interface is the default in the ordinary extension. To use its native mode,
+install the companion and explicitly select it in Settings. The separate native-only build
+always uses the companion, has no interface selector, and injects no page UI or workspace.
+It exposes no web-accessible extension resources. Chrome starts a separate local process for each native
 session. It receives the screenshot, crop, streamed answers, and follow-ups; it never receives
 your API key, the system prompt, or the structured history used for Anthropic requests. The
 extension still sends every API request directly to Anthropic. No local web server or shared
@@ -89,16 +92,19 @@ cached for about 5 minutes after its last use.
 
 ## Permissions
 
-- **activeTab and scripting:** capture the current tab and show SnapScreen on it, only after
-  you click the icon or press the shortcut. SnapScreen can't read or change any other page.
+- **activeTab:** captures the current tab only after you click the icon or press the shortcut.
+- **scripting (ordinary build only):** shows SnapScreen's In Chrome UI on the invoked tab.
+  The native-only build does not request this permission.
 - **storage:** saves your API key and settings on your device.
 - **nativeMessaging:** connects to the separately installed local macOS companion when you
-  explicitly choose native mode and invoke SnapScreen, or choose **Check companion** in
+  invoke SnapScreen in native mode (always used by the native-only build), or choose **Check companion** in
   Settings for a data-free version handshake. Native sessions transfer screenshots and answer
   data to that process and receive selection and follow-up actions; they never transfer keys.
 - **Access to `api.anthropic.com`:** sends your snip and question to Anthropic.
-- **Access to local files (optional):** requested only when you use SnapScreen on a `file://`
-  page.
+- **Access to local files (optional):** supports capture on a `file://` page. The ordinary
+  In Chrome flow may request access when invoked on a file. Native capture asks you through
+  badge feedback to enable file access in Chrome's extension management page first; it opens
+  no permission dialog during capture.
 
 ## Security
 
@@ -110,7 +116,7 @@ has the details.
 ## Your choices
 
 - Remove your API key at any time on SnapScreen's Settings page.
-- Choose **In Chrome** in Settings to use the extension without the native companion.
+- Choose **In Chrome** in the ordinary extension's Settings to use it without the native companion.
 - Uninstalling SnapScreen deletes its stored key and settings from Chrome.
 
 ## Changes

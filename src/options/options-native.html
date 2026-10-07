@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SnapScreen Settings</title>
+    <link rel="stylesheet" href="./options.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>SnapScreen Settings</h1>
+      <p class="subtitle">
+        Configure your Anthropic API key and default analysis prompt.
+      </p>
+
+      <form id="settings-form">
+        <label for="api-key">Anthropic API Key</label>
+        <div class="input-row">
+          <input
+            type="password"
+            id="api-key"
+            name="apiKey"
+            placeholder="sk-ant-…"
+            autocomplete="off"
+          />
+          <button type="button" id="toggle-key" class="btn-secondary" aria-label="Show API key" aria-pressed="false">
+            Show
+          </button>
+        </div>
+        <p class="hint">
+          Get a key from the
+          <a href="https://console.anthropic.com/" target="_blank" rel="noopener noreferrer"
+            >Anthropic Console</a
+          >. Stored locally on this device only.
+        </p>
+
+        <label for="default-prompt">Default Prompt</label>
+        <textarea
+          id="default-prompt"
+          name="defaultPrompt"
+          rows="3"
+          placeholder="Answer the question shown in this screenshot."
+        ></textarea>
+
+        <h2 class="companion-heading">macOS companion</h2>
+        <section id="companion-section" class="companion-section" aria-label="macOS companion">
+          <p class="hint companion-intro">
+            This version of SnapScreen uses the separately installed macOS companion for snips
+            and answers. Modifier keys may still reach the page. If the companion can't start,
+            the toolbar badge shows why.
+          </p>
+          <div class="companion-actions">
+            <button type="button" id="check-companion" class="btn-secondary" aria-describedby="companion-status">
+              Check companion
+            </button>
+            <a href="https://github.com/thedanielyuan/SnapScreen/blob/main/README.md#native-only-development-build" target="_blank" rel="noopener noreferrer">
+              Setup guide
+            </a>
+          </div>
+          <p id="companion-status" class="companion-status" role="status" aria-live="polite">
+            Checking briefly starts the companion. No window opens, and no screenshot or API key is used.
+          </p>
+        </section>
+
+        <details id="advanced-settings" class="advanced-section">
+          <summary>Advanced</summary>
+          <fieldset class="limits-section">
+            <legend>Request limits</legend>
+            <p class="hint limits-intro">
+              Keep requests predictable and within Anthropic's image and request limits.
+            </p>
+            <div class="limits-grid">
+              <label for="max-input-characters">
+                Question characters
+                <input type="number" id="max-input-characters" min="100" max="50000" step="100" required />
+              </label>
+              <label for="max-conversation-turns">
+                Conversation turns
+                <input type="number" id="max-conversation-turns" min="2" max="50" step="1" required />
+              </label>
+              <label for="max-screenshot-megabytes">
+                Screenshot size (MB)
+                <input type="number" id="max-screenshot-megabytes" min="1" max="10" step="1" required />
+              </label>
+              <label for="max-screenshot-dimension">
+                Screenshot edge (px)
+                <input type="number" id="max-screenshot-dimension" min="512" max="8000" step="1" required />
+              </label>
+            </div>
+            <p class="hint limits-note">
+              Defaults: 4,000 characters, 12 turns, 5 MB, and 2,576 px. The API ceilings are 10 MB and 8,000 px.
+            </p>
+          </fieldset>
+        </details>
+
+        <div class="actions">
+          <button type="submit" id="save-settings" class="btn-primary">Save</button>
+          <button type="button" id="test-key" class="btn-secondary">Test key</button>
+          <button type="button" id="remove-key" class="btn-danger" disabled>Remove key</button>
+          <span id="status" class="status" role="status" aria-live="polite" hidden></span>
+        </div>
+      </form>
+
+      <section class="shortcut-section">
+        <h2>Keyboard shortcut</h2>
+        <p class="hint">
+          Start a snip with <kbd id="shortcut-display">…</kbd> ·
+          <button type="button" id="open-shortcuts" class="btn-link">
+            Change in Chrome settings
+          </button>
+        </p>
+      </section>
+    </main>
+    <script type="module" src="./options-native.ts"></script>
+  </body>
+</html>

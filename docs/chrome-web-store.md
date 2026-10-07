@@ -1,7 +1,7 @@
 # Chrome Web Store listing
 
 Answers for the **Privacy practices** tab in the Chrome Web Store Developer Dashboard. Keep them
-in sync with [PRIVACY.md](../PRIVACY.md) and `src/manifest.json` whenever permissions or data
+in sync with [PRIVACY.md](../PRIVACY.md), `src/manifest.json`, and `src/manifest-native.json` whenever permissions or data
 handling change.
 
 The package now includes an explicit, experimental macOS companion mode alongside the default
@@ -23,6 +23,25 @@ The permission stays required rather than optional because a running service wor
 `chrome.runtime.connectNative` did not update when the permission changed at runtime (tested in
 Chromium 149). A grant from Settings might therefore not take effect until the worker restarts.
 Alternatives are a separate native build or a reworked optional-permission flow.
+
+## Native-only development variant
+
+`npm run build:extension-native` builds `dist-native/` from `src/manifest-native.json`.
+It requires the separately installed macOS companion and has no interface selector. It omits
+`scripting`, content scripts, all web-accessible resources, the result frame, and the workspace.
+The ordinary build and its `npm run package` archive remain separate. Native-only extension
+archive/release tooling and physical acceptance are still pending; this build is not a store
+submission or a signed/notarized companion release.
+
+For a future native-only listing, describe the single purpose as answering a user-selected
+region of the current tab in the local macOS companion. Omit the `scripting` justification
+below; describe `storage` as keeping only the API key and settings, with no workspace routing
+metadata. `activeTab`, `nativeMessaging`, and Anthropic host access serve the same purposes.
+Local-file capture requires file access enabled in Chrome's extension management page and
+never opens an in-session permission request. First installation opens trusted Settings;
+capture errors only report through the extension badge. The same screenshot/answer transfers
+and credential protections apply. Each variant's native host registration must authorize its
+exact extension ID; do not overwrite another registration implicitly.
 
 ## Single purpose
 

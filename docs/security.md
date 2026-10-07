@@ -3,6 +3,29 @@
 How SnapScreen handles your API key and screenshots, and how its UI is isolated from the pages
 it runs on. The [privacy policy](../PRIVACY.md) is the short version.
 
+## Native-only extension build
+
+`npm run build:extension-native` produces a separate `dist-native/` extension that always uses
+the macOS companion. Its dedicated worker has no content-script import, injection code,
+workspace, or page-message handlers. Its manifest has no `scripting` permission, content
+scripts, or web-accessible resources. The packaged Settings page and icons are private
+extension resources. The ordinary `dist/` build retains its existing interface choice and
+injected UI boundary described below.
+
+Native-only Settings keeps credential management, prompt/limits, and the explicit **Check
+companion** handshake. It has no interface selector; a previously stored `interfaceMode` is
+ignored by both Settings and capture. Credentials, API requests, and history stay in trusted
+extension contexts under the same native data contract below. Both builds open Settings on
+first installation only. Native capture failures use badge feedback and never open Settings, another
+tab, or a permission dialog. Local-file capture requires the user to enable file access in
+Chrome's extension management page before invoking capture.
+
+The native-only build requires its own exact extension ID in the host registration. It cannot
+implicitly share or replace another variant's registration. See [local setup](../README.md#native-only-development-build).
+Automated package and mocked browser checks establish these build boundaries; physical focus
+and input acceptance remain separate, pending work. Removing web-accessible resources does
+not establish universal undetectability or focus preservation.
+
 ## Optional macOS companion
 
 Settings defaults to the existing **In Chrome** interface. Selecting **macOS companion
@@ -49,7 +72,7 @@ screenshots, API credentials, or conversation content. There is no automatic upd
 surface does not promise alignment with Chrome's content area. Phase 1's measured observations
 do not establish the completed companion's interaction behavior; modifier keys can still reach
 page handlers. Escape and Command-W close a companion window when the key is released, so that
-release is not delivered to Chrome after the window disappears. The package retains the
+release is not delivered to Chrome after the window disappears. The ordinary package retains the
 web-accessible resources required by its default injected mode. See
 [setup and remaining verification](native-phase2.md) and the
 [Phase 1 results](native-phase1-results.md).
