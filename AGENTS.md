@@ -20,12 +20,14 @@ npm run build                        # tsc --noEmit && vite build → dist/ (nev
 npm run test:browser                 # Playwright smoke test of dist/; mocked API, no key needed
 npm run build:extension-native       # separate native-only Chrome extension → dist-native/
 npm run test:browser-native          # ZIP/package negative controls + browser lifecycle; both fresh builds
+npm run test:extension-artifacts     # variant selection, runner CLI and release package regressions
 npm run package                      # zip the built dist/ into release/ for the Chrome Web Store
+npm run package:extension-native     # validated native-only ZIP from dist-native/ → release/
 npm run build:native                 # macOS: build the companion app into native/macos/build/
 npm run test:native                  # macOS: companion self-tests and installer/package tests
-npm run test:native-live             # macOS: real Chrome-launched companion sessions; needs dist/
+npm run test:native-live             # macOS: real Chrome-launched companion sessions; defaults to dist/
 npm run package:native               # macOS: unsigned production app archive for local acceptance
-npm run test:native-packaged         # macOS: extracted archive + installed host; needs package and dist/
+npm run test:native-packaged         # macOS: extracted archive + installed host; defaults to dist/
 ```
 
 Before finishing any change, run lint, typecheck, test, build, then test:browser (under 10 s in
@@ -41,17 +43,24 @@ For native-only build or shared background/Settings changes, also run build:exte
 then test:browser-native after the ordinary build/browser checks. The native-only build has its
 own manifest, worker, Settings bootstrap, and Vite config; never import the ordinary worker
 into it or include the content script, result frame, workspace, or web-accessible resources.
-Its worker ignores interfaceMode. Existing native runners still use dist/ until they gain
-explicit variant selection; native-only browser tests use mocked capture/host/API transport.
+Its worker ignores interfaceMode. Native live, packaged, and physical runners accept
+`--extension-dir dist-native`; omission keeps the repository `dist/` default, while explicit
+relative paths resolve from the current working directory. For native-only changes, run live
+and packaged native tests against `dist-native/` explicitly as well as the ordinary variant.
+Native-only browser tests use mocked capture/host/API transport.
 The native-only gate inspects a temporary ZIP before adding its disposable browser shim, then
 loads the extracted assets. Its CDP worker restart checks fresh state/no replay, not natural
 suspension or physical focus. Keep package exclusions and runtime checks ahead of fixture
-instrumentation; never ship the smoke or acceptance shims.
+instrumentation; never ship the smoke or acceptance shims. `package:extension-native` validates and archives
+`dist-native/` separately; the tag workflow continues to publish only the ordinary extension.
 
 For native build, packaging, or installer changes, also run package:native then
 test:native-packaged. The latter uses the shipped installer and production app in disposable
 browser roots. Physical focus acceptance uses `experiment:native-packaged -- --app <path>`;
-read `docs/native-phase4-acceptance.md` before collecting evidence. Signing/notarization is
+pass `--extension-dir dist-native` for the native-only candidate and read
+`docs/native-phase4-acceptance.md` before collecting evidence. Runner evidence records the
+selected variant/path and original/fixture file and aggregate hashes. Packaged and physical
+runners reject native test hooks; only the live suite builds a disposable test-hook app. Signing/notarization is
 explicit opt-in (`docs/native-phase4.md`); default packages are unsigned local acceptance builds.
 
 Unit and smoke tests mock the API, so only `src/lib/anthropic.live.test.ts` catches the real API

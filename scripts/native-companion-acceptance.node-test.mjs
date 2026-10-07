@@ -1,10 +1,34 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { EXTENSION_ID, hashFiles, installAcceptanceShim, prepareAcceptanceExtension } from './native-companion-acceptance-fixture.mjs';
+import { hashSummary } from './native-extension-artifact.mjs';
+
+async function extensionFixture(root, variant = 'ordinary') {
+  const repository = resolve(import.meta.dirname, '..');
+  const source = join(root, 'source');
+  const manifest = JSON.parse(await readFile(join(repository,
+    variant === 'native-only' ? 'src/manifest-native.json' : 'src/manifest.json'), 'utf8'));
+  manifest.version = JSON.parse(await readFile(join(repository, 'package.json'), 'utf8')).version;
+  manifest.background.service_worker = 'worker.js';
+  manifest.icons = { 16: 'icon.png' };
+  manifest.action.default_icon = { 16: 'icon.png' };
+  if (variant === 'ordinary') manifest.web_accessible_resources = [{ resources: ['icon.png'], matches: ['https://*/*'] }];
+  for (const [file, contents] of [
+    ['manifest.json', JSON.stringify(manifest)],
+    ['worker.js', 'globalThis.originalWorker = true;\n'],
+    ['settings.js', 'globalThis.originalSettings = true;\n'],
+    [manifest.options_page, '<script type="module" src="/settings.js"></script>'],
+    ['icon.png', Buffer.from([137, 80, 78, 71])],
+  ]) {
+    await mkdir(dirname(join(source, file)), { recursive: true });
+    await writeFile(join(source, file), contents);
+  }
+  return { source, manifest };
+}
 
 function fixture() {
   function event() {
@@ -30,25 +54,87 @@ function fixture() {
   return { context, port, sent, capture, stored, control: context.nativeAcceptance };
 }
 
-test('fixture preparation preserves production files and adds a stable isolated wrapper', async () => {
+for (const variant of ['ordinary', 'native-only']) test(`${variant} fixture preserves production files and records every isolated edit`, async () => {
   const root = await mkdtemp(join(tmpdir(), 'snapscreen-acceptance-test-'));
   try {
-    const source = join(root, 'source');
+    const { source, manifest } = await extensionFixture(root, variant);
     const destination = join(root, 'fixture');
-    await mkdir(source);
-    await writeFile(join(source, 'manifest.json'), JSON.stringify({ name: 'SnapScreen', permissions: ['nativeMessaging'],
-      background: { type: 'module', service_worker: 'worker.js' } }));
-    await writeFile(join(source, 'worker.js'), 'globalThis.originalWorker = true;\n');
     const before = await hashFiles(source);
     const result = await prepareAcceptanceExtension(source, destination);
     assert.deepEqual(await hashFiles(source), before);
     assert.deepEqual(result.originalHashes, before);
+    assert.equal(result.originalExtension.directory, await realpath(source));
+    assert.equal(result.originalExtension.variant, variant);
+    assert.equal(result.originalExtension.sha256, hashSummary(before));
+    assert.equal(result.originalExtension.protocolVersion, 3);
+    assert.deepEqual(result.originalExtension.manifest, manifest);
     assert.equal(result.extensionId, EXTENSION_ID);
     assert.ok(result.manifest.key);
     assert.equal(await readFile(join(destination, 'native-acceptance-original-worker.js'), 'utf8'),
       await readFile(join(source, 'worker.js'), 'utf8'));
     assert.match(await readFile(join(destination, 'worker.js'), 'utf8'), /native-acceptance-shim/);
-    assert.equal(Object.keys(result.fixtureHashes).length, 4);
+    assert.equal(Object.keys(result.fixtureHashes).length, Object.keys(before).length + 2);
+    assert.equal(result.fixtureSha256, hashSummary(result.fixtureHashes));
+    assert.deepEqual(result.modifications.map(change => change.path), [
+      'manifest.json', 'manifest.json', 'native-acceptance-original-worker.js', 'native-acceptance-shim.js', 'worker.js',
+    ]);
+    const observed = { ...before };
+    for (const change of result.modifications) {
+      assert.equal(change.beforeSha256, observed[change.path] ?? null);
+      assert.match(change.afterSha256, /^[a-f\d]{64}$/u);
+      assert.ok(change.description);
+      observed[change.path] = change.afterSha256;
+    }
+    assert.deepEqual(observed, result.fixtureHashes);
+    const fixtureManifest = { ...result.manifest };
+    const productionManifest = { ...manifest };
+    delete fixtureManifest.key;
+    delete fixtureManifest.name;
+    delete productionManifest.name;
+    assert.deepEqual(fixtureManifest, productionManifest);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('fixture preparation rejects excluded native-only assets before copying or adding instrumentation', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'snapscreen-acceptance-test-'));
+  try {
+    const { source } = await extensionFixture(root, 'native-only');
+    await writeFile(join(source, 'worker.js'), 'globalThis.__nativeLive = true;\n');
+    const before = await hashFiles(source);
+    const destination = join(root, 'fixture');
+    await assert.rejects(prepareAcceptanceExtension(source, destination), /test hook/);
+    assert.deepEqual(await hashFiles(source), before);
+    await assert.rejects(readFile(join(destination, 'manifest.json')), { code: 'ENOENT' });
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('fixture preparation refuses to alter the selected production directory', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'snapscreen-acceptance-test-'));
+  try {
+    const { source } = await extensionFixture(root);
+    const before = await hashFiles(source);
+    await assert.rejects(prepareAcceptanceExtension(source, source), /outside the production extension/);
+    await assert.rejects(prepareAcceptanceExtension(source, join(source, 'fixture')), /outside the production extension/);
+    assert.deepEqual(await hashFiles(source), before);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('fixture preparation through a symlinked build instruments a real copy only', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'snapscreen-acceptance-test-'));
+  try {
+    const { source } = await extensionFixture(root, 'native-only');
+    const link = join(root, 'linked-source');
+    await symlink(source, link);
+    const before = await hashFiles(source);
+    const destination = join(root, 'fixture');
+    const result = await prepareAcceptanceExtension(link, destination);
+    assert.equal(result.originalExtension.directory, await realpath(source));
+    assert.equal((await lstat(destination)).isSymbolicLink(), false);
+    assert.match(await readFile(join(destination, 'worker.js'), 'utf8'), /native-acceptance-shim/);
+    assert.deepEqual(await hashFiles(source), before);
+    // A destination reached through the link is still inside the production extension.
+    await assert.rejects(prepareAcceptanceExtension(source, join(link, 'fixture')), /outside the production extension/);
+    assert.deepEqual(await hashFiles(source), before);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -93,9 +179,19 @@ test('mocked streaming honors Stop and disconnect aborts', async () => {
 test('observer preserves real capture and activation and does not log content', async () => {
   const { context, control, port, sent, capture } = fixture();
   let activated;
-  context.chrome.action.onClicked.addListener(tab => { activated = tab.id; });
-  context.chrome.action.onClicked.listeners[0]({ id: 42 });
+  context.chrome.action.onClicked.addListener(tab => { activated = tab.id; return 'toolbar-result'; });
+  assert.equal(context.chrome.action.onClicked.listeners[0]({ id: 42 }), 'toolbar-result');
   assert.equal(activated, 42);
+  const shortcutTab = { id: 43 };
+  let shortcut;
+  context.chrome.commands.onCommand.addListener(async (command, tab) => { shortcut = { command, tab }; return 'shortcut-result'; });
+  assert.equal(await context.chrome.commands.onCommand.listeners[0]('snip', shortcutTab), 'shortcut-result');
+  assert.equal(shortcut.command, 'snip');
+  assert.equal(shortcut.tab, shortcutTab);
+  const invocations = control.snapshot().entries.filter(entry => entry.type === 'invocation');
+  assert.equal(invocations.length, 2);
+  assert.equal(invocations[0].route, 'toolbar');
+  assert.equal(invocations[1].route, 'shortcut');
   const image = await context.chrome.tabs.captureVisibleTab(7, { format: 'png' });
   assert.deepEqual(capture, [[7, { format: 'png' }]]);
   const connection = context.chrome.runtime.connectNative('com.snapscreen.companion');

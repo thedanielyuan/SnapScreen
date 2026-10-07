@@ -8,7 +8,7 @@ import ts from 'typescript';
 const ROOT = resolve(import.meta.dirname, '..');
 export const NATIVE_OPTIONS_PATH = 'src/options/options-native.html';
 export const NATIVE_CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https://api.anthropic.com data:; object-src 'none'; base-uri 'none'";
-const EXCLUDED_SOURCE = /SNAPSCREEN_(?:TEST_|LIVE_)|__snapscreen|__nativeLive|__companionAvailabilityTrace|nativeAcceptance|installAcceptanceShim|Acceptance fixture blocks external fetch|sk-ant-snapscreen-physical-fixture-only|snapscreen-ui-host|snapscreenWorkspace:|\?script&iife|result-frame\.html|workspace\.html/u;
+const EXCLUDED_SOURCE = /SNAPSCREEN_(?:TEST_|LIVE_)|__snapscreen|__nativeLive|__packaged|__managedTypes|__companionAvailabilityTrace|nativeAcceptance|installAcceptanceShim|Acceptance fixture blocks external fetch|sk-ant-snapscreen-physical-fixture-only|snapscreen-ui-host|snapscreenWorkspace:|\?script&iife|result-frame\.html|workspace\.html/u;
 
 async function readJson(path) {
   return JSON.parse(await readFile(path, 'utf8'));
@@ -24,7 +24,7 @@ async function listFiles(directory, prefix = '') {
   return files.flat().sort();
 }
 
-function assetPath(reference, owner, files) {
+export function assetPath(reference, owner, files) {
   assert.equal(typeof reference, 'string', `Missing asset reference in ${owner}`);
   assert.ok(reference.length > 0 && !/[\\?#%]/u.test(reference)
     && !/^[a-z][a-z\d+.-]*:/iu.test(reference) && !reference.startsWith('//'),
@@ -36,7 +36,7 @@ function assetPath(reference, owner, files) {
   return path;
 }
 
-function scriptReferences(source, file) {
+export function scriptReferences(source, file, { allowInjection = false } = {}) {
   const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
   assert.equal(tree.parseDiagnostics.length, 0, `Invalid bundled JavaScript in ${file}`);
   const imports = [];
@@ -53,7 +53,7 @@ function scriptReferences(source, file) {
     if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
       const property = ts.isPropertyAccessExpression(node) ? node.name.text
         : ts.isStringLiteralLike(node.argumentExpression) ? node.argumentExpression.text : undefined;
-      assert.notEqual(property, 'scripting', `Script injection API shipped in ${file}`);
+      if (!allowInjection) assert.notEqual(property, 'scripting', `Script injection API shipped in ${file}`);
     }
     ts.forEachChild(node, visit);
   }
@@ -61,7 +61,7 @@ function scriptReferences(source, file) {
   return imports;
 }
 
-function htmlReferences(source, file) {
+export function htmlReferences(source, file) {
   const references = [];
   const scripts = [...source.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/giu)];
   assert.ok(scripts.length > 0, `Settings has no bundled script: ${file}`);

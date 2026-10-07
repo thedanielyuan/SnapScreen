@@ -24,7 +24,25 @@ npm run package:native
 npm run test:native-packaged
 ```
 
-The package command prints the archive, staged app, metadata, and SHA-256 checksum paths.
+To verify the native-only extension against the same companion package, also run:
+
+```bash
+npm run build:extension-native
+npm run test:browser-native
+npm run package:extension-native
+npm run test:native-live -- --extension-dir dist-native
+npm run test:native-packaged -- --extension-dir dist-native
+```
+
+Live, packaged, and physical native runners accept `--extension-dir`. Omitting it keeps the
+repository `dist/` default; explicit relative paths resolve from the current working directory.
+The selected build is validated before instrumentation, and reports record its variant,
+absolute path, original file/aggregate SHA-256 hashes, and disposable fixture hashes.
+`package:extension-native` writes `release/snapscreen-native-only-<version>.zip` and prints
+the archive and aggregate extension SHA-256 checksums after validating the build and extracted
+archive. It does not publish an artifact.
+
+The companion package command prints the archive, staged app, metadata, and SHA-256 checksum paths.
 Outputs live under `native/macos/build/package/` and are ignored by Git. Each archive contains
 `SnapScreenCompanion.app`, a standalone Node installer, `README.txt`, and `release.json`.
 The app version comes from `package.json`; the build checks that Swift and TypeScript agree
@@ -62,7 +80,8 @@ The installer copies the app to `~/Library/Application Support/SnapScreen`, then
 absolute executable path and exactly one allowed extension origin to that browser root's
 `NativeMessagingHosts/com.snapscreen.companion.json`. A local receipt tracks the installed app
 and its registrations. It stores installation metadata only, not screenshots or conversations.
-Use **Check companion** in SnapScreen Settings after selecting the experimental native mode.
+Use **Check companion** in SnapScreen Settings. In the ordinary extension, first select the
+experimental native mode; the native-only extension always uses the companion.
 
 For an upgrade, close companion windows and rerun the same command with the new extracted app.
 The installer validates bundle identity, version metadata, executable self-tests, and the copy;
@@ -86,6 +105,46 @@ uninstalling the companion does not remove Chrome's API key or settings. There i
 update service. Node.js 22+ remains an installation prerequisite for this developer/acceptance
 distribution.
 
+## Switch extension variants
+
+Each browser user-data root has one `com.snapscreen.companion` registration, authorizing one
+exact extension origin. The ordinary and native-only extensions can have different IDs.
+Trying to register the new ID over the old one fails; there is no automatic replacement flag.
+A second Chrome profile within the same root shares this registration. Use a separate browser
+user-data root to keep both variants registered at once, and register each root explicitly.
+The automated runners create disposable roots and never migrate an everyday registration.
+
+To switch a real browser root from one packaged variant to the other, close companion windows,
+note the existing origin and executable in `NativeMessagingHosts/com.snapscreen.companion.json`,
+and retain the extracted companion package for reinstalling. From its extracted release folder,
+replace the IDs below with the exact values from `chrome://extensions`:
+
+```bash
+node native-companion-install.mjs --remove \
+  --extension-id OLD_EXTENSION_ID --user-data-dir "/absolute/browser-root"
+node native-companion-install.mjs --app "$PWD/SnapScreenCompanion.app" \
+  --extension-id NEW_EXTENSION_ID --user-data-dir "/absolute/browser-root"
+```
+
+The first command must use the old ID. If this is the final managed registration, it also
+removes the installed app, so the second command needs the retained extracted app. For a
+nondefault managed app location, pass the same absolute `--install-dir` to both commands.
+To switch back, repeat the procedure with the IDs reversed and the appropriate package.
+Do not edit `allowed_origins` to include both IDs or manually overwrite the managed manifest.
+
+For a development registration, remove it from the checkout using its actual old executable:
+
+```bash
+npm run install:native -- --remove --extension-id OLD_EXTENSION_ID \
+  --user-data-dir "/absolute/browser-root" --executable "/absolute/old/companion/executable"
+npm run install:native -- --extension-id NEW_EXTENSION_ID \
+  --user-data-dir "/absolute/browser-root"
+```
+
+The second command registers the current checkout's `build:native` output. Use the packaged
+installation command instead when moving to a managed app. After registering, use **Check
+companion** in the new extension's Settings; restart Chrome if it cached a failed host launch.
+
 ## Signing and notarization preparation
 
 The local unsigned workflow needs no Apple credentials. When preparing an actual release,
@@ -108,7 +167,8 @@ certificates in the repository.
 The workflow follows Apple's [notarization guidance](https://developer.apple.com/documentation/Security/customizing-the-notarization-workflow)
 and [Developer ID guidance](https://developer.apple.com/developer-id/).
 
-The existing tag workflow still publishes only the extension ZIP. Native packages are not
+The existing tag workflow still publishes only the ordinary extension ZIP; it does not
+publish the separate native-only extension archive. Native packages are not
 automatically uploaded or released. Signing/notarization tooling has local gate tests; a real
 credentialed run and Gatekeeper installation on a clean Mac remain release gates. Signing does
 not establish interaction acceptance, which stays explicitly pending in the package metadata.
@@ -137,15 +197,20 @@ The final tested arm64 archive SHA-256 was
 `ec02b61f6f7f84812787db8a7330b95b034d79ae432b01a6be4a2f2a88f14c60`.
 This identifies the unsigned local artifact, not a published release.
 
-The macOS CI job runs both native suites. The test-hook suite uses the built extension with
-mocked API answers for selection, streaming, follow-ups, navigation expiry, and error routing.
-The packaged suite extracts the production ZIP, runs its shipped installer at the default
-`Application Support` path under a temporary home directory, and checks real Chrome launches,
+The macOS CI job runs the live and packaged native suites against both `dist/` and the
+explicitly selected `dist-native/`. The live test-hook suite builds a separate disposable app
+and uses the selected extension with mocked API answers for selection, streaming, follow-ups,
+navigation expiry, and error routing.
+The packaged suite rejects test-hook apps, extracts the production ZIP, runs its shipped
+installer at the default `Application Support` path under a temporary home directory, and
+checks real Chrome launches,
 exact version handshakes, independent processes across two browser roots,
 malformed/version/oversized rejection, capture disconnection, worker restart without replay,
 and uninstall. Neither suite spends API credit or installs in everyday browser
 profiles. The browser suite continues to enforce native-mode non-injection and retained
-In Chrome confidentiality boundaries.
+In Chrome confidentiality boundaries. Linux CI also verifies the distinct native-only
+extension archive command. These automated checks do not complete the native-only candidate
+or physical acceptance milestones.
 
 Use the [packaged physical acceptance runner](native-phase4-acceptance.md) to collect the
 remaining interaction matrix. It uses the production app with no native test hooks, a disposable

@@ -1,6 +1,6 @@
 # Native-only extension and physical acceptance plan
 
-Status: first and second implementation milestones complete; later milestones remain proposed. Updated 7 October 2026.
+Status: first three implementation milestones complete; candidate verification and physical acceptance remain pending. Updated 7 October 2026.
 
 This document specifies a separate native-only SnapScreen extension build and the evidence
 needed to assess its interaction behavior. Build separation, the native-only worker and
@@ -9,9 +9,10 @@ produces `dist-native/`; `test:browser-native` checks its boundaries against the
 Both variants are covered by the CI verification steps. The native-only gate now creates and
 extracts a temporary ZIP, verifies its complete asset graph and checksums, and exercises the
 extracted assets through mocked native session lifecycles and a real worker stop/restart.
-Release archive tooling, explicit native-runner variant selection, and physical acceptance
-remain pending. This document does not record a completed physical acceptance run. Other new
-commands and runner flags below remain proposals unless explicitly described as existing.
+Milestone three adds a separate native-only release archive command, explicit native-runner
+variant selection, and original/fixture artifact identities. CI checks both variants explicitly.
+Candidate verification and physical acceptance remain later milestones; this document does
+not record a completed physical acceptance run.
 
 ## Objective and limits
 
@@ -54,12 +55,14 @@ capture, API, and native-session logic.
 | Page content script | Included | Excluded |
 | Injected frame and workspace | Included | Excluded |
 | Web-accessible resources | Present | Absent |
-| Extension archive command | `npm run package` | Proposed: `npm run package:extension-native` |
+| Extension archive command | `npm run package` | `npm run package:extension-native` |
 
 `npm run build:native` already builds the Swift companion. Preserve that meaning; the new
 extension command must have a distinct name. Build outputs must not overwrite one another,
-and `dist-native/` must be ignored by Git. Use a distinct archive filename such as
-`snapscreen-native-only-<version>.zip` and keep publication an explicit release action.
+and `dist-native/` is ignored by Git. `package:extension-native` writes the distinct archive
+`release/snapscreen-native-only-<version>.zip` after validating its source and extracted assets.
+It also prints the archive and aggregate extension SHA-256 checksums. Publication remains an explicit release action; the tag
+workflow still publishes only the ordinary extension.
 
 ### Manifest and dependency graph
 
@@ -123,10 +126,10 @@ Milestone two coverage is implemented in:
 | `src/background/service-worker-native.integration.test.ts` | Source invalidation races through crop acceptance, session limits/supersession, stale identities, listener/timer cleanup, late answers, and separate first-install onboarding |
 
 Shared protocol, provider-sanitization, storage, and exact-origin native installer tests remain
-in the normal unit/native suites. Archive generation here is a disposable test gate; the
-user-facing release command and runner variant selection remain milestone three. API responses
-are synthetic and the fixture blocks outbound API fetches. Worker restart is a debugger-driven
-lifecycle diagnostic, not evidence of natural suspension, real host-process cleanup, genuine
+in the normal unit/native suites. The browser gate uses a disposable archive; milestone three
+also provides the user-facing `package:extension-native` command and runner variant selection.
+API responses are synthetic and the fixture blocks outbound API fetches. Worker restart is
+a debugger-driven lifecycle diagnostic, not evidence of natural suspension, real host-process cleanup, genuine
 toolbar/shortcut authorization, or physical focus/input behavior.
 
 ### Package checks
@@ -158,11 +161,15 @@ mocked native transport, and programmatic UI input do not establish physical foc
 
 ## 3. Make runners select the extension explicitly
 
-The existing acceptance and packaged-test runners assume `dist/`. Add a proposed
-`--extension-dir` argument to the live, packaged, and physical native runners. Resolve it to
-an absolute path, validate the built manifest, and record the selected variant/path/hash.
-Preserve `dist/` as the default for existing callers. Native-only CI and commands must pass
-`dist-native/` explicitly and fail clearly if it is missing.
+Implemented: the live, packaged, and physical native runners accept `--extension-dir`.
+Omitting it selects the repository `dist/`, regardless of the current working directory.
+An explicit relative path resolves from the current working directory; absolute paths are also
+accepted. A shared validator checks the selected built manifest and variant, rejects missing or
+invalid builds, and records the absolute path, variant, per-file SHA-256 hashes, and aggregate
+hash. Native-only CI passes `--extension-dir dist-native` explicitly, with no fallback to `dist/`.
+`npm run test:extension-artifacts` covers runner arguments, defaults and relative paths, invalid
+variants, source/fixture identity, and native-only packaging regressions on any supported host.
+The same checks run within `test:native` on macOS.
 
 Reuse `scripts/native-companion-acceptance-fixture.mjs`. Its disposable fixture must preserve
 the real action/shortcut callbacks, permission checks, capture, crop, native bridge,
@@ -170,14 +177,17 @@ conversation controller, and stream parser. Only its API responses and observati
 are instrumented. Keep mock fetches from falling through to Anthropic.
 
 The fixture changes the extension key/name and wraps its worker. Record original extension
-hashes, fixture hashes, and each modification separately. Keep the packaged native app
-unmodified and reject apps built with `SNAPSCREEN_TEST_HOOKS`.
+hashes, fixture hashes, and each modification separately. The live suite deliberately builds
+a separate disposable `SNAPSCREEN_TEST_HOOKS` app for functional controls. Packaged and physical
+runners keep the production native app unmodified and reject test-hook apps.
 
 Use disposable browser roots for testing. Native host registrations currently authorize one
 exact extension origin per browser-root registration; a separately installed native-only
 extension may have a different ID. Do not assume both variants can share an existing
-registration. Document an explicit registration/migration process for a real installation
-without overwriting another variant's registration implicitly.
+registration. Follow the [explicit variant-switch procedure](native-phase4.md#switch-extension-variants)
+for a real installation; it removes the old exact-origin registration before adding the new
+one. Keeping each variant in a separate browser user-data root avoids switching registrations.
+A Chrome profile directory inside the same root does not isolate host registration.
 
 ## 4. Build and verify the candidate
 
@@ -203,7 +213,7 @@ npm run test:native-packaged
 Keep paid live API tests disabled for this work. The model, beta headers, and request fields
 need not change. Any separately requested paid check follows the repository's approval rule.
 
-After the remaining proposed packaging command and runner flags have been implemented, also run:
+For the native-only candidate, also run:
 
 ```bash
 npm run build:extension-native
@@ -230,7 +240,7 @@ Do not enable focus emulation, alter page focus/visibility APIs, or synthesize t
 used for acceptance. The human operator uses the real keyboard and pointer; the agent prepares
 the candidate, operates the collector between trials, and reviews evidence.
 
-After implementing `--extension-dir`, a proposed invocation from the repository root is:
+From the repository root, select the native-only candidate explicitly:
 
 ```bash
 npm run experiment:native-packaged -- \
@@ -241,8 +251,7 @@ npm run experiment:native-packaged -- \
   --output "/absolute/path/to/acceptance-results"
 ```
 
-All flags above except `--extension-dir` already exist. The runner uses a disposable browser
-profile and host registration. It uses a dummy key and synthetic answers, records metadata,
+The runner uses a disposable browser profile and host registration. It uses a dummy key and synthetic answers, records metadata,
 and removes its temporary browser setup on normal cleanup. Everyday profiles and registrations
 must remain untouched.
 
@@ -326,7 +335,7 @@ undetectability guarantee.
 
 1. Complete: build separation, manifests, native-only bootstrap, and Settings behavior.
 2. Complete: extend build/resource/browser checks to extracted temporary archives and full mocked lifecycle coverage.
-3. Parameterize native runners and extension packaging; cover argument/variant mistakes.
-4. Run both variants' checks, package candidates, and update security/distribution documentation.
-5. Collect positive controls and physical trials with the human operator.
-6. Review traces, repair measured defects, repeat affected trials, and publish bounded results.
+3. Complete: explicit native-runner variant selection, separate extension packaging, argument/variant checks, and artifact identities.
+4. Pending: verify a reviewed candidate with both variants' checks, package candidates, and complete security/distribution documentation.
+5. Pending: collect positive controls and physical trials with the human operator.
+6. Pending: review traces, repair measured defects, repeat affected trials, and publish bounded results.

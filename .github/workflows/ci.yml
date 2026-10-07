@@ -27,11 +27,13 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+      - run: npm run test:extension-artifacts
       - run: npm run build
       - run: npx playwright install --with-deps --no-shell chromium
       - run: npm run test:browser
       - run: npm run build:extension-native
       - run: npm run test:browser-native
+      - run: npm run package:extension-native
 
   native:
     runs-on: macos-latest
@@ -46,9 +48,12 @@ jobs:
       - run: npm run build:native
       - run: npm run test:native
       - run: npm run build
+      - run: npm run build:extension-native
       - run: npx playwright install --no-shell chromium
       # Real Chrome-launched companion sessions with mocked answers; needs the runner's GUI session.
       - run: npm run test:native-live
+      - run: npm run test:native-live -- --extension-dir dist-native
       # Test the extracted production archive and its shipped installer, without native test hooks.
       - run: npm run package:native
       - run: npm run test:native-packaged
+      - run: npm run test:native-packaged -- --extension-dir dist-native

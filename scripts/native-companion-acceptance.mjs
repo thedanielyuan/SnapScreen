@@ -7,6 +7,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { parseArgs } from 'node:util';
 import { createHash } from 'node:crypto';
 import { EXTENSION_ID, hashFiles, prepareAcceptanceExtension } from './native-companion-acceptance-fixture.mjs';
+import { selectNativeExtension } from './native-extension-artifact.mjs';
 import { chromium } from 'playwright';
 
 // Use Playwright only to locate its installed browser binary. Attaching through Playwright
@@ -17,13 +18,15 @@ const { values } = parseArgs({ options: {
   app: { type: 'string' },
   output: { type: 'string' },
   browser: { type: 'string' },
+  'extension-dir': { type: 'string' },
   'trial-seconds': { type: 'string', default: '45' },
   help: { type: 'boolean', default: false },
 } });
 if (values.help) {
-  console.log('Usage: node scripts/native-companion-acceptance.mjs --app /absolute/path/SnapScreenCompanion.app [--output directory] [--browser executable] [--trial-seconds 45]');
+  console.log('Usage: node scripts/native-companion-acceptance.mjs --app /absolute/path/SnapScreenCompanion.app [--extension-dir directory] [--output directory] [--browser executable] [--trial-seconds 45] (extension default: dist/)');
   process.exit(0);
 }
+const selectedExtension = await selectNativeExtension(values['extension-dir']);
 if (process.platform !== 'darwin') throw new Error('Packaged companion acceptance requires macOS.');
 if (!values.app) throw new Error('Pass --app with the extracted or installed packaged companion. This runner never builds it.');
 const actionWindowMs = Number(values['trial-seconds']) * 1000;
@@ -170,7 +173,7 @@ process.once('SIGINT', () => { void close().then(() => process.exit(0)); });
 process.once('SIGTERM', () => { void close().then(() => process.exit(0)); });
 
 try {
-  extension = await prepareAcceptanceExtension(join(root, 'dist'), extensionDirectory);
+  extension = await prepareAcceptanceExtension(selectedExtension.directory, extensionDirectory);
   await new Promise((resolvePromise, reject) => {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', resolvePromise);
@@ -264,14 +267,20 @@ try {
     capturedAt: new Date().toISOString(),
     acceptance: 'pending-physical-review',
     appPath: app,
+    extensionVariant: extension.originalExtension.variant,
+    extensionDirectory: extension.originalExtension.directory,
+    extensionSha256: extension.originalExtension.sha256,
+    nativeProtocolVersion: extension.originalExtension.protocolVersion,
     artifacts: {
       packagedApp: appHashes,
       productionExtension: extension.originalHashes,
       fixtureExtension: extension.fixtureHashes,
+      fixtureExtensionSha256: extension.fixtureSha256,
       fixtureModifications: extension.modifications,
       probe: await hashFiles(join(experiment, 'fixture')),
       collector: Object.fromEntries(await Promise.all([
         'native-companion-acceptance.mjs', 'native-companion-acceptance-fixture.mjs',
+        'native-extension-artifact.mjs', 'extension-native-package.mjs',
       ].map(async file => [file, createHash('sha256').update(await readFile(join(root, 'scripts', file))).digest('hex')]))),
     },
     productionSelfTest: selfTest.stdout.trim(),
