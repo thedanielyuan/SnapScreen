@@ -170,5 +170,5 @@ daily check from the repo's Actions tab.
 
 The version lives only in `package.json`; `vite.config.ts` writes it into the built manifest,
 so `src/manifest.json` has no `version`. Bump it with `npm version <x.y.z> --no-git-tag-version`.
-Pushing a `v<x.y.z>` tag runs `.github/workflows/release.yml`: the CI checks, then
+Pushing a `v<x.y.z>` tag runs `.github/workflows/release.yml`: the `verify` CI checks, then
 `npm run package`, then a GitHub release with the zip. The tag must match `package.json`.

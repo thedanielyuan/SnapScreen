@@ -237,8 +237,7 @@ Removing those resources reduces that surface; it does not prove the extension i
 to identify.
 [Web-accessible resources documentation](https://developer.chrome.com/docs/extensions/reference/manifest/web-accessible-resources)
 
-The existing popup non-modal project remains outside this migration's critical path. Any
-retained UI frame must keep its capability-attested private channel, and the workspace must
+Any retained UI frame must keep its capability-attested private channel, and the workspace must
 remain absent from web-accessible resources.
 
 ## Phase 4 Verify and distribute
