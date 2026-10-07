@@ -29,9 +29,16 @@ Alternatives are a separate native build or a reworked optional-permission flow.
 `npm run build:extension-native` builds `dist-native/` from `src/manifest-native.json`.
 It requires the separately installed macOS companion and has no interface selector. It omits
 `scripting`, content scripts, all web-accessible resources, the result frame, and the workspace.
-The ordinary build and its `npm run package` archive remain separate. Native-only extension
-archive/release tooling and physical acceptance are still pending; this build is not a store
-submission or a signed/notarized companion release.
+The ordinary build and its `npm run package` archive remain separate.
+`npm run package:extension-native` validates the native-only build and extracted assets, then
+writes `release/snapscreen-native-only-<version>.zip` and prints its SHA-256 checksums. The
+companion is a second archive, produced by `npm run package:native`; neither archive contains
+or installs the other. The default companion package is unsigned and intended for local
+acceptance. The tag release workflow still publishes only the ordinary extension ZIP.
+Creating either native artifact does not submit a store listing, publish a native release,
+sign/notarize the companion, or complete physical acceptance. See the
+[candidate verification record](native-only-candidate-verification.md) for artifact identities
+and automated results, separately from the pending physical trials.
 
 For a future native-only listing, describe the single purpose as answering a user-selected
 region of the current tab in the local macOS companion. Omit the `scripting` justification
@@ -41,7 +48,11 @@ Local-file capture requires file access enabled in Chrome's extension management
 never opens an in-session permission request. First installation opens trusted Settings;
 capture errors only report through the extension badge. The same screenshot/answer transfers
 and credential protections apply. Each variant's native host registration must authorize its
-exact extension ID; do not overwrite another registration implicitly.
+exact extension ID. To switch variants in one browser user-data root, explicitly remove the
+old ID's registration before installing the new one; see the
+[variant-switch procedure](native-phase4.md#switch-extension-variants). Separate Chrome
+profiles within the same root share that registration; separate browser roots can each
+authorize their chosen variant.
 
 ## Single purpose
 
@@ -58,7 +69,7 @@ exact extension ID; do not overwrite another registration implicitly.
 | `storage` | Saves the user's Anthropic API key and settings on the device, and temporary data that reconnects SnapScreen's workspace tab. |
 | `nativeMessaging` | Connects to the separately installed local macOS companion for a user-invoked native session or an explicit Settings availability check (version handshake only, with no capture or API data). Sends the captured screenshot, crop, and streamed answers and receives selection/follow-up actions. The host is restricted to the exact extension origin and receives no API key. |
 | Host permission `https://api.anthropic.com/*` | Sends the selected region and the user's question to Anthropic's API, which writes the answer. |
-| Optional host permission `file:///*` | Requested only when the user invokes SnapScreen on a local `file://` page, so it can capture that page. |
+| Optional host permission `file:///*` | Supports user-invoked capture of local `file://` pages. In Chrome mode, SnapScreen may request access during invocation. Native capture requires file access enabled in Chrome's extension management page first and reports missing access through the badge. |
 
 ## Remote code
 

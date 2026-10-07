@@ -23,8 +23,8 @@ explains what it handles, where that data goes, and what stays on your device.
 | Questions you type, and your default prompt | When you ask | Sent to Anthropic with the region; native follow-ups are typed in the local companion | In memory until you close or lose the session |
 | Answer text | When Anthropic responds | Displayed in the extension or local companion | In memory until you close or lose the session; explicit Copy puts text on your clipboard |
 | Your Anthropic API key | When you save it in Settings | Stored in Chrome on your device, and sent to Anthropic with each request | Until you remove it or uninstall SnapScreen |
-| Settings (default prompt, limits, and interface choice) | When you save them | Stored in Chrome on your device | Until you change them or uninstall SnapScreen |
-| The address of the page you snipped | Only when a page needs SnapScreen's separate workspace tab | Chrome's temporary session storage on your device, to reconnect that tab | Until the workspace tab closes or Chrome quits |
+| Settings (default prompt, limits, and, in the ordinary build, interface choice) | When you save them | Stored in Chrome on your device | Until you change them or uninstall SnapScreen |
+| Page address saved for workspace reconnection | Only when the ordinary extension opens its separate workspace; the native-only build does not save this address | Chrome's temporary session storage on your device, to reconnect that tab | Until the workspace tab closes or Chrome quits |
 
 SnapScreen never writes screenshots or conversations to disk.
 
@@ -43,8 +43,13 @@ no screenshots, questions, answers, or API credentials.
 
 The separate companion installer stores the app and a receipt containing its version,
 checksum, and chosen browser registration paths under your user account. It registers the
-exact extension ID in each browser root you choose. This installation metadata contains no
-screenshots, questions, answers, or API key. The companion has no automatic update service.
+exact extension ID in each browser root you choose. The ordinary and native-only extensions
+can have different IDs. A browser root authorizes one ID at a time, shared by its Chrome
+profiles; switching variants requires explicitly removing the old registration before adding
+the new one. See the [variant-switch instructions](docs/native-phase4.md#switch-extension-variants).
+This installation metadata contains no screenshots, questions, answers, or API key. The
+companion has no automatic update service. Its local acceptance archive is unsigned and
+packaged separately from the extension archive; installing one does not install the other.
 Remove it separately using the [uninstall instructions](docs/native-phase4.md#install-upgrade-and-remove);
 uninstalling the Chrome extension does not remove the companion app or its registration.
 
