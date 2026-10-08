@@ -40,6 +40,7 @@ function fixture() {
     onMessage: event(), onDisconnect: event() };
   const capture = [];
   const stored = [];
+  const networkRequests = [];
   const context = {
     chrome: {
       runtime: { connectNative: () => port },
@@ -47,11 +48,12 @@ function fixture() {
       tabs: { captureVisibleTab: async (...args) => { capture.push(args); return 'data:image/png;base64,PRIVATE_SCREENSHOT'; } },
       storage: { local: { set: async value => { stored.push(value); } } },
     },
-    Response, ReadableStream, TextEncoder, DOMException,
+    fetch: async input => { networkRequests.push(input); throw new Error('Unexpected network passthrough.'); },
+    Response, ReadableStream, TextEncoder, DOMException, atob,
     setTimeout: fn => setTimeout(fn, 0), clearTimeout,
   };
   runInNewContext(`(${installAcceptanceShim.toString()})();`, context);
-  return { context, port, sent, capture, stored, control: context.nativeAcceptance };
+  return { context, port, sent, capture, stored, networkRequests, control: context.nativeAcceptance };
 }
 
 for (const variant of ['ordinary', 'native-only']) test(`${variant} fixture preserves production files and records every isolated edit`, async () => {
@@ -138,8 +140,67 @@ test('fixture preparation through a symlinked build instruments a real copy only
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test('captured PNG data becomes an exact Blob without network requests or content observation', async () => {
+  const { context, control, networkRequests } = fixture();
+  const base64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/h0kAAAAASUVORK5CYII=';
+  const png = Buffer.from(base64, 'base64');
+  const dataUrl = `data:image/png;base64,${base64}`;
+  control.scenario('error');
+  const before = JSON.stringify(control.snapshot());
+  for (const input of [dataUrl, new Request(dataUrl)]) {
+    const response = await context.fetch(input);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('content-type'), 'image/png');
+    const blob = await response.blob();
+    assert.equal(blob.type, 'image/png');
+    assert.deepEqual(Buffer.from(await blob.arrayBuffer()), png);
+  }
+  assert.equal(networkRequests.length, 0);
+  assert.equal(control.snapshot().requests, 0);
+  assert.equal(JSON.stringify(control.snapshot()), before);
+  assert.ok(!before.includes(base64));
+  assert.equal((await context.fetch('https://api.anthropic.com/v1/messages')).status, 529);
+});
+
+test('non-PNG and external URLs remain blocked without network requests or content observation', async () => {
+  const { context, control, networkRequests } = fixture();
+  const before = JSON.stringify(control.snapshot());
+  for (const url of [
+    'https://example.com/PRIVATE_PATH',
+    'https://api.anthropic.com/v1/messages?private=PRIVATE_QUERY',
+    'data:text/html;base64,UFJJVkFURV9IVE1M',
+    'data:image/jpeg;base64,UFJJVkFURV9JTUFHRQ==',
+    'data:image/png,PRIVATE_IMAGE',
+    'file:///PRIVATE_FILE',
+    'blob:https://example.com/PRIVATE_BLOB',
+  ]) {
+    for (const input of [url, new Request(url)]) {
+      await assert.rejects(context.fetch(input), { message: 'Acceptance fixture blocks external fetch.' });
+    }
+  }
+  assert.equal(networkRequests.length, 0);
+  assert.equal(JSON.stringify(control.snapshot()), before);
+});
+
+test('invalid PNG base64 fails locally without network requests or content observation', async () => {
+  const { context, control, networkRequests } = fixture();
+  const before = JSON.stringify(control.snapshot());
+  for (const base64 of ['PRIVATE_SCREENSHOT', 'a', 'abcd=']) {
+    const url = `data:image/png;base64,${base64}`;
+    for (const input of [url, new Request(url)]) {
+      await assert.rejects(context.fetch(input), error => {
+        assert.equal(error.name, 'InvalidCharacterError');
+        assert.ok(!error.message.includes(base64));
+        return true;
+      });
+    }
+  }
+  assert.equal(networkRequests.length, 0);
+  assert.equal(JSON.stringify(control.snapshot()), before);
+});
+
 test('the mock has no network passthrough and streams a complete answer', async () => {
-  const { context, control, stored } = fixture();
+  const { context, control, stored, networkRequests } = fixture();
   await control.ready;
   assert.equal(stored[0].interfaceMode, 'native');
   await assert.rejects(context.fetch('https://example.com'), /blocks external fetch/);
@@ -154,6 +215,7 @@ test('the mock has no network passthrough and streams a complete answer', async 
   assert.match(stream, /event: message_stop/);
   assert.equal(control.snapshot().requests, 1);
   assert.ok(control.snapshot().entries.some(entry => entry.type === 'mock-api-complete'));
+  assert.equal(networkRequests.length, 0);
 });
 
 test('mocked failure is one-shot so the production Retry button can succeed', async () => {
