@@ -143,7 +143,9 @@ npm run experiment:native-packaged -- \
   --output "$candidate/physical-acceptance"
 ```
 
-This collector command has not been run for this candidate. It defaults to installed Playwright
+At the milestone 4 handoff, this collector command had not been run for this candidate.
+Subsequent collector preparation and physical work are tracked in the
+[physical acceptance record](native-only-physical-acceptance.md). The command defaults to installed Playwright
 Chromium; select another browser explicitly and record its version when assessing that browser.
 Begin with physical page-input, application-switch, and tab-switch positive controls. Focus,
 visibility, keyboard/pointer leakage, resizing, accessibility, and the environment matrix remain

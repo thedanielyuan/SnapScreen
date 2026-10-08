@@ -1,6 +1,6 @@
 # Native-only extension and physical acceptance plan
 
-Status: first four implementation milestones complete; physical acceptance and trace review remain pending. Updated 7 October 2026.
+Status: first four implementation milestones complete; physical acceptance was partially completed and the remaining matrix skipped. Updated 8 October 2026.
 
 This document specifies a separate native-only SnapScreen extension build and the evidence
 needed to assess its interaction behavior. Build separation, the native-only worker and
@@ -14,8 +14,9 @@ variant selection, and original/fixture artifact identities. CI checks both vari
 Milestone four verified both variants and the extracted native-only release ZIP with the
 packaged production companion, retained candidate archives and checksums, and completed the
 security/distribution documentation. See the [candidate verification record](native-only-candidate-verification.md).
-Physical acceptance remains a later milestone; this document does not record a completed
-physical acceptance run.
+Physical acceptance was partially completed, and the remaining matrix was skipped on
+8 October 2026; see the [physical acceptance record](native-only-physical-acceptance.md).
+This document does not record a completed physical acceptance run.
 
 ## Objective and limits
 
@@ -345,5 +346,5 @@ undetectability guarantee.
 2. Complete: extend build/resource/browser checks to extracted temporary archives and full mocked lifecycle coverage.
 3. Complete: explicit native-runner variant selection, separate extension packaging, argument/variant checks, and artifact identities.
 4. Complete: verified both variants and the extracted native-only candidate ZIP with the packaged production companion; retained archives/checksums and completed security/distribution documentation. See the [verification record](native-only-candidate-verification.md).
-5. Pending: collect positive controls and physical trials with the human operator.
-6. Pending: review traces, repair measured defects, repeat affected trials, and publish bounded results.
+5. Partial: positive controls and shortcut/toolbar capture trials collected with the human operator; the remaining matrix was skipped on 8 October 2026. See the [physical acceptance record](native-only-physical-acceptance.md).
+6. Partial: collected traces reviewed and recorded with bounded claims; repairs and repeat trials not started because physical testing was skipped.
