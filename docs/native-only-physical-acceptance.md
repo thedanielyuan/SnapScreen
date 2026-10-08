@@ -3,9 +3,10 @@
 Priority 1 is partially complete. Physical testing stopped at the operator's request on
 8 October 2026 (Europe/London), and the remaining matrix was then skipped. Full acceptance
 is not established, and no claim extends to a workflow or configuration marked Skipped
-below. Preparation on 7 October verified the retained candidate and started an isolated
-Google Chrome session. The retained extension and companion artifacts were unchanged
-throughout these trials.
+below. The shortcut's modifier-key events are a documented limitation; see priority 2 of the
+[page observability plan](page-observability-improvements.md). Preparation on 7 October
+verified the retained candidate and started an isolated Google Chrome session. The retained
+extension and companion artifacts were unchanged throughout these trials.
 
 ## Candidate and collector
 

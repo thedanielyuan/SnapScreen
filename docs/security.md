@@ -33,8 +33,10 @@ implicitly share or replace another variant's registration. Each browser user-da
 one registration; a second Chrome profile within that root does not isolate it. Use separate
 browser roots, or explicitly remove the old ID's registration before adding the new one as
 described in the [variant-switch procedure](native-phase4.md#switch-extension-variants).
-Automated package and mocked browser checks cover these build boundaries; physical focus and
-input acceptance remain separate, pending work. Removing web-accessible resources does not
+Automated package and mocked browser checks cover these build boundaries. Physical focus and
+input acceptance was only partially completed; the
+[physical acceptance record](native-only-physical-acceptance.md) lists the tested workflows,
+and no claim extends beyond them. Removing web-accessible resources does not
 establish universal undetectability or focus preservation.
 
 ## Optional macOS companion
@@ -81,10 +83,13 @@ browser registration paths, and exact-origin native host manifests. These files 
 screenshots, API credentials, or conversation content. There is no automatic updater. See
 [packaging and removal](native-phase4.md). The fitted frozen-image
 surface does not promise alignment with Chrome's content area. Phase 1's measured observations
-do not establish the completed companion's interaction behavior; modifier keys can still reach
-page handlers. Escape and Command-W close a companion window when the key is released, so that
-release is not delivered to Chrome after the window disappears. The ordinary package retains the
-web-accessible result frame required by its default injected mode. See
+do not establish the completed companion's interaction behavior. Packaged-candidate trials
+confirmed that the shortcut's modifier keys reach page handlers: Chrome delivers the presses
+before it recognizes the shortcut, and releases can arrive before the companion takes keyboard
+focus. This is a documented limitation. Escape and Command-W close a companion window when the
+key is released, so that release is not delivered to Chrome after the window disappears. The
+ordinary package retains the web-accessible result frame required by its default injected mode.
+See
 [setup and remaining verification](native-phase2.md) and the
 [Phase 1 results](native-phase1-results.md).
 
