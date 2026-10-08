@@ -61,6 +61,13 @@ export function installAcceptanceShim() {
   };
   globalThis.fetch = async (input, options = {}) => {
     const url = typeof input === 'string' ? input : input.url;
+    // Production cropping fetches its captured PNG data URL to obtain a Blob.
+    // Decode those local bytes here; no request is delegated to network fetch.
+    const pngPrefix = 'data:image/png;base64,';
+    if (typeof url === 'string' && url.startsWith(pngPrefix)) {
+      const bytes = Uint8Array.from(atob(url.slice(pngPrefix.length)), character => character.charCodeAt(0));
+      return new Response(bytes, { headers: { 'content-type': 'image/png' } });
+    }
     if (url !== 'https://api.anthropic.com/v1/messages') throw new Error('Acceptance fixture blocks external fetch.');
     requests += 1;
     const mode = scenario;
