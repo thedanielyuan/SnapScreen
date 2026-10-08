@@ -160,7 +160,6 @@ only in [docs/security.md](docs/security.md).
       store review.
 - [ ] Keep every release zip on GitHub releases, so you always know what each version shipped.
 - [ ] Repeat the manual test pass (1.5) before each release.
-- [ ] Keep Dependabot and the `npm audit` gate.
-- [x] Add `github-actions` to [.github/dependabot.yml](.github/dependabot.yml) so workflow
-      actions stay current.
+- [ ] Keep the `npm audit` gate, and update npm packages and workflow actions by hand now and
+      then. Dependabot was removed on 2026-10-08.
 - [ ] Update the privacy policy and `docs/security.md` whenever data handling changes.
