@@ -7,9 +7,10 @@ while preserving capture, accessibility, and the existing credential and convers
 boundaries. The highest-value architecture change, a separate native-only extension, is
 already implemented. Physical acceptance of the packaged candidate was partially completed,
 and the remaining physical matrix was skipped on 8 October 2026, so interaction claims are
-limited to the workflows that were physically tested. Fixes that change interaction behavior
-still need physical before/after evidence; the public-resource audit can be verified with
-automated checks.
+limited to the workflows that were physically tested. Priority 4 removed the ordinary build's
+unnecessary public resources. Remaining work then narrowed to the native-only build, and its
+observability work closed for the tested workflows: the shortcut's modifier-key events are a
+documented limitation, and untested workflows carry no claim.
 
 This document records proposed work and acceptance criteria. It does not record new tests or
 claim that pending improvements have been implemented. It complements the detailed
@@ -59,10 +60,10 @@ exposure. See [the current isolation boundary](security.md#limits-of-the-isolati
 | Priority | Work | Status | Expected benefit |
 | --- | --- | --- | --- |
 | 1 | Physically test the retained native-only candidate and production companion | Partially tested; remaining matrix skipped 8 October; [record](native-only-physical-acceptance.md) | Establish what the packaged interaction actually exposes |
-| 2 | Investigate and repair reproducible focus or input leakage | Shortcut modifier leakage reproduced on the candidate; earlier post-close blur not seen in valid repeats; resize leakage unmeasured | Reduce unintended interaction with the source page |
+| 2 | Investigate and repair reproducible focus or input leakage | Closed without a fix; shortcut modifier events documented as a limitation; window move/resize untested | Reduce unintended interaction with the source page |
 | 3 | Maintain package gates and record a reviewed acceptance matrix for releases | Automated gates implemented; physical matrix partial, remainder skipped | Prevent regressions and keep claims tied to tested artifacts |
 | 4 | Audit unnecessary public resources in the ordinary extension | Implemented; the build exposes only the result frame | Reduce passive installation fingerprinting for users retaining In Chrome mode |
-| 5 | Evaluate dynamic URLs for ordinary-mode resources that must remain public | Optional investigation | Reduce probing through a stable resource URL where supported |
+| 5 | Evaluate dynamic URLs for ordinary-mode resources that must remain public | Out of scope; applies only to the ordinary build | Reduce probing through a stable resource URL where supported |
 
 ### 1. Complete packaged physical acceptance
 
@@ -94,6 +95,15 @@ change fails focus preservation; score input isolation separately. Mark unsuppor
 configurations explicitly. Automation that manipulates controls cannot replace physical acceptance.
 
 ### 2. Investigate focus and input leakage
+
+Closed without a fix on 8 October 2026. In the packaged candidate's shortcut trial, Shift and
+Option presses reached the page before Chrome recognized the shortcut, which no extension can
+prevent. An Option release also arrived before the companion's selection window took keyboard
+focus. Taking focus earlier would leave more presses without matching releases, itself a
+detectable pattern, so these modifier events are a documented limitation. Valid repeats did not
+show the prototype's post-close focus loss. Moving and resizing companion windows, where the
+prototype leaked pointer events, remain untested, and no claim covers them. The rest of this
+section applies if the work resumes.
 
 The [Phase 1 results](native-phase1-results.md) record modifier keys reaching page handlers,
 one unexplained 2.6-second focus/visibility loss, and earlier pointer leakage during resizing.
@@ -152,6 +162,9 @@ whose exposure was removed. This reduces installation fingerprinting; the inject
 remains observable during In Chrome use.
 
 ### 5. Evaluate dynamic resource URLs where needed
+
+Out of scope since 8 October 2026. It applies only to the ordinary build's result frame, and
+remaining work focuses on the native-only build, which exposes no web-accessible resources.
 
 Chrome's `use_dynamic_url` setting restricts a declared resource to a session-specific dynamic
 ID. Evaluate it only for resources the ordinary extension must expose. The native-only

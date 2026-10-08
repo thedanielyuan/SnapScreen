@@ -1,6 +1,6 @@
 # Native-only extension and physical acceptance plan
 
-Status: first four implementation milestones complete; physical acceptance was partially completed and the remaining matrix skipped. Updated 8 October 2026.
+Status: first four implementation milestones complete; physical acceptance was partially completed and the remaining matrix skipped; trace review closed with documented limitations. Updated 8 October 2026.
 
 This document specifies a separate native-only SnapScreen extension build and the evidence
 needed to assess its interaction behavior. Build separation, the native-only worker and
@@ -347,4 +347,4 @@ undetectability guarantee.
 3. Complete: explicit native-runner variant selection, separate extension packaging, argument/variant checks, and artifact identities.
 4. Complete: verified both variants and the extracted native-only candidate ZIP with the packaged production companion; retained archives/checksums and completed security/distribution documentation. See the [verification record](native-only-candidate-verification.md).
 5. Partial: positive controls and shortcut/toolbar capture trials collected with the human operator; the remaining matrix was skipped on 8 October 2026. See the [physical acceptance record](native-only-physical-acceptance.md).
-6. Partial: collected traces reviewed and recorded with bounded claims; repairs and repeat trials not started because physical testing was skipped.
+6. Closed: collected traces reviewed and recorded with bounded claims. The shortcut's modifier-key events are a documented limitation, and no repairs or repeat trials are planned.
