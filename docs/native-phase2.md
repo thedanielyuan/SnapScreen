@@ -153,4 +153,4 @@ roots, malformed/oversized requests, disconnects, and worker restart. Its physic
 requires actual interaction trials, including supported incognito and environment variants.
 Automated DOM assertions cannot establish native focus behavior. A signed/notarized release
 and cross-platform support remain pending. The retained extension mode still needs its
-web-accessible frame and icon resources.
+web-accessible frame.

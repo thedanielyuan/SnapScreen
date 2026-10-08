@@ -116,10 +116,11 @@ async function verifySettings(context, worker, extensionId, protocolVersion) {
 }
 
 async function verifyResources(page, nativeId, normalId, normalManifest) {
-  // This fixture deliberately has no CSP. The exposed normal-build icon must
-  // load, so a webpage policy or failed harness cannot masquerade as isolation.
+  // This fixture deliberately has no CSP. The normal build's web-accessible UI
+  // frame must load, so a webpage policy or failed harness cannot masquerade
+  // as isolation.
   const targets = {
-    positive: `chrome-extension://${normalId}/${normalManifest.icons['16']}`,
+    positive: `chrome-extension://${normalId}/src/ui/result-frame.html`,
     negative: `chrome-extension://${normalId}/not-a-real-resource.png`,
     icon: `chrome-extension://${nativeId}/${normalManifest.icons['16']}`,
     content: `chrome-extension://${nativeId}/src/content/index.js`,
@@ -137,7 +138,7 @@ async function verifyResources(page, nativeId, normalId, normalManifest) {
       }
     }),
   )), targets);
-  assert.equal(results.positive, true, 'Known exposed normal-build icon was inaccessible; probe is invalid.');
+  assert.equal(results.positive, true, 'Known exposed normal-build UI frame was inaccessible; probe is invalid.');
   for (const [name, loaded] of Object.entries(results)) {
     if (name !== 'positive') assert.equal(loaded, false, `Webpage accessed ${name} resource.`);
   }

@@ -42,10 +42,6 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["src/assets/icons/icon16.png"],
-      "matches": ["http://*/*", "https://*/*"]
-    },
-    {
       "resources": ["src/ui/result-frame.html"],
       "matches": ["http://*/*", "https://*/*", "file:///*"]
     }
