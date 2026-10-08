@@ -64,8 +64,8 @@ separate user action.
 
 ## Migration and verification
 
-The extension-only interface remains supported in this development package. Its frame and
-icon therefore remain web-accessible, and its workspace stays private. Selecting native mode
+The extension-only interface remains supported in this development package. Its frame
+therefore remains web-accessible, and its workspace stays private. Selecting native mode
 does not change those static manifest exposures. A native-only build and removing the
 injected interface are separate release decisions.
 

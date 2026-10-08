@@ -84,7 +84,7 @@ surface does not promise alignment with Chrome's content area. Phase 1's measure
 do not establish the completed companion's interaction behavior; modifier keys can still reach
 page handlers. Escape and Command-W close a companion window when the key is released, so that
 release is not delivered to Chrome after the window disappears. The ordinary package retains the
-web-accessible resources required by its default injected mode. See
+web-accessible result frame required by its default injected mode. See
 [setup and remaining verification](native-phase2.md) and the
 [Phase 1 results](native-phase1-results.md).
 
@@ -172,8 +172,11 @@ the frame's keyboard/input handling, but it is not a tamper-proof browser surfac
 exposes coarse pointer activity retargeted to the outer host (not the internal target or
 text); tests confirm that parent `preventDefault()` and `stopImmediatePropagation()` do not
 block the child click. A hostile page can still remove, move, cover, or navigate the outer
-host and cause denial of service or attempt clickjacking. The packaged frame is
-web-accessible, but a page-created copy remains inert because it cannot register or claim a
-legitimate session capability. A page can still imitate the extension visually with its own
+host and cause denial of service or attempt clickjacking. The packaged frame is the ordinary
+build's only web-accessible resource; its icons, content script, workspace, and Settings stay
+private, and `npm run test:browser` checks them with webpage resource probes. A page-created
+copy of the frame remains inert because it cannot register or claim a legitimate session
+capability, but the frame's stable URL still lets a webpage detect that the ordinary extension
+is installed. A page can still imitate the extension visually with its own
 HTML, so treat unexpected or context-sensitive prompts as untrusted, just as with any UI
 rendered inside a web page.

@@ -61,7 +61,7 @@ exposure. See [the current isolation boundary](security.md#limits-of-the-isolati
 | 1 | Physically test the retained native-only candidate and production companion | Partially tested; remaining matrix skipped 8 October; [record](native-only-physical-acceptance.md) | Establish what the packaged interaction actually exposes |
 | 2 | Investigate and repair reproducible focus or input leakage | Shortcut modifier leakage reproduced on the candidate; earlier post-close blur not seen in valid repeats; resize leakage unmeasured | Reduce unintended interaction with the source page |
 | 3 | Maintain package gates and record a reviewed acceptance matrix for releases | Automated gates implemented; physical matrix partial, remainder skipped | Prevent regressions and keep claims tied to tested artifacts |
-| 4 | Audit unnecessary public resources in the ordinary extension | Proposed | Reduce passive installation fingerprinting for users retaining In Chrome mode |
+| 4 | Audit unnecessary public resources in the ordinary extension | Implemented; the build exposes only the result frame | Reduce passive installation fingerprinting for users retaining In Chrome mode |
 | 5 | Evaluate dynamic URLs for ordinary-mode resources that must remain public | Optional investigation | Reduce probing through a stable resource URL where supported |
 
 ### 1. Complete packaged physical acceptance
@@ -134,14 +134,17 @@ extension.
 
 ### 4. Audit the ordinary extension's public resources
 
-The ordinary [manifest](../src/manifest.json) exposes `icon16.png` and `result-frame.html` to
-broad webpage origins. The icon appears to be rendered within extension-origin surfaces;
-its standalone web-accessible declaration may therefore be unnecessary. Verify that inference
-against source usage and the built artifact before removing it.
+Implemented. The ordinary [manifest](../src/manifest.json) exposed `icon16.png` and
+`result-frame.html` to broad webpage origins, and the built manifest also exposed the content
+script, which CRX adds for the worker's `?script&iife` import. The icon renders only within
+extension-origin surfaces, and `chrome.scripting` injection needs no web access, so neither
+exposure was necessary. The build now ships only the web-accessible resources that the source
+manifest declares. The result frame stays exposed while In Chrome mode embeds it.
 
-Audit the built manifest as well as source declarations, since bundling can add resources.
-Remove declarations only when the resource is no longer needed by webpage-facing features.
-Retain the result frame exposure while In Chrome mode embeds that extension page.
+`npm run test:browser` asserts that the built manifest exposes only the frame, that a webpage
+without a CSP can load the frame but not the icon, content script, workspace, or Settings, and
+that the panel icon still renders inside the frame. The frame's stable URL still allows a
+webpage to detect installation; see priority 5.
 
 Acceptance: the icon still renders in all relevant extension surfaces, ordinary capture and
 workspace flows pass browser checks, and controlled webpage probes cannot load any resource

@@ -124,14 +124,15 @@ daily check from the repo's Actions tab.
 - All injected UI renders inside the extension-origin iframe in a closed shadow host. Content ↔
   frame traffic uses the capability-attested `MessageChannel`, never `window.postMessage`, DOM
   events, or attributes.
-- `src/workspace/workspace.html` must never be web-accessible. It gets its capture by claiming
-  a one-time capability over a runtime port.
+- `src/ui/result-frame.html` is the only web-accessible resource. `src/workspace/workspace.html`
+  must never be web-accessible. It gets its capture by claiming a one-time capability over a
+  runtime port.
 - The native companion receives screenshots, crops, answers, and follow-ups, never the API key,
   system prompt, or API history. Its test hooks (`SNAPSCREEN_TEST_HOOKS`) compile only into the
   live test's build; `test:native` fails if the default build has them.
 - `npm run test:browser` enforces parts of this (hostile-page probe, closed shadow root,
-  non-web-accessible workspace). `docs/security.md` is the full contract; update it when you
-  change a boundary.
+  webpage probes of private resources). `docs/security.md` is the full contract; update it when
+  you change a boundary.
 - When permissions or data handling change, also update `PRIVACY.md` and
   `docs/chrome-web-store.md`, whose answers the user pastes into the store dashboard.
 
@@ -140,7 +141,8 @@ daily check from the repo's Actions tab.
 - The content script isn't declared in the manifest. `service-worker.ts` imports
   `../content/index.ts?script&iife` and injects it with `chrome.scripting.executeScript`. It
   must build to a synchronous IIFE, so nothing it imports may use dynamic `import()`; the smoke
-  test fails otherwise.
+  test fails otherwise. CRX also makes that import web-accessible, so `vite.config.ts` ships
+  only the web-accessible resources that `src/manifest.json` declares.
 - `src/ui/result-frame.html` and `src/workspace/workspace.html` must stay in
   `rolldownOptions.input` in `vite.config.ts`, and any new extension page belongs there too.
   Without that entry the build still passes, but the frame ships unbundled and the workspace
