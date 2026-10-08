@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import { configDefaults } from 'vitest/config';
 import { crx } from '@crxjs/vite-plugin';
 import packageJson from './package.json';
 import manifest from './src/manifest.json';
@@ -15,5 +16,10 @@ export default defineConfig({
         workspace: 'src/workspace/workspace.html',
       },
     },
+  },
+  // Retained acceptance evidence under release/ can include saved Node tests
+  // that are not Vitest suites.
+  test: {
+    exclude: [...configDefaults.exclude, 'release/**'],
   },
 });
