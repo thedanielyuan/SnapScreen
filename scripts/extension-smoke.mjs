@@ -6,11 +6,13 @@ import { chromium } from 'playwright';
 const ROOT = resolve(import.meta.dirname, '..');
 const DIST = join(ROOT, 'dist');
 const FIXTURE_URL = 'https://api.anthropic.com/snapscreen-smoke';
+const RESOURCE_PROBE_URL = 'https://api.anthropic.com/snapscreen-resource-probe';
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const UI_HOST_SELECTOR = '#snapscreen-ui-host';
 const UI_FRAME_PATH = '/src/ui/result-frame.html';
 const WORKSPACE_PATH = '/src/workspace/workspace.html';
 const OPTIONS_PATH = '/src/options/options.html';
+const PANEL_ICON_PATH = '/src/assets/icons/icon16.png';
 const ANSWER_SENTINEL = 'SNAPSCREEN_SMOKE_ANSWER_7C91F2';
 const COMPOSER_SENTINEL = 'SNAPSCREEN_SMOKE_COMPOSER_4A8DE6';
 const CODE_SENTINEL = 'SNAPSCREEN_SMOKE_CODE_5B3E9D';
@@ -73,10 +75,14 @@ async function verifyBuild() {
     throw new Error('The built extension is missing its optional local-file permission.');
   }
 
+  // In Chrome mode embeds only the UI frame in webpages. The workspace, icons,
+  // content script, and Settings stay private.
   const webAccessibleResources = (manifest.web_accessible_resources ?? [])
     .flatMap((entry) => entry.resources ?? []);
-  if (webAccessibleResources.includes(WORKSPACE_PATH.slice(1))) {
-    throw new Error('The trusted workspace must not be web-accessible.');
+  if (webAccessibleResources.length !== 1 || webAccessibleResources[0] !== UI_FRAME_PATH.slice(1)) {
+    throw new Error(
+      `Only the UI frame may be web-accessible; the built manifest exposes: ${webAccessibleResources.join(', ')}`,
+    );
   }
 
   const contentScript = 'src/content/index.js';
@@ -1110,6 +1116,54 @@ async function assertHostPageIsolation(page) {
   }
 }
 
+async function verifyWebAccessibleResources(context, extensionId, contentScript) {
+  // This page deliberately has no CSP. The UI frame must load, so a webpage
+  // policy or failed harness cannot masquerade as a private resource.
+  const page = await context.newPage();
+  await page.goto(RESOURCE_PROBE_URL);
+  const extensionUrl = (path) => `chrome-extension://${extensionId}/${path.replace(/^\//, '')}`;
+  const targets = {
+    frame: extensionUrl(UI_FRAME_PATH),
+    icon: extensionUrl(PANEL_ICON_PATH),
+    contentScript: extensionUrl(contentScript),
+    workspace: extensionUrl(WORKSPACE_PATH),
+    settings: extensionUrl(OPTIONS_PATH),
+  };
+  const loaded = await page.evaluate(async (urls) => Object.fromEntries(await Promise.all(
+    Object.entries(urls).map(async ([name, url]) => {
+      try {
+        const response = await fetch(url, { signal: AbortSignal.timeout(3_000) });
+        return [name, response.ok && (await response.arrayBuffer()).byteLength > 0];
+      } catch {
+        return [name, false];
+      }
+    }),
+  )), targets);
+  await page.close();
+  if (!loaded.frame) {
+    throw new Error('A webpage could not load the web-accessible UI frame; the resource probe is invalid.');
+  }
+  const exposed = Object.keys(loaded).filter((name) => name !== 'frame' && loaded[name]);
+  if (exposed.length > 0) {
+    throw new Error(`A webpage loaded private extension resources: ${exposed.join(', ')}`);
+  }
+}
+
+async function verifyPanelIcon(frame) {
+  // The icon is not web-accessible; the extension-origin frame loads it itself.
+  const width = await frame.locator('.snapscreen-panel-icon').evaluate(async (icon) => {
+    try {
+      await icon.decode();
+      return icon.naturalWidth;
+    } catch {
+      return 0;
+    }
+  });
+  if (width !== 16) {
+    throw new Error('The result panel icon did not load inside the extension frame.');
+  }
+}
+
 async function closeContext(context) {
   if (!context) return;
   await Promise.race([
@@ -1169,6 +1223,12 @@ try {
           },
         });
       });
+      await context.route(RESOURCE_PROBE_URL, async (route) => {
+        await route.fulfill({
+          body: '<!doctype html><html><body><h1>Resource probe</h1></body></html>',
+          contentType: 'text/html',
+        });
+      });
       await context.route(API_URL, async (route) => {
         const request = route.request();
         apiRequests.push({
@@ -1196,6 +1256,7 @@ try {
       if (!worker.url().startsWith('chrome-extension://')) {
         throw new Error(`Unexpected extension service-worker URL: ${worker.url()}`);
       }
+      await verifyWebAccessibleResources(context, new URL(worker.url()).host, contentLoader);
 
       const oversizeCrop = await createOversizeCrop(worker);
       const page = await context.newPage();
@@ -1285,6 +1346,7 @@ try {
 
       const panel = uiFrame.locator('.snapscreen-panel');
       await panel.waitFor({ state: 'visible', timeout: TEST_TIMEOUT_MS });
+      await verifyPanelIcon(uiFrame);
       await uiFrame.locator('.snapscreen-pending').waitFor({
         state: 'visible',
         timeout: TEST_TIMEOUT_MS,
@@ -1407,7 +1469,7 @@ try {
       await verifyEscapeClose(page, uiFrame, slowComposer, 'Slow-answer close');
 
       process.stdout.write(
-        'Unpacked-extension smoke test passed: exact keyed/no-key instruction, no-key Open Settings and Try again, collapsed-limit validation, strict-CSP extension-frame crop, oversize-capture downscale, answer, code-block copy, composer, Escape-release teardown, host-page isolation, interrupted-first-answer Try again and follow-up, streaming scroll-following, native answer/missing/incompatible/disconnected-host isolation, and slow-answer status and Stop verified.\n',
+        'Unpacked-extension smoke test passed: frame-only web-accessible resources, exact keyed/no-key instruction, no-key Open Settings and Try again, collapsed-limit validation, strict-CSP extension-frame crop, oversize-capture downscale, answer, code-block copy, composer, Escape-release teardown, host-page isolation, interrupted-first-answer Try again and follow-up, streaming scroll-following, native answer/missing/incompatible/disconnected-host isolation, and slow-answer status and Stop verified.\n',
       );
     })(),
     timeoutFailure,
