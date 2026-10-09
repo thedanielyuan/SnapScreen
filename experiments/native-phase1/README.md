@@ -1,6 +1,6 @@
 # Phase 1: native interaction experiment
 
-This macOS prototype tests the interaction model in [the companion plan](../../docs/native-companion-plan.md).
+This macOS prototype tests the native companion's interaction model.
 It is a separate unpacked extension with mocked answers, not a native mode in the shipping
 extension. Do not proceed with the full companion based only on a successful build or bridge
 handshake. The [results](../../docs/native-phase1-results.md) distinguish measured behavior

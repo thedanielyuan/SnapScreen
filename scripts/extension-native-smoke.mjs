@@ -55,6 +55,18 @@ async function waitForWorkers(context) {
   throw new Error('Both packaged extension workers did not start.');
 }
 
+// Each extension opens Settings on install, and Chrome navigates an active blank tab there
+// instead of opening another. Wait for both, so neither takes over a page this test opens.
+async function waitForInstallSettings(context, urls) {
+  const deadline = Date.now() + TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const open = new Set(context.pages().map(page => page.url()));
+    if (urls.every(url => open.has(url))) return;
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 50));
+  }
+  throw new Error('Both extensions did not open Settings on install.');
+}
+
 async function verifySettings(context, worker, extensionId, protocolVersion) {
   await worker.evaluate(() => chrome.storage.local.set({ interfaceMode: 'extension' }));
   const page = await context.newPage();
@@ -180,6 +192,10 @@ try {
       const { native, normal } = await waitForWorkers(context);
       const nativeId = new URL(native.url()).hostname;
       const normalId = new URL(normal.url()).hostname;
+      await waitForInstallSettings(context, [
+        `chrome-extension://${nativeId}/${OPTIONS_PATH}`,
+        `chrome-extension://${normalId}/${normalManifest.options_page}`,
+      ]);
       await verifySettings(context, native, nativeId, archive.protocolVersion);
       assert.deepEqual(escapedRequests, [], 'Settings unexpectedly called the API.');
       const page = await context.newPage();
