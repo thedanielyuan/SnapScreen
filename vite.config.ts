@@ -1,8 +1,8 @@
 import { defineConfig } from 'vite';
 import { configDefaults } from 'vitest/config';
 import { crx, type CrxPlugin } from '@crxjs/vite-plugin';
-import packageJson from './package.json';
-import manifest from './src/manifest.json';
+import packageJson from './package.json' with { type: 'json' };
+import manifest from './src/manifest.json' with { type: 'json' };
 
 // CRX makes every `?script` import web-accessible, but the worker injects the
 // content script with chrome.scripting, which needs no webpage access. Ship

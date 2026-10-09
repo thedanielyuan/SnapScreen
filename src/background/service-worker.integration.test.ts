@@ -175,6 +175,7 @@ function trustedSender(overrides: Partial<chrome.runtime.MessageSender> = {}): c
       discarded: false,
       frozen: false,
       autoDiscardable: true,
+      lastAccessed: 0,
       groupId: -1,
       windowId: 2,
       url: 'https://example.test/question',
