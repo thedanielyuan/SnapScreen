@@ -44,9 +44,7 @@ archive. It does not publish an artifact.
 
 The extension and companion archives are separate; neither includes or installs the other.
 Package both from the same reviewed source and retain their exact command-reported paths and
-checksums. Keep paid live API tests disabled during candidate verification. The
-[native-only candidate verification record](native-only-candidate-verification.md) identifies
-the selected source and artifacts and records their automated results. Physical acceptance
+checksums. Keep paid live API tests disabled during candidate verification. Physical acceptance
 requires the extracted production companion and separately recorded human-operated trials.
 
 The companion package command prints the archive, staged app, metadata, and SHA-256 checksum paths.
@@ -182,8 +180,7 @@ not establish interaction acceptance, which stays explicitly pending in the pack
 ## Evidence and remaining gates
 
 The following earlier Phase 4 companion evidence predates the native-only candidate run;
-its counts and checksum do not identify that candidate. Use the
-[candidate verification record](native-only-candidate-verification.md) for the latter.
+its counts and checksum do not identify that candidate.
 Local verification on 7 October 2026 used macOS 27.0 on arm64. Automated suites used
 Chromium 149.0.7827.55; the acceptance runner was also started with Google Chrome 154.0.8037.98:
 

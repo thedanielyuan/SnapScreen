@@ -25,9 +25,7 @@ from `npm run package:native` are separate artifacts. The extension packager val
 build and extracted archive before accepting it, including the excluded UI and test shims.
 Packaged and physical native runners reject companion builds with live-test hooks. The default
 companion archive is unsigned and intended for local acceptance; creating the archives does
-not publish or notarize them; a `v<version>` tag publishes only the extension ZIP. Candidate
-hashes and automated check results belong to the
-[candidate verification record](native-only-candidate-verification.md).
+not publish or notarize them; a `v<version>` tag publishes only the extension ZIP.
 
 The native-only build requires its own exact extension ID in the host registration. It cannot
 implicitly share or replace another variant's registration. Each browser user-data root has
@@ -35,12 +33,11 @@ one registration; a second Chrome profile within that root does not isolate it. 
 browser roots, or explicitly remove the old ID's registration before adding the new one as
 described in the [variant-switch procedure](native-phase4.md#switch-extension-variants).
 Automated package and mocked browser checks cover these build boundaries. Physical focus and
-input acceptance was only partially completed; the
-[physical acceptance record](native-only-physical-acceptance.md) lists the tested workflows,
-and no claim extends beyond them. Removing web-accessible resources does not
-establish universal undetectability or focus preservation. The only observer these measures
-address is ordinary page JavaScript; SnapScreen makes no concealment promise against screen
-sharing, other extensions, native monitoring software, or browser or OS inspection.
+input acceptance was only partially completed and is not established. Removing web-accessible
+resources does not establish universal undetectability or focus preservation. The only observer
+these measures address is ordinary page JavaScript; SnapScreen makes no concealment promise
+against screen sharing, other extensions, native monitoring software, or browser or OS
+inspection.
 
 ## macOS companion
 
