@@ -37,7 +37,9 @@ Automated package and mocked browser checks cover these build boundaries. Physic
 input acceptance was only partially completed; the
 [physical acceptance record](native-only-physical-acceptance.md) lists the tested workflows,
 and no claim extends beyond them. Removing web-accessible resources does not
-establish universal undetectability or focus preservation.
+establish universal undetectability or focus preservation. The only observer these measures
+address is ordinary page JavaScript; SnapScreen makes no concealment promise against screen
+sharing, other extensions, native monitoring software, or browser or OS inspection.
 
 ## Optional macOS companion
 
