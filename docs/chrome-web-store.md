@@ -26,9 +26,7 @@ exact extension ID. To switch variants in one browser user-data root, explicitly
 ID's registration before installing the new one; see the
 [variant-switch procedure](native-phase4.md#switch-extension-variants). Separate Chrome
 profiles within the same root share that registration; separate browser roots can each
-authorize their chosen variant. See the
-[candidate verification record](native-only-candidate-verification.md) for artifact identities
-and automated results.
+authorize their chosen variant.
 
 ## Single purpose
 

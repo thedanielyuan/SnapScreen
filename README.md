@@ -84,13 +84,10 @@ Neither archive contains or installs the other. The default companion package is
 intended for local acceptance. The live suite uses a disposable test-hook app; packaged and
 physical runners require the production app.
 
-See the [candidate verification record](docs/native-only-candidate-verification.md) for the
-reviewed source, automated results, and checksums identifying both candidate artifacts.
-Physical focus and input acceptance for the native-only candidate was partially completed; the
-[physical acceptance record](docs/native-only-physical-acceptance.md) lists the tested workflows
-and documented limitations. To resume, use the
-[physical acceptance procedure](docs/native-phase4-acceptance.md) with `--extension-dir dist-native`
-and the extracted production companion to collect evidence with a human operator.
+Physical focus and input acceptance for the native-only extension was only partially completed.
+To resume, use the [physical acceptance procedure](docs/native-phase4-acceptance.md) with
+`--extension-dir dist-native` and the extracted production companion to collect evidence with a
+human operator.
 
 ## License
 
