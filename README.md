@@ -2,54 +2,72 @@
 
 **Clarity, without breaking your flow**
 
-SnapScreen is a Chrome extension that lets you snip part of the current tab and ask Claude
-about it, using your own Anthropic API key.
+SnapScreen lets you snip part of the current Chrome tab and ask Claude about it, using your own
+Anthropic API key. The snip and answers appear in the SnapScreen companion, a separate macOS
+app, so SnapScreen adds no UI or web-accessible resources to the page. Modifier keys from its
+shortcut can still reach the page.
 
-The default interface runs in Chrome. An optional **experimental macOS companion** now has a
-native bridge, Phase 3 interface, and local development build. It requires separate installation
-and an explicit selection in Settings. See [setup and current limitations](docs/native-phase2.md)
-and [Phase 1 interaction results](docs/native-phase1-results.md). See
-[Phase 3 controls](docs/native-phase3.md) and [Phase 4 packaging and acceptance](docs/native-phase4.md).
-Unsigned local packages and install/upgrade/uninstall tooling are available. Physical acceptance
-and a signed, notarized release remain pending; modifier keys may still reach the page.
+## Setup
 
-## Native-only development build
-
-The separate **SnapScreen Native** extension always uses the macOS companion. It includes
-trusted Settings but no injected UI, workspace, `scripting` permission, or web-accessible
-resources. Build it independently of the ordinary `dist/` extension:
+Requirements: macOS, Xcode command-line tools with `swiftc`, Node 22, and Chrome 116 or later.
+Releases include only the Chrome extension, so build both parts from this repository:
 
 ```bash
+npm ci
 npm run build:extension-native
 npm run build:native
 ```
 
-Load `dist-native/` through **chrome://extensions → Developer mode → Load unpacked**.
-Use a separate browser user-data root when trying both variants: a profile folder inside the
-same root does not isolate host registration. Copy the native-only extension's ID and follow
-the [host registration instructions](docs/native-phase2.md#local-setup) for that browser root.
-The installer rejects a conflicting registration. To migrate one browser root, follow the
-[explicit variant-switch procedure](docs/native-phase4.md#switch-extension-variants), removing
-the old registration with the old extension ID before registering the new ID. Registration
-authorizes one exact extension origin.
+1. Load `dist-native/` at **chrome://extensions → Developer mode → Load unpacked**, and copy its
+   extension ID. SnapScreen's Settings page opens on first installation.
+2. Register the companion for that exact ID in your browser's user-data root: the parent of the
+   **Profile Path** shown at `chrome://version`, not the `Default` or `Profile 1` folder itself.
+   For Google Chrome this is usually `~/Library/Application Support/Google/Chrome`; pass its
+   expanded absolute path.
 
-Configure your key, prompt, and limits in Settings and use **Check companion** to verify the
-installation. There is no interface selector. First installation opens Settings; later toolbar
-and shortcut invocations start capture, with badge feedback for failures. For local files,
-enable **Allow access to file URLs** in Chrome's extension management page first.
+   ```bash
+   npm run install:native -- --extension-id <extension-id> --user-data-dir <absolute-user-data-root>
+   ```
 
-After a fresh ordinary `npm run build` and `npm run test:browser`, run
-`npm run build:extension-native` and `npm run test:browser-native`. The latter uses both build
-outputs for resource-probe controls, verifies a temporary ZIP and its extracted asset graph,
-and runs the extracted extension with mocked capture, native host, and API responses. It covers
-streaming, follow-ups, Stop/Retry, failures, source invalidation, concurrent sessions, connection
-cleanup, and an actual worker stop/restart without replay. The restart is a debugger-driven
-diagnostic; it does not establish natural suspension or physical focus behavior.
-Native live, packaged, and physical runners accept `--extension-dir dist-native` to select
-this variant explicitly. Without the flag they keep the repository `dist/` default; explicit
-relative paths resolve from the current working directory. The selected build is validated
-before fixture changes, with its variant, absolute path, and original/fixture hashes recorded.
-After building and packaging the companion, run:
+3. In Settings, add your API key, then choose **Check companion**.
+
+Click the toolbar icon or press Option-Shift-S to snip. If the companion can't start, the
+toolbar badge and the icon's tooltip say why for five seconds. For local files, first enable
+**Allow access to file URLs** for SnapScreen in Chrome's extension management page.
+
+The registration points at this checkout's build, so rerun it after moving the checkout. To
+install a packaged copy of the companion instead, or to upgrade or remove it, see
+[Phase 4 packaging](docs/native-phase4.md#install-upgrade-and-remove). See
+[Phase 3](docs/native-phase3.md) for how the companion's windows and controls work and
+[Phase 1 interaction results](docs/native-phase1-results.md) for the prototype's findings.
+
+## In Chrome build
+
+The original extension shows the snip overlay and answers inside the page instead, so it also
+works without the companion and outside macOS. Its Settings can switch it to the companion
+(experimental); see [native mode setup](docs/native-phase2.md#local-setup). Build it with
+`npm run build` and load `dist/`; scripts call it the `ordinary` variant.
+
+Each browser user-data root registers the companion for one extension ID, shared by all of its
+Chrome profiles, and the installer rejects a conflicting registration. To use both builds with
+the companion, load them in separate user-data roots, or follow the
+[variant-switch procedure](docs/native-phase4.md#switch-extension-variants) to remove the old
+ID's registration before registering the new one.
+
+## Development
+
+[AGENTS.md](AGENTS.md) lists the full check sequence that CI runs. `npm run test:browser-native`
+needs fresh `npm run build` and `npm run build:extension-native` outputs: it uses both for
+resource-probe controls, verifies a temporary ZIP and its extracted asset graph, and runs the
+extracted extension with mocked capture, native host, and API responses. It covers streaming,
+follow-ups, Stop/Retry, failures, source invalidation, concurrent sessions, connection cleanup,
+and an actual worker stop/restart without replay. The restart is a debugger-driven diagnostic;
+it does not establish natural suspension or physical focus behavior.
+
+The native live, packaged, and physical runners test `dist/` unless passed
+`--extension-dir dist-native`; explicit relative paths resolve from the current working
+directory. The selected build is validated before fixture changes, with its variant, absolute
+path, and original/fixture hashes recorded. After building and packaging the companion, run:
 
 ```bash
 npm run test:native-live -- --extension-dir dist-native
@@ -57,15 +75,14 @@ npm run test:native-packaged -- --extension-dir dist-native
 npm run package:extension-native
 ```
 
-The final command validates the built and extracted assets and writes the distinct
-`release/snapscreen-native-only-<version>.zip`, then prints archive and extension SHA-256
-checksums. The companion is a separate archive produced by `npm run package:native` under
-`native/macos/build/package/`; the command prints its exact path and checksum. Neither archive
-contains or installs the other. The default companion package is unsigned and intended for
-local acceptance. The tag release workflow continues to publish only the ordinary extension.
-`npm run build:native` still builds the Swift companion, and `npm run package` still archives
-the ordinary extension. The live suite uses a disposable test-hook app; packaged and physical
-runners require the production app.
+The final command validates the built and extracted assets, writes
+`release/snapscreen-native-only-<version>.zip`, and prints its archive and extension SHA-256
+checksums. A matching `v<version>` tag publishes that ZIP as a GitHub release. `npm run package`
+archives the In Chrome build, and `npm run package:native` writes the companion archive under
+`native/macos/build/package/`, printing its exact path and checksum; releases include neither.
+Neither archive contains or installs the other. The default companion package is unsigned and
+intended for local acceptance. The live suite uses a disposable test-hook app; packaged and
+physical runners require the production app.
 
 See the [candidate verification record](docs/native-only-candidate-verification.md) for the
 reviewed source, automated results, and checksums identifying both candidate artifacts.

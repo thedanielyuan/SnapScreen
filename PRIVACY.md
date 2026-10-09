@@ -1,16 +1,18 @@
 # SnapScreen privacy policy
 
-Last updated: October 7, 2026
+Last updated: October 9, 2026
 
-SnapScreen is a Chrome extension that answers questions about part of a web page. This policy
-explains what it handles, where that data goes, and what stays on your device.
+SnapScreen is a Chrome extension that answers questions about part of a web page, showing your
+snips and answers in a companion app on your Mac. This policy explains what it handles, where
+that data goes, and what stays on your device. It also covers the original In Chrome extension
+(the ordinary build), which shows its UI in the page and uses the companion only if you select it.
 
 ## Summary
 
 - SnapScreen has no servers. It sends your snips and questions to Anthropic, the AI provider
   that writes the answers. Native mode also gives screenshot and conversation data
-  to the separately installed SnapScreen companion on your Mac. Native mode is optional in
-  the ordinary extension and required in the separate native-only development build.
+  to the separately installed SnapScreen companion on your Mac. SnapScreen always uses native
+  mode; the ordinary build uses it only when you select it in Settings.
 - It doesn't collect analytics, show ads, or sell or share your data with anyone else.
 - Your API key and settings stay in Chrome on your device.
 
@@ -24,16 +26,16 @@ explains what it handles, where that data goes, and what stays on your device.
 | Answer text | When Anthropic responds | Displayed in the extension or local companion | In memory until you close or lose the session; explicit Copy puts text on your clipboard |
 | Your Anthropic API key | When you save it in Settings | Stored in Chrome on your device, and sent to Anthropic with each request | Until you remove it or uninstall SnapScreen |
 | Settings (default prompt, limits, and, in the ordinary build, interface choice) | When you save them | Stored in Chrome on your device | Until you change them or uninstall SnapScreen |
-| Page address saved for workspace reconnection | Only when the ordinary extension opens its separate workspace; the native-only build does not save this address | Chrome's temporary session storage on your device, to reconnect that tab | Until the workspace tab closes or Chrome quits |
+| Page address saved for workspace reconnection | Only when the ordinary build opens its separate workspace; SnapScreen's main extension never saves this address | Chrome's temporary session storage on your device, to reconnect that tab | Until the workspace tab closes or Chrome quits |
 
 SnapScreen never writes screenshots or conversations to disk.
 
-### Optional macOS companion
+### macOS companion
 
-The **In Chrome** interface is the default in the ordinary extension. To use its native mode,
-install the companion and explicitly select it in Settings. The separate native-only build
-always uses the companion, has no interface selector, and injects no page UI or workspace.
-It exposes no web-accessible extension resources. Chrome starts a separate local process for each native
+SnapScreen's main extension always uses the companion. It has no interface selector, injects no
+page UI or workspace, and exposes no web-accessible extension resources. The ordinary build
+defaults to its **In Chrome** interface; to use its native mode, install the companion and
+explicitly select it in Settings. Chrome starts a separate local process for each native
 session. It receives the screenshot, crop, streamed answers, and follow-ups; it never receives
 your API key, the system prompt, or the structured history used for Anthropic requests. The
 extension still sends every API request directly to Anthropic. No local web server or shared
@@ -43,10 +45,10 @@ no screenshots, questions, answers, or API credentials.
 
 The separate companion installer stores the app and a receipt containing its version,
 checksum, and chosen browser registration paths under your user account. It registers the
-exact extension ID in each browser root you choose. The ordinary and native-only extensions
+exact extension ID in each browser root you choose. The main extension and the ordinary build
 can have different IDs. A browser root authorizes one ID at a time, shared by its Chrome
-profiles; switching variants requires explicitly removing the old registration before adding
-the new one. See the [variant-switch instructions](docs/native-phase4.md#switch-extension-variants).
+profiles; switching between them requires explicitly removing the old registration before
+adding the new one. See the [variant-switch instructions](docs/native-phase4.md#switch-extension-variants).
 This installation metadata contains no screenshots, questions, answers, or API key. The
 companion has no automatic update service. Its local acceptance archive is unsigned and
 packaged separately from the extension archive; installing one does not install the other.
@@ -99,10 +101,10 @@ cached for about 5 minutes after its last use.
 
 - **activeTab:** captures the current tab only after you click the icon or press the shortcut.
 - **scripting (ordinary build only):** shows SnapScreen's In Chrome UI on the invoked tab.
-  The native-only build does not request this permission.
+  The main extension does not request this permission.
 - **storage:** saves your API key and settings on your device.
 - **nativeMessaging:** connects to the separately installed local macOS companion when you
-  invoke SnapScreen in native mode (always used by the native-only build), or choose **Check companion** in
+  invoke SnapScreen in native mode (always used by the main extension), or choose **Check companion** in
   Settings for a data-free version handshake. Native sessions transfer screenshots and answer
   data to that process and receive selection and follow-up actions; they never transfer keys.
 - **Access to `api.anthropic.com`:** sends your snip and question to Anthropic.
@@ -121,7 +123,8 @@ has the details.
 ## Your choices
 
 - Remove your API key at any time on SnapScreen's Settings page.
-- Choose **In Chrome** in the ordinary extension's Settings to use it without the native companion.
+- To use SnapScreen without the companion, use the ordinary build with its default **In Chrome**
+  interface.
 - Uninstalling SnapScreen deletes its stored key and settings from Chrome.
 
 ## Changes

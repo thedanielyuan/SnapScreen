@@ -5,12 +5,12 @@ it runs on. The [privacy policy](../PRIVACY.md) is the short version.
 
 ## Native-only extension build
 
-`npm run build:extension-native` produces a separate `dist-native/` extension that always uses
-the macOS companion. Its dedicated worker has no content-script import, injection code,
-workspace, or page-message handlers. Its manifest has no `scripting` permission, content
-scripts, or web-accessible resources. The packaged Settings page and icons are private
-extension resources. The ordinary `dist/` build retains its existing interface choice and
-injected UI boundary described below.
+SnapScreen's main extension, built by `npm run build:extension-native` into `dist-native/` and
+published by the tag release workflow, always uses the macOS companion. Its dedicated worker
+has no content-script import, injection code, workspace, or page-message handlers. Its manifest
+has no `scripting` permission, content scripts, or web-accessible resources. The packaged
+Settings page and icons are private extension resources. The ordinary `dist/` build retains
+its existing interface choice and injected UI boundary described below.
 
 Native-only Settings keeps credential management, prompt/limits, and the explicit **Check
 companion** handshake. It has no interface selector; a previously stored `interfaceMode` is
@@ -25,7 +25,8 @@ from `npm run package:native` are separate artifacts. The extension packager val
 build and extracted archive before accepting it, including the excluded UI and test shims.
 Packaged and physical native runners reject companion builds with live-test hooks. The default
 companion archive is unsigned and intended for local acceptance; creating the archives does
-not publish or notarize them. Candidate hashes and automated check results belong to the
+not publish or notarize them; a `v<version>` tag publishes only the extension ZIP. Candidate
+hashes and automated check results belong to the
 [candidate verification record](native-only-candidate-verification.md).
 
 The native-only build requires its own exact extension ID in the host registration. It cannot
@@ -41,10 +42,11 @@ establish universal undetectability or focus preservation. The only observer the
 address is ordinary page JavaScript; SnapScreen makes no concealment promise against screen
 sharing, other extensions, native monitoring software, or browser or OS inspection.
 
-## Optional macOS companion
+## macOS companion
 
-Settings defaults to the existing **In Chrome** interface. Selecting **macOS companion
-(experimental)** routes subsequent user invocations through the background's Native Messaging
+The native-only extension always routes user invocations through the background's Native
+Messaging bridge. In the ordinary build, Settings defaults to the **In Chrome** interface, and
+selecting **macOS companion (experimental)** routes subsequent invocations through the same
 bridge. Native mode does not inject a content script or page UI, open a workspace, or open
 Settings automatically. Missing, incompatible, or disconnected hosts end the session and
 report an extension badge error; they never trigger an automatic switch to the injected mode.
@@ -79,10 +81,10 @@ answers cannot cross sessions or browsing contexts. Chrome shares local storage,
 credentials and interface preferences, between regular and incognito use in the same profile.
 [Chrome incognito behavior](https://developer.chrome.com/docs/extensions/reference/manifest/incognito)
 
-This is an experimental companion, not yet a signed/notarized macOS release. Phase 4 packages
-include a separate user-local installer. It writes the app, a receipt of its version/digest and
-browser registration paths, and exact-origin native host manifests. These files contain no
-screenshots, API credentials, or conversation content. There is no automatic updater. See
+The default companion package is unsigned. Phase 4 packages include a separate user-local
+installer. It writes the app, a receipt of its version/digest and browser registration paths,
+and exact-origin native host manifests. These files contain no screenshots, API credentials,
+or conversation content. There is no automatic updater. See
 [packaging and removal](native-phase4.md). The fitted frozen-image
 surface does not promise alignment with Chrome's content area. Phase 1's measured observations
 do not establish the completed companion's interaction behavior. Packaged-candidate trials
@@ -136,10 +138,10 @@ Anthropic retains API inputs and outputs under its own
 [data-retention policy](https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data).
 Answer requests use Anthropic's prompt caching, so Anthropic keeps the conversation, including
 the screenshot, cached for about 5 minutes after its last use; this makes follow-up questions
-cheaper. A fallback screenshot remains only in memory: the background holds it until the exact
-workspace claims its one-time capability, after which the workspace page owns it. Only small
-source/workspace routing metadata is kept in `chrome.storage.session` so a service-worker
-restart can reconnect the workspace.
+cheaper. In the ordinary build, a fallback screenshot remains only in memory: the background
+holds it until the exact workspace claims its one-time capability, after which the workspace
+page owns it. Only small source/workspace routing metadata is kept in `chrome.storage.session`
+so a service-worker restart can reconnect the workspace.
 
 ## Injected UI isolation (In Chrome mode)
 

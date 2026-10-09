@@ -45,8 +45,9 @@ npm run install:native -- --extension-id <exact-32-character-id> --user-data-dir
 
 Chrome, Chromium and Chrome for Testing have distinct user-data roots. Use the actual root
 of the browser under test; temporary test roots isolate the installation from daily browsing.
-Select native companion mode in extension Settings after installing. Neither this document
-nor building/testing automatically registers a host with the user's Chrome installation.
+The native-only extension always uses the companion; in the ordinary build, also select
+native companion mode in Settings. Neither this document nor building/testing automatically
+registers a host with the user's Chrome installation.
 
 The UI keeps Phase 1's nonactivating panels, release-to-submit region selection, edge-resize
 pointer shield, scrolling, Copy, preview and follow-up entry, and matches the In Chrome
