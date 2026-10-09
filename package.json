@@ -4,7 +4,6 @@
   "version": "1.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
     "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -24,8 +23,7 @@
     "test:native-prototype": "node --test experiments/native-phase1/extension/*.node-test.mjs && experiments/native-phase1/build/SnapScreenPhase1.app/Contents/MacOS/SnapScreenPhase1 --self-test",
     "experiment:native": "node scripts/native-phase1-session.mjs",
     "package": "node scripts/package-extension.mjs",
-    "package:extension-native": "node scripts/package-extension.mjs --variant native-only",
-    "preview": "vite preview"
+    "package:extension-native": "node scripts/package-extension.mjs --variant native-only"
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^3.0.0",
