@@ -154,10 +154,11 @@ npm run test:native-packaged  # extracted archive + shipped installer in disposa
 - `src/ui/result-frame.html`, `src/workspace/workspace.html`, and any new extension page must be
   in `rolldownOptions.input` in `vite.config.ts`. Without an entry the build still passes, but the
   frame ships unbundled and the workspace isn't emitted.
-- `npm run dev` doesn't work (the strict CSP blocks the crxjs dev server) and leaves a dev build in
-  `dist/` that fails `test:browser` until you rebuild. To try a change, build, load `dist-native/`
-  (or `dist/` for In Chrome) unpacked at chrome://extensions, and reload it after each rebuild.
-  Real answers need an API key; the native-only build also needs a registered companion.
+- There's no dev server: the strict CSP blocks the crxjs one, and running `vite` directly leaves a
+  dev build in `dist/` that fails `test:browser` until you rebuild. To try a change, build, load
+  `dist-native/` (or `dist/` for In Chrome) unpacked at chrome://extensions, and reload it after
+  each rebuild. Real answers need an API key; the native-only build also needs a registered
+  companion.
 - The version lives only in `package.json`; bump it with `npm version <x.y.z> --no-git-tag-version`.
   A matching `v<x.y.z>` tag runs `.github/workflows/release.yml`, which publishes only the
   native-only extension's ZIP (`npm run package:extension-native`), not the companion.
