@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "SnapScreen Native",
+  "name": "SnapScreen",
   "description": "Snip the current tab and get answers in the SnapScreen macOS companion",
   "homepage_url": "https://github.com/thedanielyuan/SnapScreen",
   "minimum_chrome_version": "116",

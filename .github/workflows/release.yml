@@ -30,18 +30,20 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+      - run: npm run test:extension-artifacts
       - run: npm run build
       - run: npx playwright install --with-deps --no-shell chromium
       - run: npm run test:browser
       - run: npm run build:extension-native
       - run: npm run test:browser-native
-      - run: npm run package
+      # The native-only extension is the main product; the In Chrome build isn't published.
+      - run: npm run package:extension-native
       - name: Publish the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
           gh release create "$GITHUB_REF_NAME"
-          "release/snapscreen-${GITHUB_REF_NAME#v}.zip"
+          "release/snapscreen-native-only-${GITHUB_REF_NAME#v}.zip"
           --title "SnapScreen ${GITHUB_REF_NAME#v}"
           --generate-notes
           --verify-tag

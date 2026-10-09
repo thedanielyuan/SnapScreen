@@ -4,7 +4,7 @@ Acceptance is partially complete. Physical testing stopped at the operator's req
 8 October 2026 (Europe/London), and the remaining matrix was then skipped. Full acceptance
 is not established, and no claim extends to a workflow or configuration marked Skipped
 below. The shortcut's modifier-key events are a documented limitation; see the
-[security contract](security.md#optional-macos-companion). Preparation on 7 October
+[security contract](security.md#macos-companion). Preparation on 7 October
 verified the retained candidate and started an isolated Google Chrome session. The retained
 extension and companion artifacts were unchanged throughout these trials.
 

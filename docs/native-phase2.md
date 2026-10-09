@@ -112,7 +112,7 @@ history. Session content stays in memory and is discarded on close or disconnect
 not logged or persisted. Only an explicit Copy action writes answer text to the clipboard.
 The existing Anthropic client keeps its model settings, prompt caching, request limits,
 timeout, keepalive, and error sanitization. See the
-[security contract](security.md#optional-macos-companion) and [privacy policy](../PRIVACY.md).
+[security contract](security.md#macos-companion) and [privacy policy](../PRIVACY.md).
 
 ## Verification and remaining work
 

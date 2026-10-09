@@ -174,8 +174,7 @@ certificates in the repository.
 The workflow follows Apple's [notarization guidance](https://developer.apple.com/documentation/Security/customizing-the-notarization-workflow)
 and [Developer ID guidance](https://developer.apple.com/developer-id/).
 
-The existing tag workflow still publishes only the ordinary extension ZIP; it does not
-publish the separate native-only extension archive. Native packages are not
+The tag workflow publishes only the native-only extension ZIP. Companion packages are not
 automatically uploaded or released. Signing/notarization tooling has local gate tests; a real
 credentialed run and Gatekeeper installation on a clean Mac remain release gates. Signing does
 not establish interaction acceptance, which stays explicitly pending in the package metadata.
