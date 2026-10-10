@@ -13,8 +13,8 @@ struct SettingsServices {
   var shortcut: Hotkey.Combination?
 }
 
-/// The Settings window: the extension's options page (the key, the Default Prompt and the
-/// advanced limits), plus Screen Recording status and Open at login. Saving works as it does there.
+/// The Settings window: the key, the Default Prompt and the advanced limits, plus Screen
+/// Recording status and Open at login.
 final class SettingsWindowController: NSObject, NSWindowDelegate {
   static let contentWidth: CGFloat = 440
   static let consoleURL = URL(string: "https://console.anthropic.com/")!

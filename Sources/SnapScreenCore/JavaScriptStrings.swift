@@ -1,9 +1,9 @@
 import Foundation
 
-// This module is ported from the extension's TypeScript (src/lib), which works on JavaScript
-// strings. These helpers keep the JavaScript behavior it relies on where Swift's differs: Swift
-// compares and counts characters (grapheme clusters), so "\r\n" is one character, and Foundation's
-// whitespace differs from JavaScript's.
+// This module was ported from the Chrome extension's TypeScript, which worked on JavaScript
+// strings, and its golden fixtures pin that behavior. These helpers keep it where Swift's differs:
+// Swift compares and counts characters (grapheme clusters), so "\r\n" is one character, and
+// Foundation's whitespace differs from JavaScript's.
 
 /// The whitespace JavaScript's `trim()` and `\s` remove. Foundation's sets differ for U+FEFF,
 /// U+0085 and U+200B.
@@ -39,7 +39,7 @@ extension String {
   }
 }
 
-/// Replaces CRLF and CR line endings with LF, like `normalizePlainText` in src/lib/plain-text.ts.
+/// Replaces CRLF and CR line endings with LF.
 /// Other whitespace and Markdown-looking symbols are part of the answer and stay.
 func normalizeLineEndings(_ text: String) -> String {
   var result = String.UnicodeScalarView()

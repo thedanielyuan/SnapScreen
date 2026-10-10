@@ -1,9 +1,8 @@
 import CoreGraphics
 import Foundation
 
-// Snips and their conversations, ported from src/background/native-session.ts without the native
-// messaging bridge. The app calls a session's methods where the companion sent commands, and the
-// delegate receives the events the extension sent the companion.
+// Snips and their conversations. The app calls a session's methods as you select, ask, stop,
+// retry and close, and its delegate receives the session's events.
 
 /// A display's contents, frozen when the shortcut was pressed.
 public struct FrozenScreen: Equatable, Sendable {

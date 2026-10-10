@@ -23,9 +23,9 @@ func runSelectionViewTests() throws -> Int {
   let fitted = view.imageRect
   try check(fitted == CGRect(x: 8, y: 154, width: 984, height: 492), "landscape is fitted with letterboxing")
   try check(view.selection == nil && view.selectionSummary == "No region selected.",
-    "no region is preselected, as in Chrome")
+    "no region is preselected")
   try check(SelectionView.instruction == "Drag to select a region. Click to cancel",
-    "the visible instruction matches the extension's")
+    "the visible instruction says how to select and cancel")
   try check(view.isAccessibilityElement() && view.accessibilityRole() == .layoutArea,
     "selection is exposed as an accessible selection area")
   try check(view.accessibilityHelp()?.contains("Shift with arrow keys") == true,

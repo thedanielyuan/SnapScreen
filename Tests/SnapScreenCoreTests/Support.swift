@@ -281,7 +281,7 @@ final class ManualTimers: Sendable {
   }
 }
 
-/// Lets main-actor work that's already scheduled run, like the TypeScript tests' `flush`.
+/// Lets main-actor work that's already scheduled run.
 @MainActor
 func flush() async {
   for _ in 0..<20 { await Task.yield() }

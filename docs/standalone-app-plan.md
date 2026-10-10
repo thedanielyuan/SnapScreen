@@ -264,7 +264,7 @@ the live test, which passes 13 checks.
 ### Phase 4: Acceptance and switch-over (small)
 
 - **The round (done).** One physical round of five steps, which `npm run experiment:app`
-  (`scripts/app-acceptance.mjs`) runs:
+  (`scripts/app-acceptance.mjs`, removed in Phase 5) ran:
   - Press the shortcut over Chrome on a page that logs `focus`, `blur`, `visibilitychange`, keys
     and pointer events, first in a normal window and then in fullscreen.
   - Select a region, read the answer, ask a follow-up, and copy a code block.
@@ -285,14 +285,14 @@ the live test, which passes 13 checks.
   Recording or Keychain prompt. You accepted one finding as a second known limitation: macOS's
   periodic alert for apps that capture the screen without the system picker appeared on the
   first snip and had focus for the 2 s until you dismissed it. SnapScreen can't suppress it.
-- **You:** remove the native host registration and uninstall the extension before Phase 5
-  deletes the installer:
+- **You (done):** remove the native host registration and uninstall the extension before
+  Phase 5 deletes the installer:
 
   ```bash
   npm run install:native -- --extension-id <id> --user-data-dir <root> --remove
   ```
 
-### Phase 5: Remove the extension (medium, mostly deletion)
+### Phase 5: Remove the extension (medium, done)
 
 - Delete:
   - `src/`, `scripts/*.mjs` and `scripts/app-acceptance-observer.swift`
@@ -317,7 +317,11 @@ the live test, which passes 13 checks.
   - `PRIVACY.md`: what is captured, where the key is stored, and what goes to Anthropic.
 - Keep `.githooks/pre-push`, which is shell only.
 
-Done when: the repo contains only the app and CI is green.
+Done when: the repo contains only the app and CI is green. Done on 10 October 2026: the repo
+holds the Swift package, `scripts/build-app.sh`, `scripts/test-app-live.sh` and the docs. CI's
+`verify` job, the check `main`'s ruleset requires, now runs these steps on macOS, plus the app's
+`--self-test`. Nothing regenerates the golden fixtures any more, so changes to them are made by
+hand.
 
 ## Risks
 
@@ -325,8 +329,8 @@ Done when: the repo contains only the app and CI is green.
   a normal window and in fullscreen, so the freeze-frame overlay stays.
 - **Approvals reset on rebuild** if the app isn't signed with an Apple Development certificate
   (Phase 0).
-- **Shortcut conflict** while both the app and the extension exist. Handled by using ⌃⌥⇧S until
-  Phase 5.
+- **Shortcut conflict** while both the app and the extension existed. The app used ⌃⌥⇧S until
+  Phase 5 removed the extension.
 - **Swift 6 strict concurrency.** It adds early friction, but only in the core target.
 
 ## Not planned

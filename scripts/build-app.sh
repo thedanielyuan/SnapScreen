@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds the standalone app into build/SnapScreen.app and prints its executable path.
+# Builds the app into build/SnapScreen.app and prints its executable path.
 #
 # It signs with your Apple Development certificate when there is one. macOS recognizes a rebuilt
 # app by that signature's team, so the app keeps reading its API key from the Keychain without
@@ -36,11 +36,11 @@ case ${1-} in
     ;;
 esac
 
-# The version lives in package.json until the extension is removed.
-version=$(plutil -extract version raw -o - "$root/package.json")
+# The app's version, which also starts CFBundleVersion.
+version=$(tr -d '[:space:]' < "$root/VERSION")
 case $version in
   '' | *[!0-9.]*)
-    echo "error: package.json needs a numeric version, not \"$version\"." >&2
+    echo "error: VERSION needs a numeric version, not \"$version\"." >&2
     exit 1
     ;;
 esac

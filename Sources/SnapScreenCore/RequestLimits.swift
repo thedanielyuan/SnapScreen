@@ -23,7 +23,7 @@ public struct RequestLimitError: Error, Equatable, Sendable {
   }
 }
 
-/// Code points, which is what the input limits count, as the extension's `for...of` counter does.
+/// Code points, which is what the input limits count.
 public func countTextCharacters(_ text: String) -> Int { text.unicodeScalars.count }
 
 public func assertUserInputWithinLimit(_ text: String, maxCharacters: Int, label: String = "Question") throws {

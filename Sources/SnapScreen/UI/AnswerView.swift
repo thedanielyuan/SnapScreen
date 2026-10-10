@@ -18,7 +18,7 @@ enum NativeAnswerSegment: Equatable {
 }
 
 private enum AnswerFences {
-  // Match src/lib/code-blocks.ts: only fences are interpreted, never other Markdown or HTML.
+  // As in CodeFence.swift, only fences are interpreted, never other Markdown or HTML.
   static let opening = try! NSRegularExpression(pattern: "^( {0,3})(`{3,}|~{3,})([^\\n\\r\\u2028\\u2029]*)$")
   static let closing = try! NSRegularExpression(pattern: "^ {0,3}(`{3,}|~{3,})[ \\t]*$")
 
@@ -58,7 +58,7 @@ func splitNativeAnswerSegments(_ text: String) -> [NativeAnswerSegment] {
     flushText()
     let info = trimProtocolText(opening[2])
     let word = info.unicodeScalars.prefix(while: { !trimProtocolText(String($0)).isEmpty })
-    // The extension caps the label at 24 UTF-16 units. Avoid cutting a Unicode scalar in half.
+    // The label is capped at 24 UTF-16 units, without cutting a Unicode scalar in half.
     var language = ""
     for scalar in word {
       if language.utf16.count + String(scalar).utf16.count > 24 { break }

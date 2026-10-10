@@ -13,8 +13,6 @@ let package = Package(
       name: "SnapScreenCore",
       swiftSettings: [.swiftLanguageMode(.v6)]
     ),
-    // Sources/SnapScreen/UI is also compiled into the Chrome companion by
-    // scripts/native-companion-build.mjs, until the extension is removed.
     .executableTarget(
       name: "SnapScreen",
       dependencies: ["SnapScreenCore"],

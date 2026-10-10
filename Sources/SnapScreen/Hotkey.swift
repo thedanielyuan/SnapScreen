@@ -9,15 +9,14 @@ final class Hotkey {
     let keyCode: UInt32
     /// Carbon modifier flags, such as `controlKey`.
     let modifiers: UInt32
-    /// How menus write it, such as ⌃⌥⇧S.
+    /// How menus write it, such as ⌥⇧S.
     let display: String
     let menuKey: String
     let menuModifiers: NSEvent.ModifierFlags
 
-    /// ⌃⌥⇧S, because ⌥⇧S stays the Chrome extension's until the app replaces it
-    /// (Phase 5 of docs/standalone-app-plan.md).
-    static let snip = Combination(keyCode: UInt32(kVK_ANSI_S), modifiers: UInt32(controlKey | optionKey | shiftKey),
-      display: "⌃⌥⇧S", menuKey: "s", menuModifiers: [.control, .option, .shift])
+    /// ⌥⇧S, the shortcut the Chrome extension had.
+    static let snip = Combination(keyCode: UInt32(kVK_ANSI_S), modifiers: UInt32(optionKey | shiftKey),
+      display: "⌥⇧S", menuKey: "s", menuModifiers: [.option, .shift])
   }
 
   let combination: Combination

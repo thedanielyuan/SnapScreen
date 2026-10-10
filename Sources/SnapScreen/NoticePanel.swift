@@ -6,7 +6,7 @@ struct NoticeAction {
   let perform: () -> Void
 }
 
-/// Replaces the extension's toolbar badge: a small panel for failures before a conversation window
+/// A small panel for failures before a conversation window
 /// exists. It never activates SnapScreen or takes the keyboard, so the app you were using keeps
 /// focus.
 final class NoticePanel: NSPanel {

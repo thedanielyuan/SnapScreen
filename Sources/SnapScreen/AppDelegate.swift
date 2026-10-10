@@ -34,7 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     if !shortcutAvailable {
       notices.show("Another app is using \(hotkey.combination.display), so choose Snip from SnapScreen's menu bar icon.")
     }
-    // As the extension does on install, open Settings while there's no key to use.
+    // Open Settings while there's no key to use.
     if !keyStore.hasKey { showSettings() }
   }
 

@@ -58,7 +58,7 @@ final class ThumbnailButton: CompanionButton {
   override var focusRingMaskBounds: NSRect { bounds }
 }
 
-/// A follow-up question, right-aligned like the In Chrome thread.
+/// A follow-up question, right-aligned.
 final class QuestionBubbleView: NSView {
   let textView = ReadOnlyTextView(frame: .zero)
   private static let padding = NSSize(width: 12, height: 8)
@@ -97,7 +97,7 @@ final class QuestionBubbleView: NSView {
   }
 }
 
-/// Spinner first; after five seconds, a label and the elapsed time, as in Chrome.
+/// Spinner first; after five seconds, a label and the elapsed time.
 final class PendingView: NSView {
   private let spinner = NSProgressIndicator()
   let label = NSTextField(labelWithString: "")
@@ -144,7 +144,7 @@ final class PendingView: NSView {
     let text = thinking ? "Thinking…" : "Waiting for the answer…"
     if label.stringValue != text {
       label.stringValue = text
-      // Like the extension's status region: announce each new label once, never the timer.
+      // Announce each new label once, never the timer.
       NSAccessibility.post(element: label, notification: .announcementRequested,
         userInfo: [.announcement: text, .priority: NSAccessibilityPriorityLevel.low.rawValue])
     }
@@ -162,7 +162,7 @@ final class PendingView: NSView {
   }
 }
 
-/// A failed request, styled like the In Chrome failure message, with Retry on the newest one.
+/// A failed request, with Retry on the newest one.
 final class FailureView: NSView {
   let message = NSTextField(wrappingLabelWithString: "")
   private let icon = NSImageView()
@@ -326,7 +326,7 @@ final class TurnView: NSView {
     noticeView = notice
   }
 
-  /// Whether the extension keeps this exchange in its conversation, mirroring its settle rules:
+  /// Whether the session keeps this exchange in its conversation, mirroring its settle rules:
   /// a first answer that failed without text is cleared (the next request becomes the first),
   /// a stopped first answer is kept, and a follow-up stopped before any text is dropped.
   func isHeld(asFirst first: Bool) -> Bool {
@@ -444,8 +444,8 @@ final class ConversationView: NSView {
 
   var latestTurn: TurnView? { turns.last }
 
-  /// The earlier exchanges the extension still holds, oldest first. The newest exchange is the
-  /// request in progress, so the extension prunes only these.
+  /// The earlier exchanges the session still holds, oldest first. The newest exchange is the
+  /// request in progress, so the session prunes only these.
   var heldTurns: [TurnView] {
     var held: [TurnView] = []
     for turn in turns.dropLast() where turn.isHeld(asFirst: held.isEmpty) { held.append(turn) }
@@ -537,9 +537,9 @@ final class ConversationView: NSView {
       userInfo: [.announcement: message, .priority: NSAccessibilityPriorityLevel.high.rawValue])
   }
 
-  /// A notice concerns the newest request, so it appears above that exchange. When the extension
-  /// removed older turns to make room, the same turns leave this thread, as they do in Chrome:
-  /// it keeps the first answer and drops the oldest follow-ups after it.
+  /// A notice concerns the newest request, so it appears above that exchange. When the session
+  /// removed older turns to make room, the same turns leave this thread: it keeps the first
+  /// answer and drops the oldest follow-ups after it.
   func addNotice(_ message: String, removedTurns: Int) {
     guard let latest = latestTurn else { return }
     if removedTurns > 0 {
