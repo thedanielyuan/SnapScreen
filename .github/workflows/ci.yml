@@ -47,6 +47,9 @@ jobs:
       - run: npm ci
       - run: npm run build:native
       - run: npm run test:native
+      # The standalone app's Swift package. With no signing certificate here, it signs ad hoc.
+      - run: scripts/build-app.sh
+      - run: build/SnapScreen.app/Contents/MacOS/SnapScreen --self-test
       - run: npm run build
       - run: npm run build:extension-native
       - run: npx playwright install --no-shell chromium

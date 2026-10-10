@@ -62,7 +62,8 @@ answer's streamed text is cleared as it is in the extension. The composer's Send
 Stop while an answer runs. Incremental updates preserve the reading position when scrolled up.
 Escape and Command-W close a window on key release, so the release is not sent to Chrome.
 Sources: `SelectionView.swift`, `ConversationView.swift`, `AnswerView.swift`, `Composer.swift`,
-`Controls.swift` and `Geometry.swift`, wired together in `main.swift`. See the
+`Controls.swift` and `Geometry.swift` in `Sources/SnapScreen/UI/`, shared with the standalone
+app's Swift package, wired together in `main.swift`. See the
 [Phase 3 notes](../../docs/native-phase3.md) for keyboard controls and remaining acceptance.
 
 Both transport directions and message variants are bounded and validated. `Protocol.swift`

@@ -53,6 +53,8 @@ export async function buildCompanion(args = process.argv.slice(2)) {
   if (testHooks && !values.bundle) throw new Error('--test-hooks requires an explicit --bundle path.');
   if (process.platform !== 'darwin') throw new Error('The native companion requires macOS and Xcode command-line tools.');
   const source = resolve(ROOT, 'native/macos');
+  // Views shared with the standalone app's Swift package.
+  const shared = resolve(ROOT, 'Sources/SnapScreen/UI');
   const defaultBundle = resolve(source, 'build/SnapScreenCompanion.app');
   const bundle = values.bundle ? resolve(values.bundle) : defaultBundle;
   if (!basename(bundle).endsWith('.app')) throw new Error('--bundle must name an .app directory.');
@@ -70,9 +72,10 @@ export async function buildCompanion(args = process.argv.slice(2)) {
       run('xcrun', ['swiftc', '-swift-version', '5', '-O', '-framework', 'AppKit',
         '-module-name', 'SnapScreenCompanion', '-target', `${architecture}-apple-macosx${MINIMUM_MACOS_VERSION}`,
         ...(testHooks ? ['-D', 'SNAPSCREEN_TEST_HOOKS'] : []),
-        ...['Protocol.swift', 'Session.swift', 'Geometry.swift', 'Controls.swift', 'AnswerView.swift',
-          'ConversationView.swift', 'Composer.swift', 'SelectionView.swift', 'SelfTests.swift', 'AnswerViewTests.swift',
-          'SelectionViewTests.swift', 'ConversationViewTests.swift', 'main.swift'].map(file => resolve(source, file)),
+        ...['TextLimits.swift', 'Geometry.swift', 'Controls.swift', 'AnswerView.swift', 'ConversationView.swift',
+          'Composer.swift', 'SelectionView.swift', 'GeometryTests.swift', 'AnswerViewTests.swift',
+          'SelectionViewTests.swift', 'ConversationViewTests.swift'].map(file => resolve(shared, file)),
+        ...['Protocol.swift', 'Session.swift', 'SelfTests.swift', 'main.swift'].map(file => resolve(source, file)),
         '-o', output]);
       outputs.push(output);
     }
