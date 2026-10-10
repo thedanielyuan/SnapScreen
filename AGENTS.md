@@ -80,7 +80,8 @@ npm run lint && npm run typecheck && npm test && npm run test:extension-artifact
   must never be; it claims its capture as a one-time capability over a runtime port.
 - The companion gets screenshots, crops, answers, and follow-ups, never the API key, system
   prompt, or API history. Its test hooks (`SNAPSCREEN_TEST_HOOKS`) compile only into the live
-  suite's disposable app.
+  suite's disposable app. The standalone app's compile only into `build/test-hooks/`, which has its
+  own bundle ID, and `build-app.sh` refuses a production binary that contains them.
 - `npm run test:browser` enforces parts of this; `docs/security.md` is the full contract. Update
   it when you change a boundary.
 - When permissions or data handling change, also update `PRIVACY.md` and
@@ -156,6 +157,7 @@ npm run test:native-packaged  # extracted archive + shipped installer in disposa
 swift test                                                   # the core's tests and fixture replays
 scripts/build-app.sh                                         # → build/SnapScreen.app, signed
 build/SnapScreen.app/Contents/MacOS/SnapScreen --self-test   # the views' and app shell's checks
+scripts/test-app-live.sh                                     # a test-hooks build snips through real windows
 open build/SnapScreen.app                                    # the menu bar app
 ```
 

@@ -52,6 +52,9 @@ jobs:
       - run: swift test
       - run: scripts/build-app.sh
       - run: build/SnapScreen.app/Contents/MacOS/SnapScreen --self-test
+      # The test-hooks app snips a made-up capture through real windows with scripted answers; needs
+      # the runner's GUI session.
+      - run: scripts/test-app-live.sh
       - run: npm run build
       - run: npm run build:extension-native
       - run: npx playwright install --no-shell chromium

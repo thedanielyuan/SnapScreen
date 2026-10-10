@@ -199,7 +199,7 @@ Done when: the menu, shortcut and Settings work, and the key survives a rebuild 
 prompt. Done on 10 October 2026: 63 new self-test checks pass, and a rebuild signed with your
 Apple Development certificate reads the previous build's Keychain item without a prompt.
 
-### Phase 3: Snip to answer (large)
+### Phase 3: Snip to answer (large, done)
 
 It lands in three pull requests: the session controller, then capture, selection and the
 windows, then the test-hooks build.
@@ -245,16 +245,21 @@ windows, then the test-hooks build.
     the companion shares.
   - The app's messages don't mention Chrome. `SessionEndedView` takes its message, so the
     companion keeps "Invoke SnapScreen in Chrome…", and the app says to snip again.
-- **Test-hooks build.** Compile with `-D SNAPSCREEN_TEST_HOOKS`, using its own bundle ID and
-  build directory.
-  - A fixture image replaces ScreenCaptureKit, because CI can't grant Screen Recording.
-  - A scripted SSE transport replaces the API.
-  - The build selects a region, asks one follow-up, and closes.
+- **Test-hooks build (done).** `scripts/build-app.sh --test-hooks` compiles with
+  `-D SNAPSCREEN_TEST_HOOKS` into `build/test-hooks/`, with its own bundle ID
+  (`com.snapscreen.app.test-hooks`), build folder and an ad hoc signature.
+  - A made-up capture replaces ScreenCaptureKit, because CI can't grant Screen Recording.
+  - A scripted event stream replaces the API, so the real client reads it.
+  - The build selects a region with the keyboard, reads the streamed answer, asks one
+    follow-up, and closes, checking the windows and requests along the way.
 
-  `scripts/test-app-live.sh` runs it in CI's GUI session. A check fails the production build if
-  hook code is present.
+  `scripts/test-app-live.sh` runs it in CI's GUI session. `build-app.sh` fails the production
+  build if its binary contains the hooks' marker. A key panel that doesn't activate the app
+  still makes `NSApp.isActive` true, so the test checks that SnapScreen never becomes the
+  frontmost app instead.
 
-Done when: CI runs a full mocked exchange through real windows.
+Done when: CI runs a full mocked exchange through real windows. Done on 10 October 2026: CI runs
+the live test, which passes 13 checks.
 
 ### Phase 4: Acceptance and switch-over (small)
 

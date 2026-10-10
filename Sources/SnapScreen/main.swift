@@ -5,7 +5,11 @@ if CommandLine.arguments.contains("--self-test") {
     _ = NSApplication.shared
     let count = try runGeometryTests() + runAnswerViewTests() + runSelectionViewTests() + runConversationViewTests() +
       runAppShellTests() + runSettingsWindowTests() + MainActor.assumeIsolated { try runSessionWindowsTests() }
+    #if SNAPSCREEN_TEST_HOOKS
+    print("SnapScreen self-test: \(count) checks passed (test hooks build)")
+    #else
     print("SnapScreen self-test: \(count) checks passed")
+    #endif
     exit(0)
   } catch {
     fputs("SnapScreen self-test failed: \(error)\n", stderr)
@@ -29,6 +33,12 @@ if NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifi
 
 let application = NSApplication.shared
 application.setActivationPolicy(.accessory)
+#if SNAPSCREEN_TEST_HOOKS
+// scripts/test-app-live.sh runs the live test in the test-hooks build, which has its own bundle ID.
+let delegate: NSApplicationDelegate = CommandLine.arguments.contains("--live-test")
+  ? MainActor.assumeIsolated { LiveTest() } : AppDelegate()
+#else
 let delegate = AppDelegate()
+#endif
 application.delegate = delegate
 application.run()
