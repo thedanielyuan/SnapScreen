@@ -203,6 +203,7 @@ final class AnswerSegmentView: NSView {
       languageLabel = label
       let copy = ActionButton(symbol: "doc.on.doc", title: "Copy", label: "Copy code", target: self,
         action: #selector(copyCode))
+      copy.hoverTint = Theme.accent
       addSubview(copy)
       copyButton = copy
     }
@@ -282,13 +283,12 @@ final class AnswerSegmentView: NSView {
   override func draw(_ dirtyRect: NSRect) {
     guard segment.isCode else { return }
     let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 8, yRadius: 8)
-    Theme.codeBackground.setFill()
+    Theme.surface.setFill()
     shape.fill()
-    NSColor.separatorColor.setStroke()
+    Theme.surfaceBorder.setStroke()
     shape.lineWidth = 1
     shape.stroke()
-    // System separator colours carry their own alpha; replacing it would darken the line.
-    NSColor.separatorColor.setFill()
+    Theme.surfaceBorder.setFill()
     NSRect(x: 1, y: Self.codeHeaderHeight - 1, width: bounds.width - 2, height: 1).fill()
   }
 
@@ -297,7 +297,7 @@ final class AnswerSegmentView: NSView {
     guard copyEnabled, case .code(let code, _, _) = segment else { return }
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(code, forType: .string)
-    copyButton?.showFeedback(symbol: "checkmark", title: "Copied", label: "Copied", color: .systemGreen)
+    copyButton?.showFeedback(symbol: "checkmark", title: "Copied", label: "Copied", color: Theme.accent)
   }
 
   func clear() {

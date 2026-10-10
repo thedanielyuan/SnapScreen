@@ -78,20 +78,30 @@ func runAnswerViewTests() throws -> Int {
   try check(block.textView.selectedRange() == NSRange(location: 4, length: 1), "streaming preserves text selection")
   try check(block.segment == .code("let n = 12", language: "swift", complete: true), "copy source updates with snapshot")
   try check(block.copyButton?.isHidden == false && block.copyButton?.isEnabled == true, "a closed fence offers Copy")
+  func pointer(_ type: NSEvent.EventType) -> NSEvent {
+    NSEvent.enterExitEvent(with: type, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+      eventNumber: 0, trackingNumber: 0, userData: nil)!
+  }
+  block.copyButton?.mouseEntered(with: pointer(.mouseEntered))
+  try check(block.copyButton?.contentTintColor == Theme.accent, "Copy takes the accent under the pointer")
+  block.copyButton?.mouseExited(with: pointer(.mouseExited))
+  try check(block.copyButton?.contentTintColor == .secondaryLabelColor, "Copy is grey again at rest")
   try check(hasTextAttributes(prose.textView, font: AnswerStyle.proseFont) && hasTextAttributes(block.textView, font: AnswerStyle.codeFont),
     "streamed append preserves font and dynamic foreground on every character")
   view.render("```js\nopen(", final: false)
   try check(view.segmentViews[0].copyButton?.isHidden == true, "an unclosed fence hides Copy while streaming")
   view.render("```js\nopen(", final: true)
   try check(view.segmentViews[0].copyButton?.isHidden == false, "a stopped answer's unclosed fence offers Copy")
-  block.appearance = NSAppearance(named: .darkAqua)
-  var darkContrast = false
+  // Without an appearance of its own, the block takes the app's, which is always dark.
+  var legible = false
   block.effectiveAppearance.performAsCurrentDrawingAppearance {
-    let foreground = NSColor.labelColor.usingColorSpace(.deviceRGB)!
-    let background = Theme.codeBackground.usingColorSpace(.deviceRGB)!
-    darkContrast = foreground.redComponent > background.redComponent + 0.5
+    legible = NSColor.labelColor.usingColorSpace(.deviceRGB)!.redComponent >
+      Theme.surface.usingColorSpace(.deviceRGB)!.redComponent + 0.5
   }
-  try check(darkContrast, "dark appearance keeps code legible on its background")
+  try check(legible, "code stays legible on its background")
+  let level = { (color: NSColor) in color.usingColorSpace(.deviceRGB)!.redComponent }
+  try check(level(Theme.background) < 0.06 && level(Theme.background) < level(Theme.surface) &&
+    level(Theme.surface) < level(Theme.surfaceBorder), "code and the field sit a shade lighter than the near-black window, outlined")
   view.copyEnabled = false
   view.render("```\n\u{00E9}\n```", final: true)
   let canonicalBlock = view.segmentViews[0]

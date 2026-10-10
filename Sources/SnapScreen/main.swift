@@ -1,8 +1,11 @@
 import AppKit
 
+// SnapScreen has no light mode: its windows and menus are dark whatever the system's appearance,
+// in the self-test too. The menu bar icon still follows the menu bar.
+NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
+
 if CommandLine.arguments.contains("--self-test") {
   do {
-    _ = NSApplication.shared
     let count = try runGeometryTests() + runAnswerViewTests() + runSelectionViewTests() + runConversationViewTests() +
       runAppShellTests() + runSettingsWindowTests() + MainActor.assumeIsolated { try runSessionWindowsTests() }
     #if SNAPSCREEN_TEST_HOOKS

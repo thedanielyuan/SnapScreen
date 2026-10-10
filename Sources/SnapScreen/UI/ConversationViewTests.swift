@@ -262,6 +262,40 @@ func runConversationViewTests() throws -> Int {
   pinned.setDraft("d")
   layoutRoot.layoutSubtreeIfNeeded()
   try check(!draftScroll.hasVerticalScroller, "the scroller goes once the draft fits again")
+  func hasDraftAttributes() -> Bool {
+    guard let storage = pinned.textView.textStorage, storage.length > 0 else { return false }
+    var matches = true
+    storage.enumerateAttributes(in: NSRange(location: 0, length: storage.length)) { attributes, _, _ in
+      let paragraph = attributes[.paragraphStyle] as? NSParagraphStyle
+      matches = matches && (attributes[.font] as? NSFont)?.pointSize == 15 &&
+        paragraph?.minimumLineHeight == 20 && paragraph?.maximumLineHeight == 20
+    }
+    return matches
+  }
+  pinned.clearDraft()
+  pinned.textView.insertText("Typed", replacementRange: NSRange(location: 0, length: 0))
+  let typedAttributes = hasDraftAttributes()
+  pinned.setDraft("Set")
+  try check(typedAttributes && hasDraftAttributes(), "a draft is 15-point text on 20-point lines, typed or set")
+  // Send keeps to the bottom-right corner, beside the last line, so it's centred on one line.
+  var heights: [CGFloat] = []
+  var besideLastLine = true
+  for lines in 1...8 {
+    pinned.setDraft((1...lines).map { "Line \($0)" }.joined(separator: "\n"))
+    layoutRoot.layoutSubtreeIfNeeded()
+    heights.append(pinned.frame.height)
+    let manager = pinned.textView.layoutManager!
+    let lastLine = manager.lineFragmentRect(forGlyphAt: manager.numberOfGlyphs - 1, effectiveRange: nil)
+    besideLastLine = besideLastLine &&
+      abs(pinned.sendButton.frame.midY - pinned.textView.convert(lastLine, to: pinned).midY) < 0.5
+  }
+  try check(heights[0] == ComposerView.minimumFieldHeight && zip(heights[0..<5], heights[1...5]).allSatisfy {
+    $1 - $0 == ComposerView.lineHeight } && heights[5...].allSatisfy { $0 == heights[5] },
+    "the field grows a line at a time to six lines, then holds")
+  pinned.setDraft("One line")
+  layoutRoot.layoutSubtreeIfNeeded()
+  try check(besideLastLine && abs(pinned.sendButton.frame.midY - pinned.bounds.midY) < 0.5,
+    "Send sits beside the last line, centred while the draft is one line")
   pinned.clear()
   layoutWindow.contentView = nil
   composer.canSubmit = false

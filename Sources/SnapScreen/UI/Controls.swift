@@ -1,23 +1,30 @@
 import AppKit
 
-/// SnapScreen's colours.
+/// SnapScreen's colours. It has no light mode (main.swift makes the app dark): the conversation is
+/// near-black, code and the follow-up field sit on it a shade lighter, and cyan marks what's live.
 enum Theme {
-  static let accent = NSColor(srgbRed: 108 / 255, green: 92 / 255, blue: 231 / 255, alpha: 1)
+  /// The focused field and its caret, Send or Stop when it can act, and Copy under the pointer or
+  /// once it copies.
+  static let accent = NSColor(srgbRed: 34 / 255, green: 211 / 255, blue: 238 / 255, alpha: 1)
+  /// Glyphs drawn on the accent, such as Send's arrow.
+  static let onAccent = gray(0x0D)
   static let pointerSelection = NSColor(srgbRed: 59 / 255, green: 130 / 255, blue: 246 / 255, alpha: 1)
   static let keyboardSelection = NSColor(srgbRed: 167 / 255, green: 139 / 255, blue: 250 / 255, alpha: 1)
   static let keyboardRing = NSColor(srgbRed: 139 / 255, green: 92 / 255, blue: 246 / 255, alpha: 0.75)
   static let backdrop = NSColor(srgbRed: 17 / 255, green: 17 / 255, blue: 17 / 255, alpha: 1)
-  static let bubble = dynamic(light: NSColor(srgbRed: 0.937, green: 0.937, blue: 0.945, alpha: 1),
-    dark: NSColor(srgbRed: 0.204, green: 0.204, blue: 0.216, alpha: 1))
-  static let codeBackground = dynamic(light: NSColor(srgbRed: 0.965, green: 0.969, blue: 0.976, alpha: 1),
-    dark: NSColor(srgbRed: 0.102, green: 0.102, blue: 0.11, alpha: 1))
-  static let hover = dynamic(light: NSColor.black.withAlphaComponent(0.06), dark: NSColor.white.withAlphaComponent(0.09))
-  static let idleControl = dynamic(light: NSColor.black.withAlphaComponent(0.09), dark: NSColor.white.withAlphaComponent(0.12))
+  /// The conversation window.
+  static let background = gray(0x0D)
+  /// Code blocks, the follow-up field and the screenshot's thumbnail, each outlined.
+  static let surface = gray(0x17)
+  static let surfaceBorder = gray(0x2A)
+  /// Follow-up questions stay grey, so they don't compete with the accent.
+  static let bubble = gray(0x26)
+  static let hover = NSColor.white.withAlphaComponent(0.09)
+  static let idleControl = NSColor.white.withAlphaComponent(0.12)
 
-  static func dynamic(light: NSColor, dark: NSColor) -> NSColor {
-    NSColor(name: nil) { appearance in
-      appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
-    }
+  /// An opaque sRGB grey from its 8-bit level, so 0x0D is #0D0D0D.
+  private static func gray(_ level: CGFloat) -> NSColor {
+    NSColor(srgbRed: level / 255, green: level / 255, blue: level / 255, alpha: 1)
   }
 
   static func symbol(_ name: String, size: CGFloat, weight: NSFont.Weight = .medium, color: NSColor? = nil) -> NSImage? {
@@ -146,6 +153,7 @@ final class ActionButton: CompanionButton {
   private let idleLabel: String
   private var feedbackTimer: Timer?
   var tint: NSColor = .secondaryLabelColor { didSet { refresh() } }
+  var hoverTint: NSColor = .labelColor { didSet { refresh() } }
   override var isEnabled: Bool { didSet { refresh() } }
 
   init(symbol: String, title: String = "", label: String, target: AnyObject?, action: Selector?) {
@@ -207,7 +215,7 @@ final class ActionButton: CompanionButton {
   }
 
   private func refresh() {
-    let color = !isEnabled ? NSColor.tertiaryLabelColor : (feedbackColor ?? (hovering ? .labelColor : tint))
+    let color = !isEnabled ? NSColor.tertiaryLabelColor : (feedbackColor ?? (hovering ? hoverTint : tint))
     contentTintColor = color
     if !title.isEmpty {
       attributedTitle = NSAttributedString(string: title, attributes: [
@@ -242,7 +250,8 @@ final class ActionButton: CompanionButton {
   }
 }
 
-/// The composer's circular Send button, which becomes Stop while an answer is in progress.
+/// The composer's circular Send button, which becomes Stop while an answer is in progress. It fills
+/// with the accent only while it can act: Send needs a draft.
 final class SendButton: CompanionButton {
   enum Mode { case send, stop }
   var mode: Mode = .send { didSet { if mode != oldValue { refresh() } } }
@@ -272,8 +281,10 @@ final class SendButton: CompanionButton {
     (isEnabled ? Theme.accent.withAlphaComponent(isHighlighted ? 0.82 : 1) : Theme.idleControl).setFill()
     circle.fill()
     let glyph = mode == .send ? "arrow.up" : "stop.fill"
-    let color: NSColor = isEnabled ? .white : .tertiaryLabelColor
-    guard let image = Theme.symbol(glyph, size: mode == .send ? 13 : 10, weight: .bold, color: color) else { return }
+    let color: NSColor = isEnabled ? Theme.onAccent : .tertiaryLabelColor
+    // Scaled with the button: 13 and 10 points in a 28-point circle.
+    let pointSize = (bounds.height * (mode == .send ? 13 : 10) / 28).rounded()
+    guard let image = Theme.symbol(glyph, size: pointSize, weight: .bold, color: color) else { return }
     let size = image.size
     image.draw(in: NSRect(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2,
       width: size.width, height: size.height))
