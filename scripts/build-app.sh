@@ -5,10 +5,36 @@
 # app by that signature's team, so the app keeps reading its API key from the Keychain without
 # asking for your password, and keeps Screen Recording. Ad hoc builds, as in CI, lose both on
 # every rebuild.
+#
+# --test-hooks builds the live test's app (scripts/test-app-live.sh) into build/test-hooks
+# instead, with its own bundle ID and build folder, signed ad hoc, so it never shares the real
+# app's Keychain item, settings or approvals.
 
 set -eu
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+
+case ${1-} in
+  '')
+    hooks=false
+    scratch=$root/.build
+    identifier=com.snapscreen.app
+    name=SnapScreen
+    destination=$root/build/SnapScreen.app
+    ;;
+  --test-hooks)
+    hooks=true
+    scratch=$root/.build/test-hooks
+    identifier=com.snapscreen.app.test-hooks
+    name="SnapScreen Test"
+    destination=$root/build/test-hooks/SnapScreen.app
+    set -- -Xswiftc -DSNAPSCREEN_TEST_HOOKS
+    ;;
+  *)
+    echo "usage: $0 [--test-hooks]" >&2
+    exit 2
+    ;;
+esac
 
 # The version lives in package.json until the extension is removed.
 version=$(plutil -extract version raw -o - "$root/package.json")
@@ -19,10 +45,15 @@ case $version in
     ;;
 esac
 
-swift build --package-path "$root" -c release --product SnapScreen >&2
-binary="$(swift build --package-path "$root" -c release --show-bin-path)/SnapScreen"
+swift build --package-path "$root" --scratch-path "$scratch" -c release --product SnapScreen "$@" >&2
+binary="$(swift build --package-path "$root" --scratch-path "$scratch" -c release --show-bin-path "$@")/SnapScreen"
+# The production app never carries the live test's hooks, which print this.
+if [ "$hooks" = false ] && LC_ALL=C grep -a -F -q '(test hooks build)' "$binary"; then
+  echo "error: the production build contains the live test's hooks." >&2
+  exit 1
+fi
 
-mkdir -p "$root/build"
+mkdir -p "$(dirname "$destination")"
 staging=$(mktemp -d "$root/build/.snapscreen-app-XXXXXX")
 trap 'rm -rf "$staging"' EXIT
 app="$staging/SnapScreen.app"
@@ -33,9 +64,9 @@ cat > "$app/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleIdentifier</key><string>com.snapscreen.app</string>
-  <key>CFBundleName</key><string>SnapScreen</string>
-  <key>CFBundleDisplayName</key><string>SnapScreen</string>
+  <key>CFBundleIdentifier</key><string>$identifier</string>
+  <key>CFBundleName</key><string>$name</string>
+  <key>CFBundleDisplayName</key><string>$name</string>
   <key>CFBundleExecutable</key><string>SnapScreen</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$version</string>
@@ -48,7 +79,9 @@ EOF
 
 # The first valid Apple Development identity, by its hash in case there are several.
 identity=$(security find-identity -v -p codesigning | awk '/"Apple Development: / { print $2; exit }')
-if [ -n "$identity" ]; then
+if [ "$hooks" = true ]; then
+  codesign --force --sign - "$app" >&2
+elif [ -n "$identity" ]; then
   codesign --force --timestamp=none --sign "$identity" "$app" >&2
 else
   if security find-identity -p codesigning | grep -Fq '"Apple Development: '; then
@@ -61,6 +94,6 @@ else
   codesign --force --sign - "$app" >&2
 fi
 
-rm -rf "$root/build/SnapScreen.app"
-mv "$app" "$root/build/SnapScreen.app"
-echo "$root/build/SnapScreen.app/Contents/MacOS/SnapScreen"
+rm -rf "$destination"
+mv "$app" "$destination"
+echo "$destination/Contents/MacOS/SnapScreen"
