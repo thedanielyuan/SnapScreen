@@ -33,13 +33,16 @@ final class CompanionPanel: NSPanel {
   private var closingKey: UInt16?
   private var closeFallback: Timer?
   private var releaseMonitor: Any?
+  /// Replaces `performClose`, which never reaches the delegate of a window without a close
+  /// button, such as the borderless selection overlay.
+  var closeAction: (() -> Void)?
   override var canBecomeKey: Bool { true }
   override var canBecomeMain: Bool { false }
 
   /// Closes now for pointer actions; for a key press, closes when that key is released.
   func closeAfterKeyRelease(_ event: NSEvent?) {
     guard closingKey == nil else { return }
-    guard let event = event, event.type == .keyDown else { super.performClose(nil); return }
+    guard let event = event, event.type == .keyDown else { closeNow(nil); return }
     closingKey = event.keyCode
     // NSApplication never dispatches a key-up while Command is held, but local monitors see it.
     releaseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
@@ -72,7 +75,11 @@ final class CompanionPanel: NSPanel {
   private func finishKeyClose() {
     guard closingKey != nil else { return }
     endKeyClose()
-    super.performClose(nil)
+    closeNow(nil)
+  }
+
+  private func closeNow(_ sender: Any?) {
+    if let closeAction = closeAction { closeAction() } else { super.performClose(sender) }
   }
 
   override func sendEvent(_ event: NSEvent) {
@@ -103,7 +110,7 @@ final class CompanionPanel: NSPanel {
     if let event = event, event.type == .keyDown, event.window === self || event.window == nil {
       closeAfterKeyRelease(event)
     } else {
-      super.performClose(sender)
+      closeNow(sender)
     }
   }
 

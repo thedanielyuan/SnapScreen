@@ -111,6 +111,8 @@ private final class Harness {
   let timers = ManualTimers()
   let log = EventLog()
   var apiKey: String? = "sk-ant-test-secret"
+  /// Thrown instead of reading the key.
+  var keyError: (any Error)?
   var settings = SessionSettings(defaultPrompt: "Keep guidance.", limits: .defaults)
   private(set) var captures = 0
   private(set) var crops: [(image: CGImage, rect: CGRect)] = []
@@ -120,7 +122,10 @@ private final class Harness {
   private var heldCrop: CheckedContinuation<Data, any Error>?
 
   private(set) lazy var controller: SessionController = {
-    let controller = SessionController(answers: answers, apiKey: { [unowned self] in self.apiKey },
+    let controller = SessionController(answers: answers, apiKey: { [unowned self] in
+      if let keyError = self.keyError { throw keyError }
+      return self.apiKey
+    },
       settings: { [unowned self] in self.settings }, scheduler: timers.scheduler,
       cropSelection: { @MainActor [unowned self] image, rect, _ in try await self.crop(image, rect) })
     controller.delegate = log
@@ -391,6 +396,14 @@ func makesNoRequestForASessionClosedBeforeItsRequest(closedAt: SessionEvent) asy
   #expect(session.retry())
   await flush()
   #expect(harness.answers.analyzeCalls.count == 1 && harness.latest == firstAnswer)
+}
+
+@Test @MainActor func reportsAKeyThatCannotBeReadInItsOwnWords() async throws {
+  let harness = Harness()
+  let keychain = AnthropicError("keychain", "Couldn't read the API key from your Keychain because access was denied.")
+  harness.keyError = keychain
+  let session = try await harness.accepted()
+  #expect(harness.latest == .failed(keychain) && harness.answers.calls.isEmpty && session.canRetry)
 }
 
 @Test(arguments: [true, false]) @MainActor

@@ -72,7 +72,7 @@ export async function buildCompanion(args = process.argv.slice(2)) {
       run('xcrun', ['swiftc', '-swift-version', '5', '-O', '-framework', 'AppKit',
         '-module-name', 'SnapScreenCompanion', '-target', `${architecture}-apple-macosx${MINIMUM_MACOS_VERSION}`,
         ...(testHooks ? ['-D', 'SNAPSCREEN_TEST_HOOKS'] : []),
-        ...['TextLimits.swift', 'Geometry.swift', 'Controls.swift', 'EditMenu.swift', 'AnswerView.swift',
+        ...['TextLimits.swift', 'Geometry.swift', 'Controls.swift', 'Panels.swift', 'EditMenu.swift', 'AnswerView.swift',
           'ConversationView.swift', 'Composer.swift', 'SelectionView.swift', 'GeometryTests.swift', 'AnswerViewTests.swift',
           'SelectionViewTests.swift', 'ConversationViewTests.swift'].map(file => resolve(shared, file)),
         ...['Protocol.swift', 'Session.swift', 'SelfTests.swift', 'main.swift'].map(file => resolve(source, file)),

@@ -117,9 +117,10 @@ nonactivating panel is not a focus-preservation guarantee; see the
 ## Standalone app (in development)
 
 The menu bar app in `Sources/SnapScreen/` will replace the extension
-([plan](standalone-app-plan.md)), but it isn't the product yet. So far it has its menu, global
-shortcut, Settings and notices. It doesn't capture the screen yet, and it calls Anthropic's API
-only when you choose **Test key**.
+([plan](standalone-app-plan.md)), but it isn't the product yet. It snips as the native-only
+extension does: the shortcut or **Snip** freezes the display under the pointer, you select a
+region, and the answer opens beside it. It calls Anthropic's API only to answer a snip, with the
+extension's request, or when you choose **Test key**.
 
 Its API key is a generic password in your login keychain (service `com.snapscreen.app`, account
 `anthropic-api-key`), never in a file or `UserDefaults`, which holds only the Default Prompt and
@@ -127,22 +128,35 @@ limits. The item trusts the app that created it. macOS lets a rebuilt app read i
 login password only when it's signed by the same Apple team, which is why
 `scripts/build-app.sh` signs with an Apple Development certificate. Other apps, and builds signed
 any other way, must ask for that password. The app reads the key when Settings opens, and
-closing Settings clears it from the window. Checking whether a key exists reads only the item's
-attributes, never the key.
+closing Settings clears it from the window. Each answer reads it again, so a key saved in Settings
+applies to open conversations, and no window ever gets it. Checking whether a key exists reads
+only the item's attributes, never the key.
 
 The shortcut (⌃⌥⇧S until the extension is removed) is registered with Carbon's
 `RegisterEventHotKey`, which needs no Accessibility or Input Monitoring permission: the app
 receives that one combination and no other keystrokes. Settings checks Screen Recording with
 `CGPreflightScreenCaptureAccess`, which never prompts. Its **Open System Settings** button
-requests access, so macOS lists the app, and then opens that list. **Open at login** registers
-the app with `SMAppService` only when you turn it on.
+requests access, so macOS lists the app, and then opens that list. Snip checks access the same
+way first, and without it shows a notice with the same button. **Open at login** registers the
+app with `SMAppService` only when you turn it on.
+
+The app captures only when you press the shortcut or choose **Snip**, and only the display under
+the pointer, with ScreenCaptureKit at full resolution. The capture leaves out the cursor and
+SnapScreen's own windows, such as open conversations, notices and Settings. The frozen display
+stays in memory while you select a region. It's released once the region is cropped, or when
+the selection is cancelled, replaced by a new snip, or left for two minutes. Only the crop,
+fitted to the limits in Settings, goes to Anthropic. A session's images, answers and drafts stay
+in memory too, and are released when its conversation closes. Nothing is written to disk or
+logged. The selection overlay and the conversation panels never activate the app, so the app you
+snip keeps focus, and Escape and Command-W close them on key release, as the companion's do.
 
 The app takes no commands from other processes: it has no URL scheme, socket or XPC service,
 and the only Apple events it acts on are the standard ones, where reopening the app shows
 Settings. A second copy exits when it finds one running. Notices about failures before a
 conversation exists use a panel that never activates the app or takes the keyboard. The app's
 `--self-test` adds and removes a throwaway Keychain item under its own service,
-`com.snapscreen.app.self-test`, and never reads the real key.
+`com.snapscreen.app.self-test`, and never reads the real key. Its snips use a scripted client
+and a made-up capture, so they need neither the network nor Screen Recording.
 
 ## API key
 

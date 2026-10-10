@@ -218,24 +218,33 @@ windows, then the test-hooks build.
   The cases from `native-session.test.ts` are ported, except those about the native messaging
   protocol, and the `session-*` fixtures replay through it with the real client. Done on
   10 October 2026: 107 Swift tests pass.
-- **`ScreenCapturer`.** Use `SCShareableContent` to find the display under the pointer, filter
-  out SnapScreen's own windows, and capture with `SCScreenshotManager` at full pixel resolution,
-  without the cursor. Check permission first, as Phase 2's Snip does: if it's denied, show
-  `NoticePanel` with Open System Settings. It returns a `FrozenScreen`, the capture as a
-  `CGImage` with its display, and throws `CaptureError` for failures it can explain.
-- **`SelectionOverlay`.** A borderless, non-opaque panel that never activates the app. It covers
-  that display above the menu bar (`canJoinAllSpaces`, `fullScreenAuxiliary`) and draws the
-  frozen capture 1:1 with a dim.
-  - It must stay non-opaque. The earlier native prototype found that a screen-sized
-    non-opaque panel caused no visibility change in Chrome (`docs/native-phase1-results.md`).
-    An opaque full-screen window could make Chrome mark the page as hidden.
-  - `SelectionView` keeps release-to-ask, click or Escape to cancel, and Return for a keyboard
-    selection. Pressing the shortcut again replaces an unfinished selection, as today.
-- **Windows.** The app becomes `SessionController`'s delegate. Reuse the existing views, and
-  place the answer window beside the selection. Move `PointerShield` and its press tracking from
-  the companion's `main.swift` into shared code for the answer windows.
-- Rewrite the user-facing messages that mention Chrome, such as "Invoke SnapScreen in Chrome…".
-  `SessionController`'s own messages already name SnapScreen Settings instead.
+- **Capture, selection and windows (done).** Done on 10 October 2026. The app's self-test runs
+  snips through the real controller with a scripted client and a made-up capture: 266 checks
+  pass. A real snip still needs Screen Recording granted to the build.
+  - **`ScreenCapturer`.** Uses `SCShareableContent` to find the display under the pointer,
+    leaves out SnapScreen's own windows, and captures with `SCScreenshotManager` at full pixel
+    resolution, without the cursor. Snip checks permission first, as Phase 2's did, and shows
+    `NoticePanel` with Open System Settings when it's denied. It returns a `FrozenScreen`, the
+    capture as a `CGImage` with its display.
+  - **`SelectionOverlay`.** A borderless, non-opaque panel that never activates the app. It
+    covers that display above the menu bar (`canJoinAllSpaces`, `fullScreenAuxiliary`) and
+    draws the frozen capture 1:1 with a dim. It must stay non-opaque. The earlier native
+    prototype found that a screen-sized non-opaque panel caused no visibility change in Chrome
+    (`docs/native-phase1-results.md`), and an opaque full-screen window could make Chrome mark
+    the page as hidden.
+  - `SelectionView` gains a fill-bounds mode for the overlay, and keeps release-to-ask, click
+    or Escape to cancel, and Return for a keyboard selection. It now dims a copy of the image
+    once, because blending the dim over a 5K display took about 18 ms on every redraw.
+    Pressing the shortcut again replaces an unfinished selection, as today.
+  - `performClose` never reaches the delegate of a window without a close button, so
+    `CompanionPanel` gains a `closeAction` that the overlay uses for Escape.
+  - **Windows.** `SnipWindows` is `SessionController`'s delegate and gives each session a
+    `SessionWindows`: the overlay, then the companion's conversation and preview panels, with
+    the conversation beside the selection. The panel factory, `PointerShield` with its press
+    tracking, and `SessionEndedView` moved into `Sources/SnapScreen/UI/Panels.swift`, which
+    the companion shares.
+  - The app's messages don't mention Chrome. `SessionEndedView` takes its message, so the
+    companion keeps "Invoke SnapScreen in Chrome…", and the app says to snip again.
 - **Test-hooks build.** Compile with `-D SNAPSCREEN_TEST_HOOKS`, using its own bundle ID and
   build directory.
   - A fixture image replaces ScreenCaptureKit, because CI can't grant Screen Recording.

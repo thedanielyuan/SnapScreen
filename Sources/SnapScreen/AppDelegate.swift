@@ -1,6 +1,7 @@
 import AppKit
+import SnapScreenCore
 
-/// The menu bar app: its icon and menu, the global shortcut, Settings and notices.
+/// The menu bar app: its icon and menu, the global shortcut, snips, Settings and notices.
 final class AppDelegate: NSObject, NSApplicationDelegate {
   private let keyStore = KeychainStore()
   private let notices = NoticeCenter()
@@ -8,9 +9,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var shortcutAvailable = false
   private var statusItem: NSStatusItem?
   private var settings: SettingsWindowController?
+  private var snips: SnipWindows?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     installEditingMenu(applicationName: "SnapScreen")
+    // The key is read for each request, so a key saved in Settings applies to open conversations.
+    let keyStore = keyStore
+    let controller = SessionController(apiKey: {
+      do {
+        return try keyStore.read()
+      } catch let error as KeychainError {
+        throw AnthropicError("keychain", error.message)
+      }
+    })
+    snips = SnipWindows(controller: controller, showNotice: { [notices] in notices.show($0) })
     hotkey.onPress = { [weak self] in self?.snip() }
     shortcutAvailable = hotkey.register()
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -32,14 +44,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     return false
   }
 
-  @objc func snip() {
+  @MainActor @objc func snip() {
     guard ScreenRecordingAccess.isGranted else {
       notices.show("SnapScreen needs Screen Recording permission to snip.",
         action: NoticeAction(title: "Open System Settings") { ScreenRecordingAccess.openSystemSettings() })
       return
     }
-    // Phase 3 of docs/standalone-app-plan.md replaces this with the selection overlay.
-    notices.show("Snipping isn't built yet. It arrives in the next phase of the standalone app.")
+    // The display under the pointer, as the shortcut or the menu leaves it.
+    let displayID = screenUnderPointer()?.displayID ?? CGMainDisplayID()
+    snips?.controller.start { try await ScreenCapturer.capture(displayID: displayID) }
   }
 
   @objc func showSettings() {
