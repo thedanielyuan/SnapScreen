@@ -95,20 +95,21 @@ public final class SessionController {
   private(set) var sessions: [SnipSession] = []
 
   let answers: any AnswerClient
-  let apiKey: @MainActor () -> String?
+  let apiKey: @MainActor () throws -> String?
   let settings: @MainActor () -> SessionSettings
   let scheduler: SessionScheduler
   let cropSelection: @Sendable (CGImage, CGRect, SnapScreenLimits) async throws -> Data
 
   /// `apiKey` is read for each request, so a key saved in Settings applies to open conversations.
-  /// `settings` is read once per snip and kept for its whole conversation.
+  /// An `AnthropicError` it throws, such as for a Keychain that denied access, fails that request
+  /// with its message. `settings` is read once per snip and kept for its whole conversation.
   public convenience init(answers: any AnswerClient = AnthropicClient(),
-    apiKey: @escaping @MainActor () -> String?,
+    apiKey: @escaping @MainActor () throws -> String?,
     settings: @escaping @MainActor () -> SessionSettings = { SessionSettings.load() }) {
     self.init(answers: answers, apiKey: apiKey, settings: settings, scheduler: .live, cropSelection: cropAndFit)
   }
 
-  init(answers: any AnswerClient, apiKey: @escaping @MainActor () -> String?,
+  init(answers: any AnswerClient, apiKey: @escaping @MainActor () throws -> String?,
     settings: @escaping @MainActor () -> SessionSettings, scheduler: SessionScheduler,
     cropSelection: @escaping @Sendable (CGImage, CGRect, SnapScreenLimits) async throws -> Data) {
     self.answers = answers
@@ -330,7 +331,7 @@ public final class SnipSession {
     report(.started)
     guard owns(generation), let controller, let crop, let settings else { return }
     do {
-      guard let apiKey = controller.apiKey(), !apiKey.isEmpty else {
+      guard let apiKey = try controller.apiKey(), !apiKey.isEmpty else {
         throw AnthropicError("no_api_key", "Add your Anthropic API key in SnapScreen Settings, then Retry.")
       }
       let aligned = try prepareAlignedConversationForNewestTurn(generation.baseDisplayMessages,

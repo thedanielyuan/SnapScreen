@@ -10,13 +10,6 @@ let testScenario: TestScenario? = ProcessInfo.processInfo.environment["SNAPSCREE
   .flatMap { TestScenario(rawValue: $0.trimmingCharacters(in: .whitespacesAndNewlines)) }
 #endif
 
-/// Kept below the active panel, click-through except during an edge resize. This preserves
-/// Phase 1's tested protection from pointer events falling through a shrinking native panel.
-final class PointerShield: NSPanel {
-  override var canBecomeKey: Bool { false }
-  override var canBecomeMain: Bool { false }
-}
-
 final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate {
   private var session = NativeSession()
   private var panel: CompanionPanel?
@@ -25,12 +18,8 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate {
   private var cropImage: NSImage?
   private var conversation: ConversationView?
   private var composer: ComposerView?
-  private var monitor: Any?
-  private var pressedWindow: CompanionPanel?
-  private var pointerTimer: Timer?
   private var responseTimer: Timer?
-  private var shield: PointerShield?
-  private var liveResizing = false
+  private let shields = PointerShieldController()
   private var transportOpen = true
   #if SNAPSCREEN_TEST_HOOKS
   private var testFollowupSent = false
@@ -38,28 +27,8 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     installEditingMenu(applicationName: "SnapScreen Companion")
-    // These events control only the resize shield. No input, clipboard, geometry or content logging.
-    monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] event in
-      guard let self = self else { return event }
-      if event.type == .leftMouseDown {
-        self.endPressTracking()
-        self.pressedWindow = event.window as? CompanionPanel
-        if let panel = self.pressedWindow, panel.styleMask.contains(.resizable),
-          isNearFrameEdge(NSEvent.mouseLocation, panel.frame) { self.raiseShield(below: panel) }
-      } else {
-        self.endPressTracking()
-      }
-      return event
-    }
-    let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
-      guard let self = self, let window = self.pressedWindow else { return }
-      // AppKit's nested tracking loops may consume mouse-up before the local monitor receives it.
-      if NSEvent.pressedMouseButtons & 1 == 0 || !window.isVisible { self.endPressTracking() }
-    }
-    timer.tolerance = 0.02
-    RunLoop.main.add(timer, forMode: .common)
-    RunLoop.main.add(timer, forMode: .eventTracking)
-    pointerTimer = timer
+    shields.canRaise = { [weak self] in self?.session.phase != .expired }
+    shields.start()
     armTimeout(seconds: 10)
     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
       do {
@@ -144,35 +113,10 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate {
       userInfo: [.announcement: text, .priority: NSAccessibilityPriorityLevel.medium.rawValue])
   }
 
-  /// Media panels (selection and preview) show an image edge to edge under a transparent title bar.
   private func makePanel(title: String, contentSize: NSSize, minimumSize: NSSize, media: Bool) -> CompanionPanel {
-    var style: NSWindow.StyleMask = [.titled, .closable, .resizable, .nonactivatingPanel]
-    if media { style.insert(.fullSizeContentView) }
-    let value = CompanionPanel(contentRect: NSRect(origin: .zero, size: contentSize),
-      styleMask: style, backing: .buffered, defer: false)
-    value.title = title
-    value.identifier = NSUserInterfaceItemIdentifier(title)
-    value.level = .floating
-    value.hidesOnDeactivate = false
-    value.becomesKeyOnlyIfNeeded = false
-    value.isReleasedWhenClosed = false
-    value.autorecalculatesKeyViewLoop = true
-    value.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-    value.acceptsMouseMovedEvents = true
-    value.titlebarAppearsTransparent = true
-    value.contentMinSize = minimumSize
-    if media {
-      value.titleVisibility = .hidden
-      value.appearance = NSAppearance(named: .darkAqua)
-      value.backgroundColor = Theme.backdrop
-    }
+    let value = CompanionPanel.make(title: title, contentSize: contentSize, minimumSize: minimumSize, media: media)
     value.delegate = self
     return value
-  }
-
-  private static var titlebarHeight: CGFloat {
-    let content = NSRect(x: 0, y: 0, width: 400, height: 300)
-    return NSWindow.frameRect(forContentRect: content, styleMask: [.titled]).height - content.height
   }
 
   private func showSelection(_ image: NSImage) {
@@ -181,7 +125,7 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // Shown at captured size when it fits, otherwise fitted within most of the screen.
     let size = imageWindowContentSize(image.size, backingScale: screen?.backingScaleFactor ?? 2,
       maximum: NSSize(width: visible.width * 0.92, height: visible.height * 0.92),
-      minimum: NSSize(width: 480, height: 320), chrome: NSSize(width: 16, height: Self.titlebarHeight + 16))
+      minimum: NSSize(width: 480, height: 320), chrome: NSSize(width: 16, height: CompanionPanel.titlebarHeight + 16))
     let window = makePanel(title: "SnapScreen — Select region", contentSize: size,
       minimumSize: NSSize(width: 360, height: 260), media: true)
     window.setFrame(windowFrame(size: size, beside: nil, in: visible), display: false)
@@ -193,7 +137,7 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate {
     panel = window
     selectionView = view
     window.makeKeyAndOrderFront(nil)
-    placeShield(below: window)
+    shields.place(below: window)
     window.makeFirstResponder(view)
     #if SNAPSCREEN_TEST_HOOKS
     if testScenario == .exchange {
@@ -229,7 +173,7 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate {
     panel?.contentView = nil
     panel?.close()
     panel = nil
-    endPressTracking()
+    shields.endPressTracking()
   }
 
   private func showAnswer(beside anchor: CGRect?, on screen: NSScreen?) {
@@ -267,7 +211,7 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate {
     thread.beginTurn(question: nil)
     updateControls()
     window.makeKeyAndOrderFront(nil)
-    placeShield(below: window)
+    shields.place(below: window)
     window.makeFirstResponder(input.textView)
   }
 
@@ -322,14 +266,14 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
     let size = imageWindowContentSize(image.size, backingScale: 1,
       maximum: NSSize(width: visible.width * 0.8, height: visible.height * 0.8),
-      minimum: NSSize(width: 320, height: 220), chrome: NSSize(width: 24, height: Self.titlebarHeight + 24))
+      minimum: NSSize(width: 320, height: 220), chrome: NSSize(width: 24, height: CompanionPanel.titlebarHeight + 24))
     let window = makePanel(title: "Screenshot", contentSize: size, minimumSize: NSSize(width: 240, height: 180), media: true)
     window.setFrame(windowFrame(size: size, beside: nil, in: visible), display: false)
     let preview = PreviewView(image: image)
     window.contentView = preview
     previewPanel = window
     window.makeKeyAndOrderFront(nil)
-    placeShield(below: window)
+    shields.place(below: window)
     window.makeFirstResponder(preview)
   }
 
@@ -342,7 +286,7 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate {
       DispatchQueue.main.async { [weak self] in
         guard let window = self?.panel, window.isVisible else { return }
         window.makeKeyAndOrderFront(nil)
-        if let shield = self?.shield, let panel = self?.panel { shield.order(.below, relativeTo: panel.windowNumber) }
+        self?.shields.place(below: window)
       }
       return true
     }
@@ -366,10 +310,7 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate {
   private func clearContent() {
     responseTimer?.invalidate()
     responseTimer = nil
-    endPressTracking()
-    liveResizing = false
-    lowerShield()
-    shield?.orderOut(nil)
+    shields.reset()
     selectionView?.image = nil
     selectionView?.onConfirm = nil
     selectionView?.onCancel = nil
@@ -399,7 +340,7 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // Retain only a notice in an already-visible panel. There are no retry/reconnect commands,
     // and no screenshot, answer or draft is retained or replayed after connection loss.
     window.title = "SnapScreen — Session ended"
-    window.contentView = SessionEndedView()
+    window.contentView = SessionEndedView(message: "Invoke SnapScreen in Chrome to start a new capture.")
   }
 
   private func terminate() {
@@ -407,86 +348,17 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate {
     panel?.delegate = nil
     panel?.close()
     panel = nil
-    if let monitor = monitor { NSEvent.removeMonitor(monitor) }
-    pointerTimer?.invalidate()
+    shields.stop()
     NSApp.terminate(nil)
   }
 
   func windowWillStartLiveResize(_ notification: Notification) {
-    liveResizing = true
-    if let window = notification.object as? CompanionPanel { raiseShield(below: window) }
+    shields.liveResizeStarted(notification.object as? NSWindow)
   }
 
   func windowDidEndLiveResize(_ notification: Notification) {
-    liveResizing = false
-    lowerShield()
+    shields.liveResizeEnded()
   }
-
-  private func endPressTracking() {
-    pressedWindow = nil
-    if !liveResizing { lowerShield() }
-  }
-
-  private func placeShield(below window: CompanionPanel) {
-    guard let frame = (window.screen ?? NSScreen.main)?.frame else { return }
-    let value = shield ?? {
-      let panel = PointerShield(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel],
-        backing: .buffered, defer: false)
-      panel.isOpaque = false
-      panel.backgroundColor = NSColor(calibratedWhite: 0, alpha: 1 / 255)
-      panel.ignoresMouseEvents = true
-      panel.hasShadow = false
-      panel.level = .floating
-      panel.hidesOnDeactivate = false
-      panel.isReleasedWhenClosed = false
-      panel.animationBehavior = .none
-      panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle, .stationary]
-      return panel
-    }()
-    shield = value
-    if value.frame != frame { value.setFrame(frame, display: true) }
-    value.order(.below, relativeTo: window.windowNumber)
-  }
-
-  private func raiseShield(below window: CompanionPanel) {
-    guard session.phase != .expired else { return }
-    placeShield(below: window)
-    shield?.ignoresMouseEvents = false
-  }
-
-  private func lowerShield() { shield?.ignoresMouseEvents = true }
-}
-
-/// The only content left after the connection ends: no screenshot, answer or draft.
-final class SessionEndedView: NSView {
-  override init(frame frameRect: NSRect) {
-    super.init(frame: frameRect)
-    let icon = NSImageView(image: Theme.symbol("exclamationmark.circle", size: 30, weight: .regular,
-      color: .secondaryLabelColor) ?? NSImage())
-    icon.setAccessibilityElement(false)
-    let title = NSTextField(labelWithString: "Session ended")
-    title.font = .systemFont(ofSize: 15, weight: .semibold)
-    let body = NSTextField(wrappingLabelWithString: "Invoke SnapScreen in Chrome to start a new capture.")
-    body.font = .systemFont(ofSize: 13)
-    body.textColor = .secondaryLabelColor
-    body.alignment = .center
-    let stack = NSStackView(views: [icon, title, body])
-    stack.orientation = .vertical
-    stack.alignment = .centerX
-    stack.spacing = 8
-    stack.setCustomSpacing(12, after: icon)
-    stack.translatesAutoresizingMaskIntoConstraints = false
-    addSubview(stack)
-    NSLayoutConstraint.activate([
-      stack.centerXAnchor.constraint(equalTo: centerXAnchor),
-      stack.centerYAnchor.constraint(equalTo: centerYAnchor),
-      stack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 24),
-      stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -24),
-      body.widthAnchor.constraint(lessThanOrEqualToConstant: 320),
-    ])
-  }
-
-  required init?(coder: NSCoder) { nil }
 }
 
 if CommandLine.arguments.contains("--self-test") {

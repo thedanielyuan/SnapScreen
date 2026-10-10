@@ -35,6 +35,11 @@ public struct Answer: Equatable, Sendable {
   public let text: String
   /// The request's messages followed by the answer, which the next follow-up sends.
   public let history: [AnthropicMessage]
+
+  public init(text: String, history: [AnthropicMessage]) {
+    self.text = text
+    self.history = history
+  }
 }
 
 /// The Messages API client, ported from src/lib/anthropic.ts. Cancelling the calling task stops a

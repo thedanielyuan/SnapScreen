@@ -4,7 +4,7 @@ if CommandLine.arguments.contains("--self-test") {
   do {
     _ = NSApplication.shared
     let count = try runGeometryTests() + runAnswerViewTests() + runSelectionViewTests() + runConversationViewTests() +
-      runAppShellTests() + runSettingsWindowTests()
+      runAppShellTests() + runSettingsWindowTests() + MainActor.assumeIsolated { try runSessionWindowsTests() }
     print("SnapScreen self-test: \(count) checks passed")
     exit(0)
   } catch {

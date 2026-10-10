@@ -152,5 +152,54 @@ func runSelectionViewTests() throws -> Int {
   try check(preview.imageRect.width == 100 && preview.imageRect.height == 50, "preview fits a large crop")
   preview.image = nil
   try check(preview.imageRect == .zero && !preview.isAccessibilityElement(), "a cleared preview exposes nothing")
+
+  // The standalone app's overlay fills its view with the frozen display.
+  let overlay = SelectionView(frame: CGRect(x: 0, y: 0, width: 1440, height: 900))
+  overlay.fillsBounds = true
+  try check(overlay.imageRect == .zero, "an overlay without a screenshot has nothing to select")
+  overlay.image = NSImage(size: NSSize(width: 2880, height: 1800))
+  try check(overlay.imageRect == overlay.bounds, "the overlay's screenshot fills it, with no margin or title bar inset")
+  var overlayConfirmations = [NormalizedRect]()
+  overlay.onConfirm = { overlayConfirmations.append($0) }
+  func overlayMouse(_ type: NSEvent.EventType, _ point: CGPoint) -> NSEvent {
+    NSEvent.mouseEvent(with: type, location: overlay.convert(point, to: nil), modifierFlags: [], timestamp: 0,
+      windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+  }
+  overlay.mouseDown(with: overlayMouse(.leftMouseDown, CGPoint(x: 144, y: 90)))
+  overlay.mouseUp(with: overlayMouse(.leftMouseUp, CGPoint(x: 720, y: 450)))
+  try check(overlayConfirmations.count == 1 && near(overlayConfirmations[0].x, 0.1) && near(overlayConfirmations[0].y, 0.1) &&
+    near(overlayConfirmations[0].width, 0.4) && near(overlayConfirmations[0].height, 0.4),
+    "an overlay drag selects the same fraction of the display")
+  try check(overlay.selectionDisplayRect == CGRect(x: 144, y: 90, width: 576, height: 360),
+    "the overlay reports the selection where it is on the display")
+  overlay.selection = nil
+  overlay.placeKeyboardSelection()
+  try check(overlay.selectionDisplayRect == CGRect(x: 560, y: 360, width: 320, height: 180),
+    "the overlay's keyboard selection is centred at 320 × 180 points")
+
+  // Outside the selection the screenshot is dimmed by 35%; inside it isn't, whether fitted or filled.
+  func red(_ view: NSView, _ point: CGPoint) -> CGFloat? {
+    guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
+    view.cacheDisplay(in: view.bounds, to: rep)
+    let scale = CGFloat(rep.pixelsWide) / view.bounds.width
+    return rep.colorAt(x: Int(point.x * scale), y: Int(point.y * scale))?.usingColorSpace(.sRGB)?.redComponent
+  }
+  let context = CGContext(data: nil, width: 40, height: 20, bitsPerComponent: 8, bytesPerRow: 0,
+    space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue)!
+  context.setFillColor(CGColor(srgbRed: 1, green: 0, blue: 0, alpha: 1))
+  context.fill(CGRect(x: 0, y: 0, width: 40, height: 20))
+  let solidRed = NSImage(cgImage: context.makeImage()!, size: NSSize(width: 40, height: 20))
+  for fills in [false, true] {
+    let dimmed = SelectionView(frame: CGRect(x: 0, y: 0, width: 400, height: 200))
+    dimmed.fillsBounds = fills
+    dimmed.image = solidRed
+    dimmed.selection = CGRect(x: 0, y: 0, width: 0.5, height: 1)
+    let fitted = dimmed.imageRect
+    let inside = red(dimmed, CGPoint(x: fitted.minX + fitted.width * 0.25, y: fitted.midY)) ?? 0
+    let outside = red(dimmed, CGPoint(x: fitted.minX + fitted.width * 0.9, y: fitted.midY)) ?? 0
+    // Inside, only the selection's light tint changes the colour.
+    try check(inside > 0.85 && abs(outside - 0.65) < 0.03,
+      fills ? "the overlay dims only outside the selection" : "the selection window dims only outside the selection")
+  }
   return count
 }

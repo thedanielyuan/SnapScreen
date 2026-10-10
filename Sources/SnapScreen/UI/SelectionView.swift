@@ -9,8 +9,20 @@ final class SelectionView: NSView {
   /// Matches the extension's `KEYBOARD_CROP_STEP` and `MIN_CROP_SIZE`, in display points.
   static let keyboardStep: CGFloat = 10
   static let minimumSize: CGFloat = 5
+  static let dim = NSColor.black.withAlphaComponent(0.35)
 
-  var image: NSImage? { didSet { selectionChanged() } }
+  var image: NSImage? {
+    didSet {
+      dimmedImage = image.flatMap(Self.dimmed)
+      selectionChanged()
+    }
+  }
+  /// The image under the dim, made once, so a redraw while dragging copies two images instead of
+  /// blending the whole view.
+  private var dimmedImage: NSImage?
+  /// Fills the view with the image, for the overlay that covers its display: no margin, title bar
+  /// inset or backdrop.
+  var fillsBounds = false { didSet { selectionChanged() } }
   /// Normalized to the image. Nil until a drag starts or Return places a keyboard selection.
   var selection: CGRect? { didSet { selectionChanged() } }
   private(set) var isKeyboardSelection = false
@@ -37,6 +49,7 @@ final class SelectionView: NSView {
   /// The image avoids the transparent title bar, so a drag never starts beneath it.
   var imageRect: CGRect {
     guard let image = image else { return .zero }
+    if fillsBounds { return bounds }
     let insets = safeAreaInsets
     let area = CGRect(x: insets.left, y: insets.top, width: bounds.width - insets.left - insets.right,
       height: bounds.height - insets.top - insets.bottom)
@@ -157,22 +170,55 @@ final class SelectionView: NSView {
   }
 
   override func draw(_ dirtyRect: NSRect) {
-    Theme.backdrop.setFill()
-    bounds.fill()
+    if !fillsBounds {
+      Theme.backdrop.setFill()
+      bounds.fill()
+    }
     let fitted = imageRect
     guard let image = image, fitted.width > 0, fitted.height > 0 else { return }
-    image.draw(in: fitted, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true,
-      hints: [.interpolation: NSImageInterpolation.high.rawValue])
     let selected = selection.map { displayRect($0, in: fitted) }
-    let shade = NSBezierPath(rect: fitted)
-    if let selected = selected {
-      shade.appendRect(selected)
-      shade.windingRule = .evenOdd
+    if let dimmed = dimmedImage {
+      drawImage(dimmed, in: fitted)
+      if let selected = selected {
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: selected).addClip()
+        drawImage(image, in: fitted)
+        NSGraphicsContext.restoreGraphicsState()
+      }
+    } else {
+      drawImage(image, in: fitted)
+      let shade = NSBezierPath(rect: fitted)
+      if let selected = selected {
+        shade.appendRect(selected)
+        shade.windingRule = .evenOdd
+      }
+      Self.dim.setFill()
+      shade.fill()
     }
-    NSColor.black.withAlphaComponent(0.35).setFill()
-    shade.fill()
     if let selected = selected { drawSelection(selected) }
     if !isDragging { drawHint(in: fitted) }
+  }
+
+  private func drawImage(_ image: NSImage, in rect: CGRect) {
+    image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true,
+      hints: [.interpolation: NSImageInterpolation.high.rawValue])
+  }
+
+  /// The image with the dim applied, at its full pixel size. Nil when it has no bitmap.
+  private static func dimmed(_ image: NSImage) -> NSImage? {
+    guard let source = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+    let space = source.colorSpace.flatMap { $0.model == .rgb && $0.supportsOutput ? $0 : nil }
+      ?? CGColorSpace(name: CGColorSpace.sRGB)!
+    guard let context = CGContext(data: nil, width: source.width, height: source.height, bitsPerComponent: 8,
+      bytesPerRow: 0, space: space,
+      bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue) else {
+      return nil
+    }
+    let rect = CGRect(x: 0, y: 0, width: source.width, height: source.height)
+    context.draw(source, in: rect)
+    context.setFillColor(dim.cgColor)
+    context.fill(rect)
+    return context.makeImage().map { NSImage(cgImage: $0, size: image.size) }
   }
 
   private func drawSelection(_ rect: CGRect) {
