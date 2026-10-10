@@ -181,6 +181,10 @@ open build/SnapScreen.app                                    # the menu bar app
   bundle ID and that certificate: macOS ties Screen Recording approval to the signature, and the
   Keychain lets a rebuilt app read the key without a password prompt only when it has the same
   Apple team, which a self-signed certificate lacks.
+- Phase 4's physical round is `npm run experiment:app`, which builds and restarts the app and
+  sets up each step itself. Feed its commands from a file (`tail -f commands.txt | npm run
+  experiment:app`) so no terminal takes focus. `node scripts/app-acceptance-report.mjs
+  <report.json>` summarizes a saved round again.
 - Quit a running copy before opening a rebuild, since opening the app while one runs only shows
   that copy's Settings. `--self-test` adds and removes a Keychain item under its own service,
   `com.snapscreen.app.self-test`, never the real key's.

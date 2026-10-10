@@ -44,6 +44,18 @@ case $version in
     exit 1
     ;;
 esac
+# Unchanged sources build an identical, identically signed app. SNAPSCREEN_BUILD_NUMBER, when
+# set, joins CFBundleVersion and changes the signature as a code change would, for Phase 4's
+# check that approvals survive a rebuild (docs/standalone-app-plan.md).
+build=$version
+case ${SNAPSCREEN_BUILD_NUMBER-} in
+  '') ;;
+  *[!0-9]*)
+    echo "error: SNAPSCREEN_BUILD_NUMBER needs to be a number, not \"$SNAPSCREEN_BUILD_NUMBER\"." >&2
+    exit 1
+    ;;
+  *) build=$version.$SNAPSCREEN_BUILD_NUMBER ;;
+esac
 
 swift build --package-path "$root" --scratch-path "$scratch" -c release --product SnapScreen "$@" >&2
 binary="$(swift build --package-path "$root" --scratch-path "$scratch" -c release --show-bin-path "$@")/SnapScreen"
@@ -70,7 +82,7 @@ cat > "$app/Contents/Info.plist" <<EOF
   <key>CFBundleExecutable</key><string>SnapScreen</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$version</string>
-  <key>CFBundleVersion</key><string>$version</string>
+  <key>CFBundleVersion</key><string>$build</string>
   <key>LSMinimumSystemVersion</key><string>15.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
