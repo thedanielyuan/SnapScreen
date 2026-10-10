@@ -64,7 +64,7 @@ final class ComposerView: NSView, NSTextViewDelegate {
     textView.drawsBackground = false
     textView.font = Self.font
     textView.textColor = .labelColor
-    textView.insertionPointColor = .labelColor
+    textView.insertionPointColor = Theme.accent
     textView.typingAttributes = [.font: Self.font, .foregroundColor: NSColor.labelColor]
     textView.isAutomaticQuoteSubstitutionEnabled = false
     textView.isAutomaticDashSubstitutionEnabled = false
@@ -181,7 +181,7 @@ final class ComposerView: NSView, NSTextViewDelegate {
     let field = fieldRect.insetBy(dx: 1, dy: 1)
     let radius = min(20, field.height / 2)
     let shape = NSBezierPath(roundedRect: field, xRadius: radius, yRadius: radius)
-    NSColor.textBackgroundColor.setFill()
+    Theme.surface.setFill()
     shape.fill()
     let focused = window?.firstResponder === textView && (window?.isKeyWindow ?? false)
     if focused {
@@ -190,7 +190,7 @@ final class ComposerView: NSView, NSTextViewDelegate {
       ring.lineWidth = 3
       ring.stroke()
     }
-    (focused ? Theme.accent : NSColor.separatorColor).setStroke()
+    (focused ? Theme.accent : Theme.surfaceBorder).setStroke()
     shape.lineWidth = 1
     shape.stroke()
   }

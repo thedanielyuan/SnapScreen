@@ -21,8 +21,9 @@ extension CompanionPanel {
     value.contentMinSize = minimumSize
     if media {
       value.titleVisibility = .hidden
-      value.appearance = NSAppearance(named: .darkAqua)
       value.backgroundColor = Theme.backdrop
+    } else {
+      value.backgroundColor = Theme.background
     }
     return value
   }

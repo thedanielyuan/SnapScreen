@@ -39,14 +39,14 @@ final class ThumbnailButton: CompanionButton {
     let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 10, yRadius: 10)
     NSGraphicsContext.saveGraphicsState()
     shape.addClip()
-    Theme.codeBackground.setFill()
+    Theme.surface.setFill()
     bounds.fill()
     if let image = screenshot {
       image.draw(in: imageRect, from: .zero, operation: .sourceOver, fraction: isHighlighted ? 0.8 : 1,
         respectFlipped: true, hints: [.interpolation: NSImageInterpolation.high.rawValue])
     }
     NSGraphicsContext.restoreGraphicsState()
-    NSColor.separatorColor.setStroke()
+    Theme.surfaceBorder.setStroke()
     shape.lineWidth = 1
     shape.stroke()
   }
@@ -268,6 +268,7 @@ final class TurnView: NSView {
     copyButton = ActionButton(symbol: "doc.on.doc", label: "Copy answer", target: target, action: copy)
     retryButton = ActionButton(symbol: "arrow.clockwise", title: "Retry", label: "Retry", target: target, action: retry)
     super.init(frame: .zero)
+    copyButton.hoverTint = Theme.accent
     stoppedLabel.font = .systemFont(ofSize: 12)
     stoppedLabel.textColor = .secondaryLabelColor
     if let bubble = bubble { addSubview(bubble) }
@@ -649,7 +650,7 @@ final class ConversationView: NSView {
     guard !trimProtocolText(text).isEmpty else { return }
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(text, forType: .string)
-    sender.showFeedback(symbol: "checkmark", title: "", label: "Copied", color: .systemGreen)
+    sender.showFeedback(symbol: "checkmark", title: "", label: "Copied", color: Theme.accent)
   }
 
   func clear() {

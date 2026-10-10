@@ -74,6 +74,9 @@ func runAppShellTests() throws -> Int {
   try check(!panel.canBecomeKey && !panel.canBecomeMain && panel.styleMask.contains(.nonactivatingPanel) &&
     !panel.hidesOnDeactivate, "a notice never activates SnapScreen or takes the keyboard")
   try check(notice.actionButton?.acceptsFirstMouse(for: nil) == true, "a notice's buttons act on the first click")
+  try check([NSApp.effectiveAppearance, menu.effectiveAppearance, panel.effectiveAppearance].allSatisfy {
+    $0.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+  }, "SnapScreen's windows and menus are dark whatever the system's appearance")
 
   let store = KeychainStore(service: "com.snapscreen.app.self-test", account: UUID().uuidString)
   defer { try? store.remove() }
