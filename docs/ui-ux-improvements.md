@@ -3,7 +3,7 @@
 Proposal, 10 October 2026. Changes to how SnapScreen looks and responds that keep what it does:
 the same requests, features and limits, and windows that never activate the app, with Escape and
 Command-W closing on key release. Offscreen renders of the current views confirmed items 1 and 3.
-Items 1–4 matter most for daily use; 1, 2 and 8 are done.
+Items 1–4 matter most for daily use; 1–4 and 8 are done.
 
 ## Highest value
 
@@ -37,27 +37,33 @@ Done on 10 October 2026: when an answer starts, the thread follows it until its 
 reaches the top, then holds there while the rest fills in below. Scrolling to the bottom follows
 again, and asking a question still scrolls it into view.
 
-### 3. Hanging indents for numbered and bulleted lines
+### 3. Hanging indents for numbered and bulleted lines (done)
 
-Answers write numbered parts, lettered options and bullets as plain lines. Wrapped lines return to
-the left margin, and the items run together with no space between them.
+Answers write numbered parts, lettered options and bullets as plain lines. Wrapped lines returned
+to the left margin, and the items ran together with no space between them.
 
-- In `AnswerSegmentView.update`, give each prose paragraph that starts with a marker (`1.`, `a)`,
-  `-`, `•`) a head indent the width of its marker, plus a few points of paragraph spacing. When a
-  streamed update appends text, restyle only the paragraphs it touches.
-- The text storage stays the literal answer, so Copy is unchanged, and nothing else is interpreted
-  as Markdown. The system prompt and `CodeFence.swift` don't change.
+Done on 10 October 2026:
 
-### 4. Hold Space to move the selection while dragging
+- Each prose paragraph that starts with a marker (`1.`, `a)`, `(b)`, `-`, `•`, after up to eight
+  spaces) gets a head indent the width of its marker, and 4 points above it unless it starts the
+  text (`AnswerStyle.listItemParagraph`). A streamed update restyles only the paragraphs it
+  touches. Years and decimals, such as `2026.` and `1.5`, stay plain lines.
+- The text storage stays the literal answer, so selecting and copying are unchanged, and nothing
+  else is interpreted as Markdown. The system prompt and `CodeFence.swift` don't change.
+- `AnswerSegmentView.update` read the inserted text's start from the text view's string after
+  inserting it, and that string is the live storage, so streamed text never got its paragraph
+  style. It now counts first, so answers also get the line spacing `AnswerStyle` always declared:
+  3 points for prose and 2 for code.
 
-Releasing asks at once, so a drag that starts in the wrong place means cancelling and snipping
-again. `SelectionView.keyDown` ignores Space.
+### 4. Hold Space to move the selection while dragging (done)
 
-- While a drag is in progress, holding Space moves the selection instead of resizing it, as in
-  ⌘⇧4. Releasing Space goes back to resizing from the moved anchor.
-- Don't use Option or Shift as drag modifiers: they're often still held from ⌥⇧S when the drag
-  starts.
-- Add a check to `UI/SelectionViewTests.swift`.
+Releasing asks at once, so a drag that started in the wrong place meant cancelling and snipping
+again.
+
+Done on 10 October 2026: while a drag is in progress, holding Space moves the selection instead of
+resizing it, as in ⌘⇧4, stopping at the image's edges. Releasing Space resizes again from the moved
+corner, and releasing the mouse while moving asks about the moved region. Option and Shift do
+nothing, since they're often still held from ⌥⇧S. The README mentions it.
 
 ## Medium
 

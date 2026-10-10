@@ -120,6 +120,38 @@ func runSelectionViewTests() throws -> Int {
   try check(confirmations.count == 4 && confirmations[3].x == 0 && confirmations[3].y == 0,
     "a drag starting in the margin begins at the image edge")
 
+  // Holding Space while dragging moves the selection; releasing Space resizes it again.
+  func space(_ type: NSEvent.EventType) -> NSEvent {
+    NSEvent.keyEvent(with: type, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+      characters: " ", charactersIgnoringModifiers: " ", isARepeat: false, keyCode: 49)!
+  }
+  let start = CGPoint(x: fitted.minX + 100, y: fitted.minY + 100)
+  view.mouseDown(with: mouse(.leftMouseDown, start))
+  view.mouseDragged(with: mouse(.leftMouseDragged, CGPoint(x: start.x + 200, y: start.y + 100)))
+  let sized = view.selectionDisplayRect!
+  view.keyDown(with: space(.keyDown))
+  view.mouseDragged(with: mouse(.leftMouseDragged, CGPoint(x: start.x + 250, y: start.y + 130)))
+  let moved = view.selectionDisplayRect!
+  try check(near(moved.width, sized.width) && near(moved.height, sized.height) && near(moved.minX, sized.minX + 50) &&
+    near(moved.minY, sized.minY + 30), "holding Space while dragging moves the selection")
+  view.keyUp(with: space(.keyUp))
+  view.mouseDragged(with: mouse(.leftMouseDragged, CGPoint(x: start.x + 300, y: start.y + 130)))
+  let resized = view.selectionDisplayRect!
+  try check(near(resized.minX, moved.minX) && near(resized.minY, moved.minY) && near(resized.width, moved.width + 50),
+    "releasing Space resizes again from the moved corner")
+  view.keyDown(with: space(.keyDown))
+  view.mouseDragged(with: mouse(.leftMouseDragged, CGPoint(x: fitted.maxX + 500, y: fitted.maxY + 500)))
+  try check(view.selection.map { near($0.maxX, 1) && near($0.maxY, 1) } == true &&
+    view.selectionDisplayRect.map { near($0.width, resized.width) && near($0.height, resized.height) } == true,
+    "a moved selection stops at the image's edges, keeping its size")
+  view.mouseUp(with: mouse(.leftMouseUp, CGPoint(x: fitted.maxX + 500, y: fitted.maxY + 500)))
+  try check(confirmations.count == 5 && near(confirmations[4].width * fitted.width, resized.width) &&
+    near(confirmations[4].x + confirmations[4].width, 1), "releasing while moving asks about the moved selection")
+  view.keyUp(with: space(.keyUp))
+  view.selection = nil
+  view.keyDown(with: space(.keyDown))
+  try check(view.selection == nil && confirmations.count == 5 && cancellations == 2, "Space does nothing without a drag")
+
   view.selection = CGRect(x: 0.1004, y: 0.1004, width: 0.1004, height: 0.1004)
   try check(view.selectionSummary == "201 × 101 pixels, 201 from left, 100 from top.",
     "pixel summary rounds crop edges rather than width independently")
@@ -135,7 +167,7 @@ func runSelectionViewTests() throws -> Int {
     "portrait summary uses screenshot dimensions rather than view dimensions")
   view.image = nil
   view.confirm()
-  try check(view.imageRect == .zero && view.selectionSummary == "No screenshot available." && confirmations.count == 4,
+  try check(view.imageRect == .zero && view.selectionSummary == "No screenshot available." && confirmations.count == 5,
     "cleared screenshots cannot be confirmed or exposed in feedback")
 
   // Normalizing and rescaling can land a hair under the minimum at some widths, such as 77 points.

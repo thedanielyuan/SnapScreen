@@ -24,8 +24,8 @@ macOS asks again after every rebuild.
 ## Using it
 
 - Press ⌥⇧S, or choose **Snip** from the menu bar icon, to freeze the display under the pointer.
-- Drag over a region and release to ask. Click or press Escape to cancel; Return selects with the
-  keyboard.
+- Drag over a region and release to ask; hold Space while dragging to move the region. Click or
+  press Escape to cancel; Return selects with the keyboard.
 - Ask follow-ups in the conversation window. You can Stop or Retry an answer, open the
   screenshot, and copy a code block or the answer.
 - Settings holds your API key, a Default Prompt for first answers, the advanced limits, and Open
