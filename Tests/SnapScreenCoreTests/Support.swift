@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import ImageIO
+import Testing
 @testable import SnapScreenCore
 
 /// A value shared with `@Sendable` closures in tests.
@@ -77,6 +78,9 @@ final class MockTransport: HTTPTransport, @unchecked Sendable {
   var bodyError: (any Error)?
   /// Holds `send` open until the calling task is cancelled.
   var waitsForCancellation = false
+  /// Called at a response's `stop` end instead of cancelling the reading task, so a session can
+  /// stop it the way Stop does.
+  var onStop: (@Sendable () -> Void)?
 
   init(_ responses: ScriptedResponse...) { state = Locked((responses, [], 0)) }
   init(_ responses: [ScriptedResponse]) { state = Locked((responses, [], 0)) }
@@ -99,6 +103,7 @@ final class MockTransport: HTTPTransport, @unchecked Sendable {
     let chunks = stride(from: 0, to: bytes.count, by: size).map { Data(bytes[$0..<min($0 + size, bytes.count)]) }
     let next = Locked(0)
     let bodyError = bodyError
+    let onStop = onStop
     // The unfolding closure runs on the reading task, so `stop` can cancel it the way Stop does.
     let body = AsyncThrowingStream<Data, any Error> {
       let index = next.withLock { index in
@@ -113,7 +118,7 @@ final class MockTransport: HTTPTransport, @unchecked Sendable {
       case .error:
         throw URLError(.networkConnectionLost)
       case .stop:
-        withUnsafeCurrentTask { $0?.cancel() }
+        if let onStop { onStop() } else { withUnsafeCurrentTask { $0?.cancel() } }
         try await Task.sleep(for: .seconds(3600))
         return nil
       }
@@ -224,6 +229,75 @@ func pixel(_ png: Data, x: Int, y: Int) throws -> (UInt8, UInt8, UInt8) {
   // Bitmap contexts put the origin at the bottom-left.
   context.draw(image, in: CGRect(x: -x, y: y - image.height + 1, width: image.width, height: image.height))
   return (rgba[0], rgba[1], rgba[2])
+}
+
+/// Records what sessions report.
+@MainActor
+final class EventLog: SessionControllerDelegate {
+  private(set) var reports: [(session: SnipSession, event: SessionEvent)] = []
+  private(set) var notices: [String] = []
+  /// Called after each event is recorded, as the app's windows would react to it.
+  var onEvent: ((SnipSession, SessionEvent) -> Void)?
+
+  var events: [SessionEvent] { reports.map(\.event) }
+
+  func events(of session: SnipSession) -> [SessionEvent] {
+    reports.filter { $0.session === session }.map(\.event)
+  }
+
+  func session(_ session: SnipSession, didReport event: SessionEvent) {
+    reports.append((session, event))
+    onEvent?(session, event)
+  }
+
+  func sessionController(_ controller: SessionController, showNotice message: String) {
+    notices.append(message)
+  }
+}
+
+/// Timers that fire only when a test moves time on.
+final class ManualTimers: Sendable {
+  private let state = Locked<(now: Duration, pending: [(due: Duration, action: @MainActor @Sendable () -> Void)])>(
+    (.zero, []))
+
+  var scheduler: SessionScheduler {
+    SessionScheduler { [state] delay, action in
+      state.withLock { state in
+        let due = state.now + delay
+        state.pending.append((due, action))
+      }
+    }
+  }
+
+  /// Moves time on and fires the timers that come due, in the order they were set.
+  @MainActor func advance(by duration: Duration) {
+    let due = state.withLock { state in
+      state.now += duration
+      let now = state.now
+      defer { state.pending.removeAll { $0.due <= now } }
+      return state.pending.filter { $0.due <= now }.map { $0.action }
+    }
+    for action in due { action() }
+  }
+}
+
+/// Lets main-actor work that's already scheduled run, like the TypeScript tests' `flush`.
+@MainActor
+func flush() async {
+  for _ in 0..<20 { await Task.yield() }
+}
+
+/// Waits for work off the main actor, such as a real client's stream, to meet a condition.
+@MainActor
+func waitUntil(_ condition: () -> Bool, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+  let deadline = ContinuousClock.now + .seconds(10)
+  while !condition() {
+    guard ContinuousClock.now < deadline else {
+      Issue.record("Timed out waiting for a condition.", sourceLocation: sourceLocation)
+      throw CancellationError()
+    }
+    try await Task.sleep(for: .milliseconds(1))
+  }
 }
 
 /// The error a call throws, if it's of type `E`.

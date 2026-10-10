@@ -32,6 +32,15 @@ private func size(_ png: Data) throws -> (Int, Int) {
   #expect(try pixel(cropped, x: 0, y: 0) == (255, 255, 0))
 }
 
+@Test func cropsAFrozenScreenTheSameAsItsPNG() throws {
+  let source = makePNG(width: 200, height: 200) { _, y in y >= 190 ? (255, 0, 0) : (0, 0, 255) }
+  let rect = CGRect(x: 0, y: 0.95, width: 0.15, height: 0.05)
+  #expect(try cropImage(decodePNG(source), normalizedRect: rect) == cropImage(source, normalizedRect: rect))
+  #expect(throws: ImageFittingError.invalidCrop) {
+    try cropImage(decodePNG(source), normalizedRect: CGRect(x: 0.9, y: 0, width: 0.2, height: 1))
+  }
+}
+
 @Test func rejectsInvalidCropsBeforeDecoding() {
   let notAPNG = Data("not a png".utf8)
   for rect in [CGRect(x: 0, y: 0, width: 0, height: 0.2), CGRect(x: 0.9, y: 0.1, width: 0.2, height: 0.2),

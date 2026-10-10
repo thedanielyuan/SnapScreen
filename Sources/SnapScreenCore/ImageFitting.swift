@@ -18,12 +18,13 @@ private let maxFitPasses = 4
 /// Crops a PNG to a rectangle given as fractions of its width and height from its top-left corner.
 /// Edges are rounded to whole pixels of the decoded image.
 public func cropImage(_ png: Data, normalizedRect rect: CGRect) throws -> Data {
-  let values = [rect.origin.x, rect.origin.y, rect.size.width, rect.size.height]
-  guard values.allSatisfy(\.isFinite), rect.origin.x >= 0, rect.origin.y >= 0, rect.size.width > 0,
-    rect.size.height > 0, rect.origin.x + rect.size.width <= 1, rect.origin.y + rect.size.height <= 1 else {
-    throw ImageFittingError.invalidCrop
-  }
-  let image = try decodePNG(png)
+  try validateCrop(rect)
+  return try cropImage(decodePNG(png), normalizedRect: rect)
+}
+
+/// Crops an image, such as a frozen screen, the same way, and encodes only the crop as a PNG.
+public func cropImage(_ image: CGImage, normalizedRect rect: CGRect) throws -> Data {
+  try validateCrop(rect)
   // Rounding matches JavaScript's Math.round for these non-negative values.
   func edge(_ fraction: CGFloat, _ size: Int) -> Int {
     Int((Double(fraction) * Double(size)).rounded()).clamped(to: 0...size)
@@ -37,6 +38,14 @@ public func cropImage(_ png: Data, normalizedRect rect: CGRect) throws -> Data {
     throw ImageFittingError.emptyCrop
   }
   return try encodePNG(cropped)
+}
+
+private func validateCrop(_ rect: CGRect) throws {
+  let values = [rect.origin.x, rect.origin.y, rect.size.width, rect.size.height]
+  guard values.allSatisfy(\.isFinite), rect.origin.x >= 0, rect.origin.y >= 0, rect.size.width > 0,
+    rect.size.height > 0, rect.origin.x + rect.size.width <= 1, rect.origin.y + rect.size.height <= 1 else {
+    throw ImageFittingError.invalidCrop
+  }
 }
 
 /// Downscales a PNG that exceeds the edge or byte limit, so a large selection on a high-DPI screen

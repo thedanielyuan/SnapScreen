@@ -201,10 +201,28 @@ Apple Development certificate reads the previous build's Keychain item without a
 
 ### Phase 3: Snip to answer (large)
 
+It lands in three pull requests: the session controller, then capture, selection and the
+windows, then the test-hooks build.
+
+- **`SessionController` (done).** Port `native-session.ts` into the core without the bridge.
+  The app calls a session's methods (`select`, `ask`, `retry`, `stop` and `close`) where the
+  companion sent commands, and one delegate method receives its events: captured, accepted,
+  started, thinking, notice, answer, failed and ended. It covers:
+  - crop and fit, the first answer, follow-ups, Stop, Retry, trimming notices, and refusal
+    clearing
+  - answer updates throttled to 10 per second
+  - at most four sessions, with a new snip replacing a selection that hasn't been accepted
+  - a selection ending after two minutes, as today
+  - every image and all text released when a session closes
+
+  The cases from `native-session.test.ts` are ported, except those about the native messaging
+  protocol, and the `session-*` fixtures replay through it with the real client. Done on
+  10 October 2026: 107 Swift tests pass.
 - **`ScreenCapturer`.** Use `SCShareableContent` to find the display under the pointer, filter
   out SnapScreen's own windows, and capture with `SCScreenshotManager` at full pixel resolution,
   without the cursor. Check permission first, as Phase 2's Snip does: if it's denied, show
-  `NoticePanel` with Open System Settings.
+  `NoticePanel` with Open System Settings. It returns a `FrozenScreen`, the capture as a
+  `CGImage` with its display, and throws `CaptureError` for failures it can explain.
 - **`SelectionOverlay`.** A borderless, non-opaque panel that never activates the app. It covers
   that display above the menu bar (`canJoinAllSpaces`, `fullScreenAuxiliary`) and draws the
   frozen capture 1:1 with a dim.
@@ -213,20 +231,11 @@ Apple Development certificate reads the previous build's Keychain item without a
     An opaque full-screen window could make Chrome mark the page as hidden.
   - `SelectionView` keeps release-to-ask, click or Escape to cancel, and Return for a keyboard
     selection. Pressing the shortcut again replaces an unfinished selection, as today.
-- **`SessionController`.** Port `native-session.ts` into the core without the bridge. Its
-  events (started, thinking, notice, answer, error) become delegate calls that the app's windows
-  handle. It covers:
-  - crop and fit, the first answer, follow-ups, Stop, Retry, trimming notices, and refusal
-    clearing
-  - answer updates throttled to 10 per second
-  - at most four sessions
-  - every image and all text released when a session closes
-
-  Port the cases from `native-session.test.ts` (426 lines), and replay the `session-*` fixtures
-  through it. Reuse the existing views, and place the answer window beside the selection. Move
-  `PointerShield` and its press tracking from the companion's `main.swift` into shared code for
-  the answer windows.
+- **Windows.** The app becomes `SessionController`'s delegate. Reuse the existing views, and
+  place the answer window beside the selection. Move `PointerShield` and its press tracking from
+  the companion's `main.swift` into shared code for the answer windows.
 - Rewrite the user-facing messages that mention Chrome, such as "Invoke SnapScreen in Chrome…".
+  `SessionController`'s own messages already name SnapScreen Settings instead.
 - **Test-hooks build.** Compile with `-D SNAPSCREEN_TEST_HOOKS`, using its own bundle ID and
   build directory.
   - A fixture image replaces ScreenCaptureKit, because CI can't grant Screen Recording.
