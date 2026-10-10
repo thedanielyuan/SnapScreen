@@ -66,6 +66,8 @@ final class ScriptedAPI: HTTPTransport, @unchecked Sendable {
 final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate {
   static let timeout: TimeInterval = 45
   private let api = ScriptedAPI()
+  /// Where Copy writes during the test, so it never touches the clipboard.
+  private let pasteboard = NSPasteboard(name: NSPasteboard.Name("com.snapscreen.app.test-hooks.\(UUID().uuidString)"))
   private var controller: SessionController?
   private var snips: SnipWindows?
   private var screen: NSScreen?
@@ -77,9 +79,10 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     installEditingMenu(applicationName: "SnapScreen")
+    Clipboard.pasteboard = pasteboard
     let controller = SessionController(answers: AnthropicClient(transport: api), apiKey: { "sk-ant-snapscreen-live-test" },
       settings: { .defaults })
-    snips = SnipWindows(controller: controller, showNotice: { [weak self] message in
+    snips = SnipWindows(controller: controller, showNotice: { [weak self] message, _ in
       self?.fail("no notice is shown, but one said: \(message)")
     })
     // Watch what the windows are told, then pass it on.
@@ -132,6 +135,7 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
 
   private func fail(_ name: String) {
     FileHandle.standardError.write(Data("SnapScreen live test failed: \(name)\n".utf8))
+    pasteboard.releaseGlobally()
     exit(1)
   }
 
@@ -183,6 +187,12 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
         screen.visibleFrame.maxX - selection.maxX > panel.frame.width + 16 {
         check(panel.frame.minX >= selection.maxX, "the conversation opens beside the selection")
       }
+      // Pressed in the panel, ⌥⌘C reaches the Edit menu, which copies the newest code block.
+      NSApp.sendEvent(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.command, .option],
+        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: panel.windowNumber, context: nil, characters: "ç",
+        charactersIgnoringModifiers: "c", isARepeat: false, keyCode: 8)!)
+      check(panel.isKeyWindow && pasteboard.string(forType: .string) == "print(2 + 2)",
+        "⌥⌘C in the conversation copies its code block")
       composer.setDraft(ScriptedAPI.followUp)
       composer.submit()
       check(thread.turns.count == 2 && composer.isRunning, "the follow-up starts a new turn")
@@ -198,6 +208,7 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
     check(!isFrontmost, "SnapScreen never became the active app")
     print("SnapScreen live test passed (test hooks build): \(checks) checks, keyboard selection, streamed answer, " +
       "follow-up and Close through real windows")
+    pasteboard.releaseGlobally()
     exit(0)
   }
 

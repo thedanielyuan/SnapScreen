@@ -2,7 +2,7 @@ import AppKit
 import SnapScreenCore
 
 /// The menu bar app: its icon and menu, the global shortcut, snips, Settings and notices.
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
   private let keyStore = KeychainStore()
   private let notices = NoticeCenter()
   private let hotkey = Hotkey(.snip)
@@ -22,14 +22,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         throw AnthropicError("keychain", error.message)
       }
     })
-    snips = SnipWindows(controller: controller, showNotice: { [notices] in notices.show($0) })
+    snips = SnipWindows(controller: controller, showNotice: { [notices] in notices.show($0, action: $1) })
     hotkey.onPress = { [weak self] in self?.snip() }
     shortcutAvailable = hotkey.register()
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     item.button?.image = StatusMenu.icon
     item.button?.toolTip = "SnapScreen"
-    item.menu = StatusMenu.make(target: self, snip: #selector(snip), settings: #selector(showSettings),
-      shortcut: shortcutAvailable ? hotkey.combination : nil)
+    item.menu = StatusMenu.make(target: self, snip: #selector(snip), closeAll: #selector(closeAllConversations),
+      settings: #selector(showSettings), shortcut: shortcutAvailable ? hotkey.combination : nil)
     statusItem = item
     if !shortcutAvailable {
       notices.show("Another app is using \(hotkey.combination.display), so choose Snip from SnapScreen's menu bar icon.")
@@ -53,6 +53,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // The display under the pointer, as the shortcut or the menu leaves it.
     let displayID = screenUnderPointer()?.displayID ?? CGMainDisplayID()
     snips?.controller.start { try await ScreenCapturer.capture(displayID: displayID) }
+  }
+
+  @MainActor @objc func closeAllConversations() {
+    snips?.closeAll()
+  }
+
+  /// Close All Conversations is enabled only while there's one to close.
+  @MainActor func validateMenuItem(_ item: NSMenuItem) -> Bool {
+    item.action != #selector(closeAllConversations) || snips?.sessions.isEmpty == false
   }
 
   @objc func showSettings() {

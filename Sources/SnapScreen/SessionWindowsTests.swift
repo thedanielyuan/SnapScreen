@@ -3,15 +3,22 @@ import SnapScreenCore
 
 private enum SessionWindowsTestError: Error { case failed(String) }
 
-/// Answers each question at once, or holds the answer until it's stopped.
+/// Answers each question at once, after a moment, or holds the answer until it's stopped.
 private final class SelfTestAnswers: AnswerClient, @unchecked Sendable {
   private let lock = NSLock()
   private var holding = false
+  private var delaying = false
   private var asked: [String] = []
 
   var holds: Bool {
     get { lock.withLock { holding } }
     set { lock.withLock { holding = newValue } }
+  }
+
+  /// Each answer streams for a moment before it finishes.
+  var delays: Bool {
+    get { lock.withLock { delaying } }
+    set { lock.withLock { delaying = newValue } }
   }
 
   /// "(first)" for each first answer without a question, then each question.
@@ -28,14 +35,15 @@ private final class SelfTestAnswers: AnswerClient, @unchecked Sendable {
   }
 
   private func answer(_ question: String, _ handlers: StreamHandlers) async throws -> Answer {
-    let holds = lock.withLock { () -> Bool in
+    let (holds, delays) = lock.withLock { () -> (Bool, Bool) in
       asked.append(question)
-      return holding
+      return (holding, delaying)
     }
     let text = "Answer to \(question)"
     handlers.onThinking()
     handlers.onDelta(text)
     if holds { try await Task.sleep(for: .seconds(60)) }
+    if delays { try await Task.sleep(for: .milliseconds(300)) }
     return Answer(text: text, history: [])
   }
 }
@@ -76,8 +84,10 @@ func runSessionWindowsTests() throws -> Int {
   let answers = SelfTestAnswers()
   let slot = KeySlot()
   var notices: [String] = []
+  var noticeActions: [NoticeAction?] = []
   let controller = SessionController(answers: answers, apiKey: { slot.key }, settings: { .defaults })
-  let snips = SnipWindows(controller: controller, showNotice: { notices.append($0) }, present: { _ in })
+  let snips = SnipWindows(controller: controller, showNotice: { notices.append($0); noticeActions.append($1) },
+    present: { _ in })
   defer { snips.shields.stop() }
   let context = CGContext(data: nil, width: 64, height: 40, bitsPerComponent: 8, bytesPerRow: 0,
     space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue)!
@@ -189,6 +199,49 @@ func runSessionWindowsTests() throws -> Int {
   try check(answers.questions == ["(first)", "Why?", longQuestion, longQuestion, "Hold on", "Hold on"],
     "each request asks its own question")
 
+  // Return while an answer streams queues the draft, which goes once the answer finishes. A
+  // stopped answer leaves its queued draft in the field, unsent.
+  answers.delays = true
+  windows.composer?.setDraft("Slowly")
+  windows.composer?.submit()
+  try check(waitUntil { windows.conversation?.latestTurn?.state == .streaming }, "a slow answer streams")
+  windows.composer?.setDraft("Queued")
+  windows.composer?.submit()
+  try check(windows.composer?.isQueued == true && windows.composer?.hintLabel.stringValue == ComposerView.queuedMessage &&
+    windows.composer?.draft == "Queued" && windows.conversation?.latestTurn?.question == "Slowly",
+    "Return while an answer streams queues the draft")
+  answers.delays = false
+  try check(waitUntil { windows.conversation?.latestTurn?.question == "Queued" && windows.conversation?.latestTurn?.state == .done } &&
+    windows.composer?.draft.isEmpty == true && windows.composer?.isQueued == false, "the queued draft goes once the answer finishes")
+  answers.holds = true
+  windows.composer?.setDraft("Held")
+  windows.composer?.submit()
+  try check(waitUntil { windows.conversation?.latestTurn?.state == .streaming }, "a held answer streams")
+  windows.composer?.setDraft("Not sent")
+  windows.composer?.submit()
+  windows.composer?.onStop?()
+  answers.holds = false
+  try check(windows.composer?.isQueued == false && windows.composer?.draft == "Not sent" &&
+    !answers.questions.contains("Not sent"), "stopping the answer leaves its queued draft in the field, unsent")
+
+  // ⇧⌘C and ⌥⌘C copy the newest answer and code block. These checks write to a private
+  // pasteboard, never the clipboard.
+  let general = Clipboard.pasteboard
+  let pasteboard = NSPasteboard(name: NSPasteboard.Name("com.snapscreen.self-test.\(UUID().uuidString)"))
+  Clipboard.pasteboard = pasteboard
+  windows.composer?.setDraft("Code:\n```py\nprint(1)\n```")
+  windows.composer?.submit()
+  try check(waitUntil { windows.conversation?.latestTurn?.state == .done }, "an answer with code arrives")
+  func enables(_ action: Selector) -> Bool { windows.validateMenuItem(NSMenuItem(title: "", action: action, keyEquivalent: "")) }
+  try check(enables(#selector(SessionWindows.copyAnswer(_:))) && enables(#selector(SessionWindows.copyLastCode(_:))),
+    "Copy Answer and Copy Code are available")
+  windows.copyAnswer(nil)
+  try check(pasteboard.string(forType: .string) == "Answer to Code:\n```py\nprint(1)\n```", "⇧⌘C copies the newest answer")
+  windows.copyLastCode(nil)
+  try check(pasteboard.string(forType: .string) == "print(1)", "⌥⌘C copies the newest code block")
+  Clipboard.pasteboard = general
+  pasteboard.releaseGlobally()
+
   slot.key = nil
   windows.composer?.setDraft("No key")
   windows.composer?.submit()
@@ -202,6 +255,8 @@ func runSessionWindowsTests() throws -> Int {
   try check(windows.panel?.title == "SnapScreen — Session ended" && windows.conversation == nil &&
     (windows.panel?.contentView as? SessionEndedView)?.messageLabel.stringValue == SessionWindows.endedMessage,
     "an ended session keeps no screenshot, answer or draft")
+  try check(!enables(#selector(SessionWindows.copyAnswer(_:))) && !enables(#selector(SessionWindows.copyLastCode(_:))),
+    "an ended session has nothing to copy")
   windows.panel?.performClose(nil)
   try check(windows.session.phase == .ended && windows.panel == nil && snips.sessions.isEmpty,
     "closing the conversation ends the session")
@@ -232,8 +287,8 @@ func runSessionWindowsTests() throws -> Int {
 
   // Notices for snips that fail before they have a window.
   controller.start { throw CaptureError("The display was disconnected.") }
-  try check(waitUntil { notices == ["The display was disconnected."] } && snips.sessions.isEmpty,
-    "a capture failure shows its notice")
+  try check(waitUntil { notices == ["The display was disconnected."] } && snips.sessions.isEmpty &&
+    noticeActions.count == 1 && noticeActions[0] == nil, "a capture failure shows its notice, without a button")
   var open: [SessionWindows] = []
   for _ in 0..<SessionController.maxSessions {
     guard let windows = snip(), select(windows) else { throw SessionWindowsTestError.failed("an answered snip") }
@@ -242,11 +297,16 @@ func runSessionWindowsTests() throws -> Int {
   let next = open[0].panel.map { $0.contentRect(forFrameRect: $0.frame).size }
   try check(next.map { $0.width == chosen.width && $0.height <= chosen.height } == true && open[0].fitsContent,
     "a later conversation opens at the width you chose, and fits its thread up to your height")
-  try check(controller.start { frozen } == nil && notices.last == "Close a SnapScreen window before starting another snip.",
-    "a fifth snip asks for a window to close")
-  for windows in open { windows.panel?.performClose(nil) }
+  try check(controller.start { frozen } == nil && notices.last == "Close a SnapScreen window before starting another snip." &&
+    noticeActions.last??.title == "Close Oldest", "a fifth snip offers to close the oldest conversation")
+  noticeActions.last??.perform()
+  try check(open[0].panel == nil && open[0].session.phase == .ended && snips.sessions.count == 3 &&
+    snips.sessions.first === open[1], "Close Oldest closes the conversation that opened first")
+  snips.closeAll()
+  try check(snips.sessions.isEmpty && open.allSatisfy { $0.panel == nil && $0.session.phase == .ended },
+    "Close All closes every conversation")
   let room = controller.start { frozen }
-  try check(snips.sessions.isEmpty && room != nil, "closing windows makes room again")
+  try check(snips.sessions.isEmpty && room != nil, "closing conversations makes room again")
   room?.close()
   return count
 }

@@ -8,11 +8,12 @@ final class SnipWindows: SessionControllerDelegate {
   let shields = PointerShieldController()
   let chosenSize = ChosenConversationSize()
   private(set) var sessions: [SessionWindows] = []
-  private let showNotice: (String) -> Void
+  private let showNotice: (String, NoticeAction?) -> Void
   private let present: @MainActor (NSWindow) -> Void
 
-  /// `present` shows a window. The self-test leaves windows offscreen.
-  init(controller: SessionController, showNotice: @escaping (String) -> Void,
+  /// `showNotice` shows a message, with a button when it has an action. `present` shows a window;
+  /// the self-test leaves windows offscreen.
+  init(controller: SessionController, showNotice: @escaping (String, NoticeAction?) -> Void,
     present: @escaping @MainActor (NSWindow) -> Void = { $0.makeKeyAndOrderFront(nil) }) {
     self.controller = controller
     self.showNotice = showNotice
@@ -33,7 +34,22 @@ final class SnipWindows: SessionControllerDelegate {
   }
 
   func sessionController(_ controller: SessionController, showNotice message: String) {
-    showNotice(message)
+    showNotice(message, nil)
+  }
+
+  /// With every session open, the notice offers to close the oldest conversation.
+  func sessionControllerIsFull(_ controller: SessionController) {
+    showNotice(SessionController.fullMessage, NoticeAction(title: "Close Oldest") { [weak self] in self?.closeOldest() })
+  }
+
+  /// Closes the conversation that opened first, ending its session.
+  func closeOldest() {
+    sessions.first?.closeConversation()
+  }
+
+  /// Closes every conversation, ending their sessions.
+  func closeAll() {
+    for windows in sessions { windows.closeConversation() }
   }
 
   private func closed(_ windows: SessionWindows?) {
@@ -58,7 +74,7 @@ final class ChosenConversationSize {
 /// keeps focus, and Escape and Command-W close on key release. The conversation opens small and
 /// grows to fit its thread until you resize it.
 @MainActor
-final class SessionWindows: NSObject, NSWindowDelegate {
+final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
   static let endedMessage = "Snip again to start a new capture."
   /// A conversation's largest content size, until you choose one by resizing a conversation.
   static let defaultConversationSize = NSSize(width: 460, height: 560)
@@ -114,15 +130,20 @@ final class SessionWindows: NSObject, NSWindowDelegate {
     case .answer(let text, let status):
       conversation?.updateAnswer(text, status: AnswerStatus(status))
       if status != .streaming { announce(status == .done ? "Answer complete" : "Answer stopped") }
+      // A draft queued behind a stopped answer stays in the field, unsent.
+      if status == .stopped { composer?.cancelQueue() }
     case .failed(let error):
       // The session drops refused text from the conversation, so the window does too.
       conversation?.fail(error.message, clearAnswer: error.code == "refusal")
+      composer?.cancelQueue()
     case .ended:
       end()
       return
     }
     updateControls()
     fitPanel()
+    // The answer a queued draft waited for has finished, so it goes now.
+    if case .answer(_, .done) = event { composer?.sendQueued() }
   }
 
   private func showOverlay(_ frozen: FrozenScreen) {
@@ -322,9 +343,32 @@ final class SessionWindows: NSObject, NSWindowDelegate {
       return true
     }
     // Closing the conversation ends its session, or dismisses one that already ended.
+    closeConversation()
+    return false
+  }
+
+  /// Ends the session and closes its windows, as the conversation's close button does.
+  func closeConversation() {
     session.close()
     close()
-    return false
+  }
+
+  /// Edit > Copy Answer (⇧⌘C): the newest answer, as its Copy button copies it.
+  @objc func copyAnswer(_ sender: Any?) {
+    conversation?.copyLatestAnswer()
+  }
+
+  /// Edit > Copy Code (⌥⌘C): the newest code block, as its Copy button copies it.
+  @objc func copyLastCode(_ sender: Any?) {
+    conversation?.copyLatestCode()
+  }
+
+  func validateMenuItem(_ item: NSMenuItem) -> Bool {
+    switch item.action {
+    case #selector(copyAnswer(_:)): return conversation?.answerToCopy != nil
+    case #selector(copyLastCode(_:)): return conversation?.codeToCopy != nil
+    default: return true
+    }
   }
 
   func windowWillStartLiveResize(_ notification: Notification) {

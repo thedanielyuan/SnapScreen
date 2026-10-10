@@ -262,6 +262,10 @@ final class TurnView: NSView {
       answer.copyEnabled = actionsEnabled
     }
   }
+  /// The shortcut that copies this answer, while it's the newest that offers Copy.
+  var copyShortcut: String? {
+    didSet { copyButton.toolTip = "Copy answer" + (copyShortcut.map { " (\($0))" } ?? "") }
+  }
   override var isFlipped: Bool { true }
 
   init(question: String?, target: AnyObject?, copy: Selector, retry: Selector) {
@@ -454,6 +458,14 @@ final class ConversationView: NSView {
 
   var latestTurn: TurnView? { turns.last }
 
+  /// The newest answer that offers Copy, which Copy Answer (⇧⌘C) copies.
+  var answerToCopy: TurnView? { turns.last { !$0.copyButton.isHidden } }
+
+  /// The newest code block that offers Copy, which Copy Code (⌥⌘C) copies.
+  var codeToCopy: AnswerSegmentView? {
+    turns.reversed().lazy.compactMap { $0.answer.segmentViews.last { $0.copyButton?.isHidden == false } }.first
+  }
+
   /// The earlier exchanges the session still holds, oldest first. The newest exchange is the
   /// request in progress, so the session prunes only these.
   var heldTurns: [TurnView] {
@@ -645,6 +657,35 @@ final class ConversationView: NSView {
     }
     scrollView.contentView.scroll(to: NSPoint(x: 0, y: target))
     scrollView.reflectScrolledClipView(scrollView.contentView)
+    updateCopyShortcuts()
+  }
+
+  /// Names the copy shortcuts in the tooltips of the Copy buttons they press.
+  private func updateCopyShortcuts() {
+    let answer = answerToCopy
+    let code = codeToCopy
+    for turn in turns {
+      turn.copyShortcut = turn === answer ? "⇧⌘C" : nil
+      for block in turn.answer.segmentViews where block.segment.isCode {
+        block.copyShortcut = block === code ? "⌥⌘C" : nil
+      }
+    }
+  }
+
+  /// Copies the newest answer, as its Copy button does. Returns false when no answer offers Copy.
+  @discardableResult
+  func copyLatestAnswer() -> Bool {
+    guard actionsEnabled, let button = answerToCopy?.copyButton, button.isEnabled else { return false }
+    button.performClick(nil)
+    return true
+  }
+
+  /// Copies the newest code block, as its Copy button does. Returns false when none offers Copy.
+  @discardableResult
+  func copyLatestCode() -> Bool {
+    guard actionsEnabled, let button = codeToCopy?.copyButton, button.isEnabled else { return false }
+    button.performClick(nil)
+    return true
   }
 
   /// Removing a view that holds keyboard focus must not leave the panel without a responder.
@@ -679,8 +720,7 @@ final class ConversationView: NSView {
     guard actionsEnabled, let turn = turns.first(where: { $0.copyButton === sender }) else { return }
     let text = turn.answer.renderedText
     guard !trimProtocolText(text).isEmpty else { return }
-    NSPasteboard.general.clearContents()
-    NSPasteboard.general.setString(text, forType: .string)
+    Clipboard.copy(text)
     sender.showFeedback(symbol: "checkmark", title: "", label: "Copied", color: Theme.accent)
   }
 
