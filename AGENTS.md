@@ -40,7 +40,8 @@ npm run lint && npm run typecheck && npm test && npm run test:extension-artifact
   session; `src/background/native-session.ts` owns its session, crop, conversation, and API calls
 - `Package.swift`, `Sources/SnapScreen/` — the standalone app that will replace the extension
   (`docs/standalone-app-plan.md`). The companion's views live in `Sources/SnapScreen/UI/` and
-  compile into both.
+  compile into both. `Sources/SnapScreenCore/` is `src/lib/`'s API client, conversation state,
+  limits and image fitting ported to Swift, tested in `Tests/SnapScreenCoreTests/`.
 - `experiments/native-phase1/` — finished prototype and evidence. Frozen: don't edit unless asked.
 
 ## Conventions
@@ -151,15 +152,25 @@ npm run test:native-packaged  # extracted archive + shipped installer in disposa
 ## Standalone app (macOS, in progress)
 
 ```bash
+swift test                                                   # the core's tests and fixture replays
 scripts/build-app.sh                                         # → build/SnapScreen.app, signed
 build/SnapScreen.app/Contents/MacOS/SnapScreen --self-test   # the shared views' checks
 ```
 
 - Build it phase by phase from `docs/standalone-app-plan.md`, and keep the plan current. The
   extension stays the product until Phase 5, so leave ⌥⇧S to it.
-- After touching `Package.swift` or `Sources/`, run both commands above. `Sources/SnapScreen/UI/`
-  also builds into the companion, whose minimum is macOS 13 while the package's is macOS 15:
-  keep those views to macOS 13 APIs and run the companion's checks too.
+- After touching `Package.swift`, `Sources/` or `Tests/`, run the commands above.
+  `Sources/SnapScreen/UI/` also builds into the companion, whose minimum is macOS 13 while the
+  package's is macOS 15: keep those views to macOS 13 APIs and run the companion's checks too.
+- `SnapScreenCore` uses only Foundation, CoreGraphics and ImageIO, in Swift 6 language mode. Its
+  client follows the Anthropic API rules above.
+- Until Phase 5 the TypeScript and the core must behave the same. `src/lib/core-fixtures.test.ts`
+  records golden fixtures in `Tests/SnapScreenCoreTests/Fixtures/` that `swift test` replays, and
+  `npm test` fails once the TypeScript no longer produces them. After an intended change to the
+  client, conversation state, limits or prompt, rewrite them with
+  `npx vitest run src/lib/core-fixtures.test.ts -u` and update the Swift core in the same change.
+- `swift test` skips `LiveAPITests` unless `SNAPSCREEN_LIVE_API_KEY` is set. Like the TypeScript
+  live test, it spends API credit.
 - `build-app.sh` signs with the user's self-signed "SnapScreen Local" certificate (ad hoc in CI).
   Keep the bundle ID and that signature: macOS ties Screen Recording and Keychain approvals to them.
 

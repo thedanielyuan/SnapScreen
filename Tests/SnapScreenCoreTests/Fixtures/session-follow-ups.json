@@ -1,0 +1,1373 @@
+{
+  "description": "Follow-ups build on each answer until the oldest turn is trimmed, with a notice.",
+  "steps": [
+    {
+      "op": "prepareAlignedConversationForNewestTurn",
+      "input": {
+        "displayMessages": [],
+        "conversationHistory": [],
+        "maxConversationTurns": 3
+      },
+      "output": {
+        "displayMessages": [],
+        "conversationHistory": [],
+        "removedTurns": 0
+      }
+    },
+    {
+      "note": "First answer",
+      "op": "analyzeImage",
+      "input": {
+        "apiKey": "test-key",
+        "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        "hiddenInstruction": "Answer the question shown in this screenshot.",
+        "limits": {
+          "maxInputCharacters": 4000,
+          "maxScreenshotBytes": 5000000,
+          "maxScreenshotDimension": 2576,
+          "maxConversationTurns": 3
+        }
+      },
+      "response": {
+        "headers": {
+          "content-type": "text/event-stream"
+        },
+        "body": "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_fixture\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-opus-5-5\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":1200,\"output_tokens\":1}}}\n\nevent: ping\ndata: {\"type\":\"ping\"}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"c2lnbmF0dXJl\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"First.\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":87}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+      },
+      "request": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "method": "POST",
+        "headers": {
+          "x-api-key": "test-key",
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+          "anthropic-dangerous-direct-browser-access": "true",
+          "anthropic-beta": "server-side-fallback-2026-07-01"
+        },
+        "body": {
+          "model": "claude-opus-5-5",
+          "max_tokens": 32000,
+          "thinking": {
+            "type": "adaptive"
+          },
+          "output_config": {
+            "effort": "high"
+          },
+          "fallbacks": "default",
+          "stream": true,
+          "cache_control": {
+            "type": "ephemeral"
+          },
+          "system": "(system-prompt.txt)",
+          "messages": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "image",
+                  "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                  }
+                },
+                {
+                  "type": "text",
+                  "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "events": [
+        {
+          "type": "thinking"
+        },
+        {
+          "type": "delta",
+          "text": "First."
+        }
+      ],
+      "outcome": {
+        "type": "answer",
+        "text": "First.",
+        "history": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                }
+              },
+              {
+                "type": "text",
+                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "First."
+          }
+        ]
+      }
+    },
+    {
+      "op": "settleSuccessfulConversation",
+      "input": {
+        "kind": "initial",
+        "baseDisplayMessages": [],
+        "baseHistory": [],
+        "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        "sessionInstruction": "Answer the question shown in this screenshot.",
+        "assistantText": "First.",
+        "providerHistory": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                }
+              },
+              {
+                "type": "text",
+                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "First."
+          }
+        ]
+      },
+      "output": {
+        "displayMessages": [
+          {
+            "role": "assistant",
+            "content": "First."
+          }
+        ],
+        "conversationHistory": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                }
+              },
+              {
+                "type": "text",
+                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "First."
+          }
+        ]
+      }
+    },
+    {
+      "op": "prepareAlignedConversationForNewestTurn",
+      "input": {
+        "displayMessages": [
+          {
+            "role": "assistant",
+            "content": "First."
+          }
+        ],
+        "conversationHistory": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                }
+              },
+              {
+                "type": "text",
+                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "First."
+          }
+        ],
+        "maxConversationTurns": 3
+      },
+      "output": {
+        "displayMessages": [
+          {
+            "role": "assistant",
+            "content": "First."
+          }
+        ],
+        "conversationHistory": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                }
+              },
+              {
+                "type": "text",
+                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "First."
+          }
+        ],
+        "removedTurns": 0
+      }
+    },
+    {
+      "note": "Second turn",
+      "op": "followUp",
+      "input": {
+        "apiKey": "test-key",
+        "text": "Question 1",
+        "history": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                }
+              },
+              {
+                "type": "text",
+                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "First."
+          }
+        ],
+        "sessionInstruction": "Answer the question shown in this screenshot.",
+        "limits": {
+          "maxInputCharacters": 4000,
+          "maxScreenshotBytes": 5000000,
+          "maxScreenshotDimension": 2576,
+          "maxConversationTurns": 3
+        }
+      },
+      "response": {
+        "headers": {
+          "content-type": "text/event-stream"
+        },
+        "body": "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_fixture\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-opus-5-5\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":1200,\"output_tokens\":1}}}\n\nevent: ping\ndata: {\"type\":\"ping\"}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"c2lnbmF0dXJl\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"Answer 1.\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":87}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+      },
+      "request": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "method": "POST",
+        "headers": {
+          "x-api-key": "test-key",
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+          "anthropic-dangerous-direct-browser-access": "true",
+          "anthropic-beta": "server-side-fallback-2026-07-01"
+        },
+        "body": {
+          "model": "claude-opus-5-5",
+          "max_tokens": 32000,
+          "thinking": {
+            "type": "adaptive"
+          },
+          "output_config": {
+            "effort": "high"
+          },
+          "fallbacks": "default",
+          "stream": true,
+          "cache_control": {
+            "type": "ephemeral"
+          },
+          "system": "(system-prompt.txt)",
+          "messages": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "image",
+                  "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                  }
+                },
+                {
+                  "type": "text",
+                  "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+                }
+              ]
+            },
+            {
+              "role": "assistant",
+              "content": "First."
+            },
+            {
+              "role": "user",
+              "content": "Question 1"
+            }
+          ]
+        }
+      },
+      "events": [
+        {
+          "type": "thinking"
+        },
+        {
+          "type": "delta",
+          "text": "Answer 1."
+        }
+      ],
+      "outcome": {
+        "type": "answer",
+        "text": "Answer 1.",
+        "history": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                }
+              },
+              {
+                "type": "text",
+                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "First."
+          },
+          {
+            "role": "user",
+            "content": "Question 1"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 1."
+          }
+        ]
+      }
+    },
+    {
+      "op": "settleSuccessfulConversation",
+      "input": {
+        "kind": "follow-up",
+        "userText": "Question 1",
+        "baseDisplayMessages": [
+          {
+            "role": "assistant",
+            "content": "First."
+          }
+        ],
+        "baseHistory": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                }
+              },
+              {
+                "type": "text",
+                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "First."
+          }
+        ],
+        "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        "sessionInstruction": "Answer the question shown in this screenshot.",
+        "assistantText": "Answer 1.",
+        "providerHistory": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                }
+              },
+              {
+                "type": "text",
+                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "First."
+          },
+          {
+            "role": "user",
+            "content": "Question 1"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 1."
+          }
+        ]
+      },
+      "output": {
+        "displayMessages": [
+          {
+            "role": "assistant",
+            "content": "First."
+          },
+          {
+            "role": "user",
+            "content": "Question 1"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 1."
+          }
+        ],
+        "conversationHistory": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                }
+              },
+              {
+                "type": "text",
+                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "First."
+          },
+          {
+            "role": "user",
+            "content": "Question 1"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 1."
+          }
+        ]
+      }
+    },
+    {
+      "op": "prepareAlignedConversationForNewestTurn",
+      "input": {
+        "displayMessages": [
+          {
+            "role": "assistant",
+            "content": "First."
+          },
+          {
+            "role": "user",
+            "content": "Question 1"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 1."
+          }
+        ],
+        "conversationHistory": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                }
+              },
+              {
+                "type": "text",
+                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "First."
+          },
+          {
+            "role": "user",
+            "content": "Question 1"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 1."
+          }
+        ],
+        "maxConversationTurns": 3
+      },
+      "output": {
+        "displayMessages": [
+          {
+            "role": "assistant",
+            "content": "First."
+          },
+          {
+            "role": "user",
+            "content": "Question 1"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 1."
+          }
+        ],
+        "conversationHistory": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                }
+              },
+              {
+                "type": "text",
+                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "First."
+          },
+          {
+            "role": "user",
+            "content": "Question 1"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 1."
+          }
+        ],
+        "removedTurns": 0
+      }
+    },
+    {
+      "note": "Third turn",
+      "op": "followUp",
+      "input": {
+        "apiKey": "test-key",
+        "text": "Question 2",
+        "history": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                }
+              },
+              {
+                "type": "text",
+                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "First."
+          },
+          {
+            "role": "user",
+            "content": "Question 1"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 1."
+          }
+        ],
+        "sessionInstruction": "Answer the question shown in this screenshot.",
+        "limits": {
+          "maxInputCharacters": 4000,
+          "maxScreenshotBytes": 5000000,
+          "maxScreenshotDimension": 2576,
+          "maxConversationTurns": 3
+        }
+      },
+      "response": {
+        "headers": {
+          "content-type": "text/event-stream"
+        },
+        "body": "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_fixture\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-opus-5-5\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":1200,\"output_tokens\":1}}}\n\nevent: ping\ndata: {\"type\":\"ping\"}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"c2lnbmF0dXJl\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"Answer 2.\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":87}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+      },
+      "request": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "method": "POST",
+        "headers": {
+          "x-api-key": "test-key",
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+          "anthropic-dangerous-direct-browser-access": "true",
+          "anthropic-beta": "server-side-fallback-2026-07-01"
+        },
+        "body": {
+          "model": "claude-opus-5-5",
+          "max_tokens": 32000,
+          "thinking": {
+            "type": "adaptive"
+          },
+          "output_config": {
+            "effort": "high"
+          },
+          "fallbacks": "default",
+          "stream": true,
+          "cache_control": {
+            "type": "ephemeral"
+          },
+          "system": "(system-prompt.txt)",
+          "messages": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "image",
+                  "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                  }
+                },
+                {
+                  "type": "text",
+                  "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+                }
+              ]
+            },
+            {
+              "role": "assistant",
+              "content": "First."
+            },
+            {
+              "role": "user",
+              "content": "Question 1"
+            },
+            {
+              "role": "assistant",
+              "content": "Answer 1."
+            },
+            {
+              "role": "user",
+              "content": "Question 2"
+            }
+          ]
+        }
+      },
+      "events": [
+        {
+          "type": "thinking"
+        },
+        {
+          "type": "delta",
+          "text": "Answer 2."
+        }
+      ],
+      "outcome": {
+        "type": "answer",
+        "text": "Answer 2.",
+        "history": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                }
+              },
+              {
+                "type": "text",
+                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "First."
+          },
+          {
+            "role": "user",
+            "content": "Question 1"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 1."
+          },
+          {
+            "role": "user",
+            "content": "Question 2"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 2."
+          }
+        ]
+      }
+    },
+    {
+      "op": "settleSuccessfulConversation",
+      "input": {
+        "kind": "follow-up",
+        "userText": "Question 2",
+        "baseDisplayMessages": [
+          {
+            "role": "assistant",
+            "content": "First."
+          },
+          {
+            "role": "user",
+            "content": "Question 1"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 1."
+          }
+        ],
+        "baseHistory": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                }
+              },
+              {
+                "type": "text",
+                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "First."
+          },
+          {
+            "role": "user",
+            "content": "Question 1"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 1."
+          }
+        ],
+        "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        "sessionInstruction": "Answer the question shown in this screenshot.",
+        "assistantText": "Answer 2.",
+        "providerHistory": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                }
+              },
+              {
+                "type": "text",
+                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "First."
+          },
+          {
+            "role": "user",
+            "content": "Question 1"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 1."
+          },
+          {
+            "role": "user",
+            "content": "Question 2"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 2."
+          }
+        ]
+      },
+      "output": {
+        "displayMessages": [
+          {
+            "role": "assistant",
+            "content": "First."
+          },
+          {
+            "role": "user",
+            "content": "Question 1"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 1."
+          },
+          {
+            "role": "user",
+            "content": "Question 2"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 2."
+          }
+        ],
+        "conversationHistory": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                }
+              },
+              {
+                "type": "text",
+                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "First."
+          },
+          {
+            "role": "user",
+            "content": "Question 1"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 1."
+          },
+          {
+            "role": "user",
+            "content": "Question 2"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 2."
+          }
+        ]
+      }
+    },
+    {
+      "op": "prepareAlignedConversationForNewestTurn",
+      "input": {
+        "displayMessages": [
+          {
+            "role": "assistant",
+            "content": "First."
+          },
+          {
+            "role": "user",
+            "content": "Question 1"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 1."
+          },
+          {
+            "role": "user",
+            "content": "Question 2"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 2."
+          }
+        ],
+        "conversationHistory": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                }
+              },
+              {
+                "type": "text",
+                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "First."
+          },
+          {
+            "role": "user",
+            "content": "Question 1"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 1."
+          },
+          {
+            "role": "user",
+            "content": "Question 2"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 2."
+          }
+        ],
+        "maxConversationTurns": 3
+      },
+      "output": {
+        "displayMessages": [
+          {
+            "role": "assistant",
+            "content": "First."
+          },
+          {
+            "role": "user",
+            "content": "Question 2"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 2."
+          }
+        ],
+        "conversationHistory": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                }
+              },
+              {
+                "type": "text",
+                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "First."
+          },
+          {
+            "role": "user",
+            "content": "Question 2"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 2."
+          }
+        ],
+        "removedTurns": 1,
+        "notice": "1 older conversation turn was removed to keep the screenshot and newest request within the configured limit."
+      }
+    },
+    {
+      "note": "Fourth turn trims the second",
+      "op": "followUp",
+      "input": {
+        "apiKey": "test-key",
+        "text": "Question 3",
+        "history": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                }
+              },
+              {
+                "type": "text",
+                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "First."
+          },
+          {
+            "role": "user",
+            "content": "Question 2"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 2."
+          }
+        ],
+        "sessionInstruction": "Answer the question shown in this screenshot.",
+        "limits": {
+          "maxInputCharacters": 4000,
+          "maxScreenshotBytes": 5000000,
+          "maxScreenshotDimension": 2576,
+          "maxConversationTurns": 3
+        }
+      },
+      "response": {
+        "headers": {
+          "content-type": "text/event-stream"
+        },
+        "body": "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_fixture\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-opus-5-5\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":1200,\"output_tokens\":1}}}\n\nevent: ping\ndata: {\"type\":\"ping\"}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"c2lnbmF0dXJl\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"Answer 3.\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":87}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+      },
+      "request": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "method": "POST",
+        "headers": {
+          "x-api-key": "test-key",
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+          "anthropic-dangerous-direct-browser-access": "true",
+          "anthropic-beta": "server-side-fallback-2026-07-01"
+        },
+        "body": {
+          "model": "claude-opus-5-5",
+          "max_tokens": 32000,
+          "thinking": {
+            "type": "adaptive"
+          },
+          "output_config": {
+            "effort": "high"
+          },
+          "fallbacks": "default",
+          "stream": true,
+          "cache_control": {
+            "type": "ephemeral"
+          },
+          "system": "(system-prompt.txt)",
+          "messages": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "image",
+                  "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                  }
+                },
+                {
+                  "type": "text",
+                  "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+                }
+              ]
+            },
+            {
+              "role": "assistant",
+              "content": "First."
+            },
+            {
+              "role": "user",
+              "content": "Question 2"
+            },
+            {
+              "role": "assistant",
+              "content": "Answer 2."
+            },
+            {
+              "role": "user",
+              "content": "Question 3"
+            }
+          ]
+        }
+      },
+      "events": [
+        {
+          "type": "thinking"
+        },
+        {
+          "type": "delta",
+          "text": "Answer 3."
+        }
+      ],
+      "outcome": {
+        "type": "answer",
+        "text": "Answer 3.",
+        "history": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                }
+              },
+              {
+                "type": "text",
+                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "First."
+          },
+          {
+            "role": "user",
+            "content": "Question 2"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 2."
+          },
+          {
+            "role": "user",
+            "content": "Question 3"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 3."
+          }
+        ]
+      }
+    },
+    {
+      "op": "settleSuccessfulConversation",
+      "input": {
+        "kind": "follow-up",
+        "userText": "Question 3",
+        "baseDisplayMessages": [
+          {
+            "role": "assistant",
+            "content": "First."
+          },
+          {
+            "role": "user",
+            "content": "Question 2"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 2."
+          }
+        ],
+        "baseHistory": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                }
+              },
+              {
+                "type": "text",
+                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "First."
+          },
+          {
+            "role": "user",
+            "content": "Question 2"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 2."
+          }
+        ],
+        "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        "sessionInstruction": "Answer the question shown in this screenshot.",
+        "assistantText": "Answer 3.",
+        "providerHistory": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                }
+              },
+              {
+                "type": "text",
+                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "First."
+          },
+          {
+            "role": "user",
+            "content": "Question 2"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 2."
+          },
+          {
+            "role": "user",
+            "content": "Question 3"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 3."
+          }
+        ]
+      },
+      "output": {
+        "displayMessages": [
+          {
+            "role": "assistant",
+            "content": "First."
+          },
+          {
+            "role": "user",
+            "content": "Question 2"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 2."
+          },
+          {
+            "role": "user",
+            "content": "Question 3"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 3."
+          }
+        ],
+        "conversationHistory": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                }
+              },
+              {
+                "type": "text",
+                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "First."
+          },
+          {
+            "role": "user",
+            "content": "Question 2"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 2."
+          },
+          {
+            "role": "user",
+            "content": "Question 3"
+          },
+          {
+            "role": "assistant",
+            "content": "Answer 3."
+          }
+        ]
+      }
+    }
+  ]
+}

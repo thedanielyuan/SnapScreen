@@ -1,0 +1,85 @@
+{
+  "description": "The Settings key check sends one token and no thinking, beta, or stream.",
+  "steps": [
+    {
+      "note": "A working key",
+      "op": "verifyApiKey",
+      "input": {
+        "apiKey": "test-key"
+      },
+      "response": {
+        "status": 200,
+        "statusText": "",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"content\":[{\"type\":\"text\",\"text\":\"Hi\"}],\"stop_reason\":\"max_tokens\"}"
+      },
+      "request": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "method": "POST",
+        "headers": {
+          "x-api-key": "test-key",
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+          "anthropic-dangerous-direct-browser-access": "true"
+        },
+        "body": {
+          "model": "claude-opus-5-5",
+          "max_tokens": 1,
+          "messages": [
+            {
+              "role": "user",
+              "content": "Hi"
+            }
+          ]
+        }
+      },
+      "events": [],
+      "outcome": {
+        "type": "verified"
+      }
+    },
+    {
+      "note": "A rejected key",
+      "op": "verifyApiKey",
+      "input": {
+        "apiKey": "test-key"
+      },
+      "response": {
+        "status": 403,
+        "statusText": "",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"error\":{\"message\":\"forbidden\"}}"
+      },
+      "request": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "method": "POST",
+        "headers": {
+          "x-api-key": "test-key",
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+          "anthropic-dangerous-direct-browser-access": "true"
+        },
+        "body": {
+          "model": "claude-opus-5-5",
+          "max_tokens": 1,
+          "messages": [
+            {
+              "role": "user",
+              "content": "Hi"
+            }
+          ]
+        }
+      },
+      "events": [],
+      "outcome": {
+        "type": "error",
+        "code": "auth",
+        "message": "Invalid API key. Check your settings."
+      }
+    }
+  ]
+}

@@ -66,7 +66,7 @@ macOS 15; ScreenCaptureKit screenshots need macOS 14.
 
 | Today | In the app |
 | --- | --- |
-| `src/lib/anthropic.ts` | `AnthropicClient.swift`, `SSEParser.swift` (core) |
+| `src/lib/anthropic.ts` | `AnthropicClient.swift`, `SSEParser.swift`, `HTTPTransport.swift` (core) |
 | `src/lib/screenshot-qa-prompt.ts` | `SystemPrompt.swift` (core) |
 | `src/lib/messages.ts` (API types), `session-history.ts` | `Messages.swift` (core) |
 | `src/lib/request-limits.ts` | `RequestLimits.swift` (core) |
@@ -74,6 +74,7 @@ macOS 15; ScreenCaptureKit screenshots need macOS 14.
 | `src/lib/crop.ts` | `ImageFitting.swift` (core) |
 | `src/lib/storage.ts` | `Settings.swift` (core), `KeychainStore.swift` (app) |
 | `closeOpenCodeFence` in `src/lib/code-blocks.ts` | `CodeFence.swift` (core) |
+| `src/lib/plain-text.ts` and JavaScript string behavior | `JavaScriptStrings.swift` (core) |
 | `src/background/native-session.ts`, `native/macos/Session.swift` | `SessionController.swift` (core, reports to the app through a delegate) |
 | `src/background/capture-source.ts`, `capture-session.ts` | `ScreenCapturer.swift` |
 | `service-worker-native.ts` (toolbar button and command) | `AppDelegate.swift`, `Hotkey.swift`, `StatusMenu.swift` |
@@ -117,14 +118,16 @@ Each phase leaves CI green.
 
 Done when: CI builds the package and the companion's tests pass unchanged.
 
-### Phase 1: Port the core (large)
+### Phase 1: Port the core (large, done)
 
 - Add the `SnapScreenCore` target and `Tests/SnapScreenCoreTests/`, and add `swift test` to the
   CI `native` job.
-- **Record golden fixtures from the TypeScript before porting.** Add a temporary Vitest recorder that
-  runs only when `SNAPSCREEN_RECORD_FIXTURES=1` is set, and delete it in Phase 5. It runs
-  `analyzeImage` and `followUp` against a stubbed `fetch` and saves request bodies, plus SSE
-  streams with their expected results, for these cases:
+- **Record golden fixtures from the TypeScript before porting.** `src/lib/core-fixtures.test.ts`,
+  deleted in Phase 5, runs `analyzeImage` and `followUp` against a scripted `fetch`, and drives
+  multi-turn sessions through the conversation-state functions as `native-session.ts` does. It
+  saves each request body, stream, result and state change as a file snapshot in
+  `Tests/SnapScreenCoreTests/Fixtures/`, so `npm test` also fails if the TypeScript drifts from
+  them; `npx vitest run src/lib/core-fixtures.test.ts -u` rewrites them. The cases:
   - first answers with and without a question and a Default Prompt
   - follow-ups, including trimming at the turn limit
   - stopped and failed answers, and Retry
@@ -134,7 +137,8 @@ Done when: CI builds the package and the companion's tests pass unchanged.
   - a `max_tokens` cut-off inside a code fence
 - **Port these into `SnapScreenCore`:**
   - The API client streams with `URLSession.bytes(for:)` through an injectable transport and
-    sends the same request body. Stop and timeouts use `Task` cancellation.
+    sends the same request body. Stop uses `Task` cancellation, and the timeouts are URLSession's
+    request (idle) and resource (overall) timeouts.
   - The SSE parser keeps today's line-ending handling, including a CR split across chunks. It
     signals thinking once.
   - Error mapping and `sanitizeProviderMessage` keep their limits: provider error bodies of at
@@ -151,6 +155,7 @@ Done when: CI builds the package and the companion's tests pass unchanged.
   running it in CI, as today, because it spends API credit.
 
 Done when: Swift request bodies equal the fixtures as JSON, and every ported case passes.
+Done on 10 October 2026: 18 fixture files replay, and 80 Swift tests pass.
 
 ### Phase 2: App shell (medium)
 
@@ -198,9 +203,10 @@ prompt.
   - at most four sessions
   - every image and all text released when a session closes
 
-  Port the cases from `native-session.test.ts` (426 lines). Reuse the existing views, and place
-  the answer window beside the selection. Move `PointerShield` and its press tracking from the
-  companion's `main.swift` into shared code for the answer windows.
+  Port the cases from `native-session.test.ts` (426 lines), and replay the `session-*` fixtures
+  through it. Reuse the existing views, and place the answer window beside the selection. Move
+  `PointerShield` and its press tracking from the companion's `main.swift` into shared code for
+  the answer windows.
 - Rewrite the user-facing messages that mention Chrome, such as "Invoke SnapScreen in Chrome…".
 - **Test-hooks build.** Compile with `-D SNAPSCREEN_TEST_HOOKS`, using its own bundle ID and
   build directory.
