@@ -28,3 +28,8 @@ release
 # Local native interaction experiment (binaries, profiles and raw observations)
 experiments/native-phase1/build/
 native/macos/build/
+
+# Swift package and standalone app builds
+/.build/
+/.swiftpm/
+/build/

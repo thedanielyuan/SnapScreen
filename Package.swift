@@ -1,0 +1,17 @@
+// swift-tools-version: 6.0
+import PackageDescription
+
+// The standalone macOS app (docs/standalone-app-plan.md). scripts/build-app.sh bundles and signs it.
+let package = Package(
+  name: "SnapScreen",
+  // scripts/build-app.sh writes the same minimum into the bundle's Info.plist.
+  platforms: [.macOS(.v15)],
+  targets: [
+    // Sources/SnapScreen/UI is also compiled into the Chrome companion by
+    // scripts/native-companion-build.mjs, until the extension is removed.
+    .executableTarget(
+      name: "SnapScreen",
+      swiftSettings: [.swiftLanguageMode(.v5)]
+    ),
+  ]
+)

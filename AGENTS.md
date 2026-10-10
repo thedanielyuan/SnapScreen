@@ -36,8 +36,11 @@ npm run lint && npm run typecheck && npm test && npm run test:extension-artifact
   (`result-panel.ts`, `snip-overlay.ts`, `overlay.css`) runs only in the UI frame (`src/ui/`) and
   the workspace (`src/workspace/`, a tab used when a page rejects injection), never in the page;
   the content script reaches it through `ui-proxy.ts`.
-- `native/macos/` — the companion, one host process per session;
-  `src/background/native-session.ts` owns its session, crop, conversation, and API calls
+- `native/macos/` — the companion's protocol, session state, and entry point, one host process per
+  session; `src/background/native-session.ts` owns its session, crop, conversation, and API calls
+- `Package.swift`, `Sources/SnapScreen/` — the standalone app that will replace the extension
+  (`docs/standalone-app-plan.md`). The companion's views live in `Sources/SnapScreen/UI/` and
+  compile into both.
 - `experiments/native-phase1/` — finished prototype and evidence. Frozen: don't edit unless asked.
 
 ## Conventions
@@ -98,7 +101,7 @@ npm run lint && npm run typecheck && npm test && npm run test:extension-artifact
   cache. So follow-up rules live in the shared `src/lib/screenshot-qa-prompt.ts`, never in a
   separate prompt or a mid-conversation `system` message (not every fallback model accepts one).
 - Answers are plain text except fenced code blocks, which `src/lib/code-blocks.ts` and
-  `native/macos/AnswerView.swift` parse for per-block Copy buttons. Change the prompt's formatting
+  `Sources/SnapScreen/UI/AnswerView.swift` parse for per-block Copy buttons. Change the prompt's formatting
   rules and both parsers together.
 - Thinking can stream no text for over 30 s, and Chrome may stop an idle worker even mid-fetch, so
   requests run inside `keepAliveUntilSettled`. Keep `API_REQUEST_TIMEOUT_MS` (240 s) under
@@ -118,14 +121,15 @@ npm run package:native        # unsigned app archive (signing is opt-in: docs/na
 npm run test:native-packaged  # extracted archive + shipped installer in disposable browser roots
 ```
 
-- After touching `native/`, `src/lib/native-protocol.ts`, or `src/background/native-*.ts`, run
-  the first three; build, packaging, or installer changes need all five. The live, packaged, and
+- After touching `native/`, `Sources/SnapScreen/UI/`, `src/lib/native-protocol.ts`, or
+  `src/background/native-*.ts`, run the first three; build, packaging, or installer changes need all five. The live, packaged, and
   physical runners load `dist/` unless passed `-- --extension-dir dist-native`; for native-only
   changes, run the live and packaged tests against both builds, as CI does.
 - The native protocol is validated on both sides with exact keys: `src/lib/native-protocol.ts` and
   `native/macos/Protocol.swift` (state machine in `Session.swift`). Change both sides and their
   tests (`native-protocol.test.ts`, `SelfTests.swift`) together.
-- `scripts/native-companion-build.mjs` compiles an explicit list of Swift files; add new ones.
+- `scripts/native-companion-build.mjs` compiles an explicit list of Swift files from
+  `native/macos/` and `Sources/SnapScreen/UI/`; add new ones.
 - Panels never activate the app, so Chrome stays active: close windows on key release
   (`CompanionPanel`) and give tracking areas `.activeAlways`. Match the In Chrome interface's
   wording and conversation behavior.
@@ -143,6 +147,21 @@ npm run test:native-packaged  # extracted archive + shipped installer in disposa
   worker into it or add the content script, result frame, workspace, or web-accessible resources.
   `test:browser-native` checks a temporary ZIP before adding its browser shim: keep package
   exclusions and runtime checks ahead of fixture instrumentation, and never ship test shims.
+
+## Standalone app (macOS, in progress)
+
+```bash
+scripts/build-app.sh                                         # → build/SnapScreen.app, signed
+build/SnapScreen.app/Contents/MacOS/SnapScreen --self-test   # the shared views' checks
+```
+
+- Build it phase by phase from `docs/standalone-app-plan.md`, and keep the plan current. The
+  extension stays the product until Phase 5, so leave ⌥⇧S to it.
+- After touching `Package.swift` or `Sources/`, run both commands above. `Sources/SnapScreen/UI/`
+  also builds into the companion, whose minimum is macOS 13 while the package's is macOS 15:
+  keep those views to macOS 13 APIs and run the companion's checks too.
+- `build-app.sh` signs with the user's self-signed "SnapScreen Local" certificate (ad hoc in CI).
+  Keep the bundle ID and that signature: macOS ties Screen Recording and Keychain approvals to them.
 
 ## Build and release gotchas
 

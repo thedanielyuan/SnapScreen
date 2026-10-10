@@ -234,6 +234,8 @@ final class NoticeView: NSView {
   }
 }
 
+enum AnswerStatus: String { case streaming, done, stopped }
+
 enum TurnState: Equatable { case waiting, thinking, streaming, done, stopped, failed(String) }
 
 /// One exchange: an optional follow-up question, then its answer, progress, failure and actions.

@@ -519,7 +519,8 @@ final class SessionEndedView: NSView {
 if CommandLine.arguments.contains("--self-test") {
   do {
     _ = NSApplication.shared
-    let count = try runProtocolSelfTests() + runAnswerViewTests() + runSelectionViewTests() + runConversationViewTests()
+    let count = try runProtocolSelfTests() + runGeometryTests() + runAnswerViewTests() + runSelectionViewTests() +
+      runConversationViewTests()
     #if SNAPSCREEN_TEST_HOOKS
     print("Native companion self-test: \(count) checks passed (test hooks build)")
     #else

@@ -1,5 +1,19 @@
 import AppKit
 
+/// A selection as fractions of the image's width and height, from its top-left corner.
+struct NormalizedRect {
+  let x: Double
+  let y: Double
+  let width: Double
+  let height: Double
+
+  var isValid: Bool {
+    [x, y, width, height].allSatisfy { $0.isFinite } &&
+      x >= 0 && y >= 0 && width > 0 && height > 0 &&
+      x + width <= 1 && y + height <= 1
+  }
+}
+
 /// Fits an image inside `bounds`, centred, after an equal inset on every side. `maximumScale`
 /// prevents enlarging an image beyond the size it was captured at.
 func fittedImageRect(_ imageSize: CGSize, in bounds: CGRect, inset: CGFloat = 12,
