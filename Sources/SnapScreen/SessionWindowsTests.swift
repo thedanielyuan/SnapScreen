@@ -84,8 +84,9 @@ func runSessionWindowsTests() throws -> Int {
   context.setFillColor(CGColor(srgbRed: 0.2, green: 0.5, blue: 0.8, alpha: 1))
   context.fill(CGRect(x: 0, y: 0, width: 64, height: 40))
   let frozen = FrozenScreen(image: context.makeImage()!, displayID: displayID)
-  func snip() -> SessionWindows? {
-    let session = controller.start { frozen }
+  func snip(_ screen: FrozenScreen? = nil) -> SessionWindows? {
+    let capture = screen ?? frozen
+    let session = controller.start { capture }
     guard waitUntil({ snips.sessions.last?.session === session && snips.sessions.last?.overlay != nil }) else { return nil }
     return snips.sessions.last
   }
@@ -117,8 +118,16 @@ func runSessionWindowsTests() throws -> Int {
   try check(replaced.session.phase == .ended && replaced.overlay == nil && snips.sessions.count == 1,
     "a new snip replaces the unfinished selection and closes its overlay")
 
-  // Selecting opens the conversation beside the selection and asks for the first answer.
-  try check(select(windows), "the first answer arrives")
+  // Selecting opens the conversation beside the selection and asks for the first answer. The
+  // thumbnail holds the crop's place until it arrives.
+  windows.selectionView?.selection = CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
+  windows.selectionView?.confirm()
+  let reserved = windows.conversation?.thumbnail.frame ?? .zero
+  try check(windows.conversation?.thumbnail.isHidden == false && windows.conversation?.thumbnail.screenshot == nil &&
+    reserved.width > 0, "the thumbnail holds the crop's place before it arrives")
+  try check(waitUntil { windows.conversation?.latestTurn?.state == .done }, "the first answer arrives")
+  try check(windows.conversation?.thumbnail.screenshot != nil && windows.conversation?.thumbnail.frame == reserved,
+    "the crop fills its place without moving the thread")
   try check(windows.overlay == nil && windows.selectionView == nil && windows.panel?.title == "SnapScreen",
     "selecting replaces the overlay with the conversation")
   try check(windows.panel.map { panel in NSScreen.screens.contains { $0.visibleFrame.contains(panel.frame) } } == true,
@@ -129,12 +138,41 @@ func runSessionWindowsTests() throws -> Int {
     windows.composer?.maximumCharacters == SnapScreenLimits.defaults.maxInputCharacters,
     "the composer accepts a follow-up within the limit")
 
+  // The conversation opens only as tall as its answer needs, and grows down with its thread.
+  guard let panel = windows.panel, let thread = windows.conversation else {
+    throw SessionWindowsTestError.failed("the conversation stays open")
+  }
+  func fitsThread() -> Bool { thread.scrollView.documentView!.frame.height <= thread.scrollView.contentSize.height + 1 }
+  let largest = panel.frameRect(forContentRect: NSRect(origin: .zero, size: SessionWindows.defaultConversationSize))
+  let top = panel.frame.maxY
+  try check(panel.frame.height < largest.height && fitsThread() && windows.fitsContent,
+    "the conversation opens only as tall as its answer needs")
+
   windows.composer?.setDraft("Why?")
   windows.composer?.submit()
   try check(windows.conversation?.turns.count == 2 && windows.composer?.draft.isEmpty == true &&
     windows.composer?.isRunning == true, "a follow-up starts a new turn")
   try check(waitUntil { windows.conversation?.latestTurn?.state == .done } && answers.questions == ["(first)", "Why?"],
     "the follow-up is answered")
+  let longQuestion = (1...30).map { "Line \($0) of a long question" }.joined(separator: "\n")
+  let shorter = panel.frame.height
+  windows.composer?.setDraft(longQuestion)
+  windows.composer?.submit()
+  try check(waitUntil { windows.conversation?.latestTurn?.state == .done } && shorter < largest.height &&
+    abs(panel.frame.height - largest.height) < 1 && abs(panel.frame.maxY - top) < 1 && !fitsThread(),
+    "a longer thread grows it down to its largest, then scrolls")
+
+  // Resizing it yourself stops the fitting, and later conversations take the size you chose.
+  windows.windowWillStartLiveResize(Notification(name: NSWindow.willStartLiveResizeNotification, object: panel))
+  panel.setFrame(NSRect(x: panel.frame.minX, y: panel.frame.maxY - 420, width: 400, height: 420), display: false)
+  windows.windowDidEndLiveResize(Notification(name: NSWindow.didEndLiveResizeNotification, object: panel))
+  let chosen = panel.contentRect(forFrameRect: panel.frame).size
+  try check(!windows.fitsContent && snips.chosenSize.size == chosen, "resizing a conversation keeps its size for the next")
+  let resized = panel.frame
+  windows.composer?.setDraft(longQuestion)
+  windows.composer?.submit()
+  try check(waitUntil { windows.conversation?.latestTurn?.state == .done } && panel.frame == resized,
+    "a conversation you resized keeps its size")
 
   answers.holds = true
   windows.composer?.setDraft("Hold on")
@@ -148,6 +186,8 @@ func runSessionWindowsTests() throws -> Int {
   windows.conversation?.onRetry?()
   try check(waitUntil { windows.conversation?.latestTurn?.state == .done } &&
     windows.conversation?.latestTurn?.answer.renderedText == "Answer to Hold on", "Retry asks again")
+  try check(answers.questions == ["(first)", "Why?", longQuestion, longQuestion, "Hold on", "Hold on"],
+    "each request asks its own question")
 
   slot.key = nil
   windows.composer?.setDraft("No key")
@@ -166,6 +206,30 @@ func runSessionWindowsTests() throws -> Int {
   try check(windows.session.phase == .ended && windows.panel == nil && snips.sessions.isEmpty,
     "closing the conversation ends the session")
 
+  // A scroller that comes and goes as the conversation grows changes how wide its thread is, so how
+  // its text wraps and how tall its thumbnail is. It still ends up fitting. This conversation opens
+  // at the default size, whose height holds its whole thread, rather than the size chosen above.
+  let keptSize = snips.chosenSize.size
+  snips.chosenSize.size = nil
+  let largeContext = CGContext(data: nil, width: 1800, height: 1000, bitsPerComponent: 8, bytesPerRow: 0,
+    space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue)!
+  largeContext.setFillColor(CGColor(srgbRed: 0.2, green: 0.5, blue: 0.8, alpha: 1))
+  largeContext.fill(CGRect(x: 0, y: 0, width: 1800, height: 1000))
+  guard let scrolling = snip(FrozenScreen(image: largeContext.makeImage()!, displayID: displayID)) else {
+    throw SessionWindowsTestError.failed("a snip of a large display")
+  }
+  scrolling.selectionView?.selection = CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
+  scrolling.selectionView?.confirm()
+  scrolling.conversation?.scrollView.scrollerStyle = .legacy
+  try check(waitUntil { scrolling.conversation?.latestTurn?.state == .done }, "the large snip is answered")
+  scrolling.composer?.setDraft("Why is that?\nAnd what about this?")
+  scrolling.composer?.submit()
+  try check(waitUntil { scrolling.conversation?.latestTurn?.state == .done } &&
+    scrolling.conversation.map { $0.scrollView.documentView!.frame.height <= $0.scrollView.contentSize.height + 1 } == true,
+    "a conversation whose scroller came and went still fits its thread")
+  scrolling.panel?.performClose(nil)
+  snips.chosenSize.size = keptSize
+
   // Notices for snips that fail before they have a window.
   controller.start { throw CaptureError("The display was disconnected.") }
   try check(waitUntil { notices == ["The display was disconnected."] } && snips.sessions.isEmpty,
@@ -175,6 +239,9 @@ func runSessionWindowsTests() throws -> Int {
     guard let windows = snip(), select(windows) else { throw SessionWindowsTestError.failed("an answered snip") }
     open.append(windows)
   }
+  let next = open[0].panel.map { $0.contentRect(forFrameRect: $0.frame).size }
+  try check(next.map { $0.width == chosen.width && $0.height <= chosen.height } == true && open[0].fitsContent,
+    "a later conversation opens at the width you chose, and fits its thread up to your height")
   try check(controller.start { frozen } == nil && notices.last == "Close a SnapScreen window before starting another snip.",
     "a fifth snip asks for a window to close")
   for windows in open { windows.panel?.performClose(nil) }

@@ -76,6 +76,9 @@ final class SelectionView: NSView {
     return (left, top, right - left, bottom - top)
   }
 
+  /// The selection's size in screenshot pixels: the crop's size before any limit shrinks it.
+  var selectedPixelSize: CGSize? { pixelBounds.map { CGSize(width: $0.width, height: $0.height) } }
+
   var selectionSummary: String {
     guard image != nil else { return "No screenshot available." }
     guard let pixels = pixelBounds else { return "No region selected." }
