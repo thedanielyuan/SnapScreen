@@ -7,6 +7,9 @@ private final class ThreadDocumentView: NSView {
 /// The accepted crop at the top of the thread. Pressing it opens the larger preview.
 final class ThumbnailButton: CompanionButton {
   var screenshot: NSImage? { didSet { needsDisplay = true } }
+  /// The crop's size in pixels, known once the region is selected. The thumbnail takes this size at
+  /// once and keeps it, so the thread doesn't shift when the crop arrives.
+  var reservedSize: CGSize?
 
   init(target: AnyObject?, action: Selector?) {
     super.init(frame: .zero)
@@ -24,9 +27,9 @@ final class ThumbnailButton: CompanionButton {
 
   /// Fits the screenshot within the thread, never wider than 62% of it or taller than 150 points.
   func size(for width: CGFloat) -> NSSize {
-    guard let image = screenshot, image.size.width > 0, image.size.height > 0 else { return .zero }
-    let scale = min(min(width * 0.62, 300) / image.size.width, 150 / image.size.height, 1)
-    return NSSize(width: max(24, (image.size.width * scale).rounded()), height: max(24, (image.size.height * scale).rounded()))
+    guard let size = reservedSize ?? screenshot?.size, size.width > 0, size.height > 0 else { return .zero }
+    let scale = min(min(width * 0.62, 300) / size.width, 150 / size.height, 1)
+    return NSSize(width: max(24, (size.width * scale).rounded()), height: max(24, (size.height * scale).rounded()))
   }
 
   /// A very thin crop keeps a usable button; the image itself keeps its proportions.
@@ -418,8 +421,10 @@ final class TurnView: NSView {
   }
 }
 
-/// The scrolling thread: screenshot, answers, follow-ups, progress and failures. Reading above the
-/// bottom keeps its position while text streams in; asking a question scrolls it into view.
+/// The scrolling thread: screenshot, answers, follow-ups, progress and failures. Streaming text is
+/// followed until the newest exchange's start reaches the top, which then stays in view as the rest
+/// arrives below; scrolling to the bottom follows again. Reading elsewhere keeps its position, and
+/// asking a question scrolls it into view.
 final class ConversationView: NSView {
   let scrollView = NSScrollView(frame: .zero)
   private let document = ThreadDocumentView(frame: .zero)
@@ -437,10 +442,14 @@ final class ConversationView: NSView {
   var actionsEnabled = true {
     didSet {
       turns.forEach { $0.actionsEnabled = actionsEnabled }
-      thumbnail.isEnabled = actionsEnabled
+      thumbnail.isEnabled = actionsEnabled && thumbnail.screenshot != nil
     }
   }
+  /// The thread's height when nothing is scrolled out of view, as last laid out.
+  private(set) var contentHeight: CGFloat = 0
   static let horizontalPadding: CGFloat = 18
+  /// Above the first item and below the last, and above an exchange held at the top.
+  static let verticalPadding: CGFloat = 16
   static let followThreshold: CGFloat = 24
 
   var latestTurn: TurnView? { turns.last }
@@ -484,9 +493,19 @@ final class ConversationView: NSView {
 
   required init?(coder: NSCoder) { nil }
 
+  /// Holds the thumbnail's place at the crop's size, in pixels, until `setScreenshot` fills it.
+  func reserveScreenshot(size: CGSize) {
+    thumbnail.reservedSize = size
+    thumbnail.isHidden = false
+    thumbnail.isEnabled = false
+    relayout(followBottom: false)
+  }
+
   func setScreenshot(_ image: NSImage?) {
     thumbnail.screenshot = image
+    if image == nil { thumbnail.reservedSize = nil }
     thumbnail.isHidden = image == nil
+    thumbnail.isEnabled = actionsEnabled && image != nil
     relayout(followBottom: false)
   }
 
@@ -572,8 +591,8 @@ final class ConversationView: NSView {
     latestTurn?.isLatest = true
   }
 
-  /// Following the bottom pauses only while the reader is selecting text in the thread; text
-  /// views keep an inactive selection after focus moves on, which must not stop following.
+  /// Following pauses only while the reader is selecting text in the thread; text views keep an
+  /// inactive selection after focus moves on, which must not stop following.
   var hasSelection: Bool {
     guard let text = window?.firstResponder as? NSTextView, text.isDescendant(of: document) else { return false }
     return text.selectedRange().length > 0
@@ -598,7 +617,7 @@ final class ConversationView: NSView {
     scrollView.tile()
     let width = max(1, scrollView.contentSize.width)
     let inner = max(1, width - Self.horizontalPadding * 2)
-    var y: CGFloat = 16
+    var y = Self.verticalPadding
     if !thumbnail.isHidden {
       let size = thumbnail.size(for: inner)
       thumbnail.frame = NSRect(x: width - Self.horizontalPadding - size.width, y: y, width: size.width, height: size.height)
@@ -609,10 +628,22 @@ final class ConversationView: NSView {
       turn.frame = NSRect(x: Self.horizontalPadding, y: y, width: inner, height: height)
       y += height + (index == turns.count - 1 ? 0 : 22)
     }
-    y += 16
+    y += Self.verticalPadding
+    contentHeight = y
     document.frame = NSRect(x: 0, y: 0, width: width, height: max(scrollView.contentSize.height, y))
     let maximum = max(0, document.frame.height - scrollView.contentSize.height)
-    scrollView.contentView.scroll(to: NSPoint(x: 0, y: follow ? maximum : min(position.y, maximum)))
+    // Following stops where the newest exchange starts at the top, so its first lines stay in view
+    // while the rest streams in below. A reader who scrolls on past that is followed to the bottom.
+    let start = turns.last.map { max(0, $0.frame.minY - Self.verticalPadding) } ?? maximum
+    let target: CGFloat
+    if scrollToBottom {
+      target = min(maximum, start)
+    } else if follow {
+      target = position.y > start + 1 ? maximum : min(maximum, start)
+    } else {
+      target = min(position.y, maximum)
+    }
+    scrollView.contentView.scroll(to: NSPoint(x: 0, y: target))
     scrollView.reflectScrolledClipView(scrollView.contentView)
   }
 
@@ -666,6 +697,7 @@ final class ConversationView: NSView {
     }
     turns.removeAll()
     thumbnail.screenshot = nil
+    thumbnail.reservedSize = nil
     thumbnail.isHidden = true
     thumbnail.target = nil
     thumbnail.action = nil

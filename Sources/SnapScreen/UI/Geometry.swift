@@ -72,6 +72,34 @@ func windowFrame(size: CGSize, beside region: CGRect?, in visible: CGRect, gap: 
   return frame(visible.maxX - gap - width, visible.midY - height / 2)
 }
 
+/// Where a window opens while it's only `height` tall, when `largest` is the frame `windowFrame`
+/// gave it at its largest size, so it can grow there. Beside the region, it's level with the
+/// region's top, as `windowFrame` places a window that tall; above the region, it keeps the bottom
+/// edge; otherwise it keeps the top edge.
+func openingFrame(_ largest: CGRect, height: CGFloat, beside region: CGRect?, in visible: CGRect) -> CGRect {
+  let height = min(height, largest.height)
+  let y: CGFloat
+  if let region = region, largest.minY >= region.maxY {
+    y = largest.minY
+  } else if let region = region, largest.maxX <= region.minX || largest.minX >= region.maxX {
+    y = min(max(region.maxY - height, visible.minY), visible.maxY - height).rounded()
+  } else {
+    y = largest.maxY - height
+  }
+  return CGRect(x: largest.minX, y: y, width: largest.width, height: height)
+}
+
+/// Grows a window's frame to `height`, at most `maximumHeight`, and never shrinks it. It grows
+/// down from its top edge, or up from its bottom edge, then the other way at the screen's edge.
+func grownFrame(_ frame: CGRect, toHeight height: CGFloat, maximumHeight: CGFloat, upward: Bool = false,
+  in visible: CGRect) -> CGRect {
+  let target = min(height, maximumHeight, visible.height)
+  guard target > frame.height else { return frame }
+  let y = upward ? frame.minY : frame.maxY - target
+  return CGRect(x: frame.minX, y: min(max(y, visible.minY), visible.maxY - target), width: frame.width,
+    height: target)
+}
+
 /// The screen the user is working on: the one under the pointer that invoked SnapScreen.
 func screenUnderPointer() -> NSScreen? {
   let point = NSEvent.mouseLocation

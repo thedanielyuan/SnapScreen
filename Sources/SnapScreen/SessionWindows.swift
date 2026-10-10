@@ -6,6 +6,7 @@ import SnapScreenCore
 final class SnipWindows: SessionControllerDelegate {
   let controller: SessionController
   let shields = PointerShieldController()
+  let chosenSize = ChosenConversationSize()
   private(set) var sessions: [SessionWindows] = []
   private let showNotice: (String) -> Void
   private let present: @MainActor (NSWindow) -> Void
@@ -24,7 +25,7 @@ final class SnipWindows: SessionControllerDelegate {
     if let windows = sessions.first(where: { $0.session === session }) {
       windows.handle(event)
     } else if case .captured = event {
-      let windows = SessionWindows(session: session, shields: shields, present: present)
+      let windows = SessionWindows(session: session, shields: shields, chosenSize: chosenSize, present: present)
       windows.onClose = { [weak self, weak windows] in self?.closed(windows) }
       sessions.append(windows)
       windows.handle(event)
@@ -46,12 +47,26 @@ final class SnipWindows: SessionControllerDelegate {
   }
 }
 
+/// The size you last gave a conversation by resizing it. Later conversations open at its width and
+/// grow no taller than its height. It's kept in memory only, so it lasts until SnapScreen quits.
+final class ChosenConversationSize {
+  var size: NSSize?
+}
+
 /// One session's windows: the overlay over its frozen display, then its conversation beside the
 /// selection and the screenshot preview. None of them activates SnapScreen, so the app you snip
-/// keeps focus, and Escape and Command-W close on key release.
+/// keeps focus, and Escape and Command-W close on key release. The conversation opens small and
+/// grows to fit its thread until you resize it.
 @MainActor
 final class SessionWindows: NSObject, NSWindowDelegate {
   static let endedMessage = "Snip again to start a new capture."
+  /// A conversation's largest content size, until you choose one by resizing a conversation.
+  static let defaultConversationSize = NSSize(width: 460, height: 560)
+  /// The smallest content size, which a conversation opens at and can be resized to.
+  static let minimumConversationSize = NSSize(width: 340, height: 280)
+  /// Between the thread and the follow-up field, and from the field to the panel's edges.
+  private static let composerGap: CGFloat = 8
+  private static let composerMargin: CGFloat = 14
 
   let session: SnipSession
   /// Called once every window has closed.
@@ -64,11 +79,22 @@ final class SessionWindows: NSObject, NSWindowDelegate {
   private(set) var composer: ComposerView?
   private var screenshot: NSImage?
   private let shields: PointerShieldController
+  private let chosenSize: ChosenConversationSize
   private let present: @MainActor (NSWindow) -> Void
+  /// The conversation grows to fit its thread and draft until you resize it yourself.
+  private(set) var fitsContent = true
+  /// How tall the conversation may grow: its frame at its largest, where it was placed.
+  private var largestHeight: CGFloat = 0
+  /// Whether it opened above the selection, so it grows upward, away from it.
+  private var growsUpward = false
+  /// The visible frame of the display it opens on, which fitting uses until it's on screen.
+  private var openingVisibleFrame = NSRect.zero
 
-  init(session: SnipSession, shields: PointerShieldController, present: @escaping @MainActor (NSWindow) -> Void) {
+  init(session: SnipSession, shields: PointerShieldController, chosenSize: ChosenConversationSize,
+    present: @escaping @MainActor (NSWindow) -> Void) {
     self.session = session
     self.shields = shields
+    self.chosenSize = chosenSize
     self.present = present
   }
 
@@ -96,6 +122,7 @@ final class SessionWindows: NSObject, NSWindowDelegate {
       return
     }
     updateControls()
+    fitPanel()
   }
 
   private func showOverlay(_ frozen: FrozenScreen) {
@@ -125,9 +152,10 @@ final class SessionWindows: NSObject, NSWindowDelegate {
     guard let window = overlay, let view = selectionView,
       session.select(CGRect(x: rect.x, y: rect.y, width: rect.width, height: rect.height)) else { return }
     let anchor = view.selectionDisplayRect.map { window.convertToScreen(view.convert($0, to: nil)) }
+    let cropSize = view.selectedPixelSize
     let screen = window.screen
     releaseOverlay()
-    showConversation(beside: anchor, on: screen)
+    showConversation(beside: anchor, on: screen, cropSize: cropSize)
   }
 
   private func cancelSelection() {
@@ -148,13 +176,20 @@ final class SessionWindows: NSObject, NSWindowDelegate {
     overlay = nil
   }
 
-  private func showConversation(beside anchor: CGRect?, on screen: NSScreen?) {
+  /// `cropSize`, the selection in pixels, holds the thumbnail's place until the crop arrives.
+  private func showConversation(beside anchor: CGRect?, on screen: NSScreen?, cropSize: CGSize?) {
     let screen = screen ?? screenUnderPointer()
     let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
-    let window = CompanionPanel.make(title: "SnapScreen", contentSize: NSSize(width: 460, height: 560),
-      minimumSize: NSSize(width: 340, height: 280), media: false)
+    let window = CompanionPanel.make(title: "SnapScreen", contentSize: chosenSize.size ?? Self.defaultConversationSize,
+      minimumSize: Self.minimumConversationSize, media: false)
     window.delegate = self
-    window.setFrame(windowFrame(size: window.frame.size, beside: anchor, in: visible), display: false)
+    // Placed at its largest, so it has room to grow, but opened at its smallest.
+    let largest = windowFrame(size: window.frame.size, beside: anchor, in: visible)
+    let smallest = window.frameRect(forContentRect: NSRect(origin: .zero, size: Self.minimumConversationSize)).height
+    window.setFrame(openingFrame(largest, height: smallest, beside: anchor, in: visible), display: false)
+    largestHeight = largest.height
+    growsUpward = anchor.map { largest.minY >= $0.maxY } ?? false
+    openingVisibleFrame = visible
     let root = NSView()
     window.contentView = root
     let thread = ConversationView()
@@ -165,7 +200,10 @@ final class SessionWindows: NSObject, NSWindowDelegate {
     input.translatesAutoresizingMaskIntoConstraints = false
     input.onSubmit = { [weak self] text in self?.ask(text) }
     input.onStop = { [weak self] in self?.stopAnswer() }
-    input.onChange = { [weak self] in self?.updateControls() }
+    input.onChange = { [weak self] in
+      self?.updateControls()
+      self?.fitPanel()
+    }
     thread.focusFallback = { [weak input] in input?.textView }
     root.addSubview(thread)
     root.addSubview(input)
@@ -173,16 +211,18 @@ final class SessionWindows: NSObject, NSWindowDelegate {
       thread.leadingAnchor.constraint(equalTo: root.leadingAnchor),
       thread.trailingAnchor.constraint(equalTo: root.trailingAnchor),
       thread.topAnchor.constraint(equalTo: root.topAnchor),
-      thread.bottomAnchor.constraint(equalTo: input.topAnchor, constant: -8),
-      input.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 14),
-      input.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -14),
-      input.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -14),
+      thread.bottomAnchor.constraint(equalTo: input.topAnchor, constant: -Self.composerGap),
+      input.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: Self.composerMargin),
+      input.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -Self.composerMargin),
+      input.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -Self.composerMargin),
     ])
     panel = window
     conversation = thread
     composer = input
+    if let size = cropSize { thread.reserveScreenshot(size: size) }
     thread.beginTurn(question: nil)
     updateControls()
+    fitPanel()
     present(window)
     shields.place(below: window)
     window.makeFirstResponder(input.textView)
@@ -198,12 +238,33 @@ final class SessionWindows: NSObject, NSWindowDelegate {
     composer.canSubmit = session.canAsk
   }
 
+  /// Grows the conversation to show its whole thread and draft, up to its largest size, until you
+  /// resize it yourself. It never shrinks, so a Retry or a sent draft doesn't make it jump.
+  private func fitPanel() {
+    guard fitsContent, let window = panel, let root = window.contentView, let thread = conversation,
+      let input = composer else { return }
+    let visible = window.isVisible ? (window.screen?.visibleFrame ?? openingVisibleFrame) : openingVisibleFrame
+    // Growing can hide the thread's scroller, which widens the thread: its text rewraps and its
+    // thumbnail grows. So it measures again until the panel holds still, a pass or two at most.
+    for _ in 0..<4 {
+      root.layoutSubtreeIfNeeded()
+      let content = thread.contentHeight + Self.composerGap + input.intrinsicContentSize.height + Self.composerMargin
+      let height = window.frameRect(forContentRect: NSRect(x: 0, y: 0, width: 1, height: ceil(content))).height
+      let frame = grownFrame(window.frame, toHeight: height, maximumHeight: largestHeight, upward: growsUpward,
+        in: visible)
+      guard frame != window.frame else { return }
+      window.setFrame(frame, display: false)
+    }
+    root.layoutSubtreeIfNeeded()
+  }
+
   private func ask(_ text: String) {
     guard session.ask(text) else { return }
     conversation?.removeAbandonedTurn()
     conversation?.beginTurn(question: text)
     composer?.clearDraft()
     updateControls()
+    fitPanel()
   }
 
   private func stopAnswer() {
@@ -267,11 +328,22 @@ final class SessionWindows: NSObject, NSWindowDelegate {
   }
 
   func windowWillStartLiveResize(_ notification: Notification) {
+    // Resizing the conversation yourself stops it fitting its thread.
+    if (notification.object as? NSWindow) === panel { fitsContent = false }
     shields.liveResizeStarted(notification.object as? NSWindow)
   }
 
   func windowDidEndLiveResize(_ notification: Notification) {
+    if let window = notification.object as? NSWindow, window === panel {
+      chosenSize.size = window.contentRect(forFrameRect: window.frame).size
+    }
     shields.liveResizeEnded()
+  }
+
+  /// Zooming the conversation is resizing it too, but it doesn't choose the next one's size.
+  func windowShouldZoom(_ window: NSWindow, toFrame newFrame: NSRect) -> Bool {
+    if window === panel { fitsContent = false }
+    return true
   }
 
   /// The session ended on its own, so an open conversation keeps only a notice.

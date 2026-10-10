@@ -31,6 +31,20 @@ func runConversationViewTests() throws -> Int {
   thread.setScreenshot(NSImage(size: NSSize(width: 960, height: 270)))
   thread.thumbnail.performClick(nil)
   try check(previews == 1, "thumbnail opens the preview")
+  // The selection's size holds the thumbnail's place, so the crop, fitted to the limits and a pixel
+  // or so different, fills it without moving the thread.
+  let placeholder = ConversationView(frame: NSRect(x: 0, y: 0, width: 460, height: 300))
+  placeholder.reserveScreenshot(size: CGSize(width: 960, height: 270))
+  placeholder.beginTurn(question: nil)
+  let reserved = placeholder.thumbnail.frame
+  let pendingTop = placeholder.latestTurn!.frame.minY
+  try check(!placeholder.thumbnail.isHidden && !placeholder.thumbnail.isEnabled && reserved.width > 0 &&
+    placeholder.thumbnail.screenshot == nil, "the thumbnail holds the crop's place, inactive, until it arrives")
+  placeholder.setScreenshot(NSImage(size: NSSize(width: 958, height: 269)))
+  try check(placeholder.thumbnail.frame == reserved && placeholder.latestTurn!.frame.minY == pendingTop &&
+    placeholder.thumbnail.isEnabled, "the crop fills its place without moving the thread")
+  placeholder.clear()
+  try check(placeholder.thumbnail.reservedSize == nil && placeholder.thumbnail.isHidden, "clear releases the place")
   thread.setThinking()
   try check(first.state == .thinking && first.pending.thinking, "thinking keeps the pending indicator")
   first.pending.since = Date(timeIntervalSinceNow: -2)
@@ -124,20 +138,30 @@ func runConversationViewTests() throws -> Int {
   thread.actionsEnabled = false
   try check(!first.copyButton.isEnabled && !thread.thumbnail.isEnabled, "an ended session disables copy and preview")
 
-  // Reading position: retained above the bottom, followed at the bottom, and a new question shows.
+  // Reading position: a long answer is followed until its start reaches the top, then held there.
+  // The reader's own position is kept, the bottom is followed once the reader goes there, and a new
+  // question shows.
   let reader = ConversationView(frame: NSRect(x: 0, y: 0, width: 460, height: 240))
+  reader.setScreenshot(NSImage(size: NSSize(width: 960, height: 270)))
   reader.beginTurn(question: nil)
   let long = (1...80).map { "Line \($0) of the answer." }.joined(separator: "\n")
+  reader.updateAnswer("Line 1 of the answer.", status: .streaming)
   reader.updateAnswer(long, status: .streaming)
   let scroll = reader.scrollView
+  func start(of turn: TurnView) -> CGFloat { turn.frame.minY - ConversationView.verticalPadding }
   try check(scroll.documentView!.frame.height > scroll.contentSize.height, "long answer scrolls")
-  scroll.contentView.scroll(to: NSPoint(x: 0, y: 90))
+  try check(start(of: reader.turns[0]) > 0 && abs(scroll.contentView.bounds.minY - start(of: reader.turns[0])) < 1,
+    "a long answer is followed until its start reaches the top")
   reader.updateAnswer(long + "\nMore.", status: .streaming)
-  try check(abs(scroll.contentView.bounds.minY - 90) < 1, "streaming preserves the reader's position")
+  try check(abs(scroll.contentView.bounds.minY - start(of: reader.turns[0])) < 1,
+    "its start stays in view as the rest streams in")
+  scroll.contentView.scroll(to: NSPoint(x: 0, y: 150))
+  reader.updateAnswer(long + "\nMore.\nStill more.", status: .streaming)
+  try check(abs(scroll.contentView.bounds.minY - 150) < 1, "streaming preserves the reader's position")
   scroll.contentView.scroll(to: NSPoint(x: 0, y: scroll.documentView!.frame.height - scroll.contentSize.height))
-  reader.updateAnswer(long + "\nMore.\nEven more.", status: .done)
+  reader.updateAnswer(long + "\nMore.\nStill more.\nEven more.", status: .done)
   try check(abs(scroll.contentView.bounds.maxY - scroll.documentView!.frame.height) < 1,
-    "streaming follows the bottom when the reader is there")
+    "streaming follows the bottom once the reader goes there")
   scroll.contentView.scroll(to: .zero)
   reader.beginTurn(question: "Next?")
   try check(abs(scroll.contentView.bounds.maxY - scroll.documentView!.frame.height) < 1,
@@ -145,8 +169,9 @@ func runConversationViewTests() throws -> Int {
   // A selection left behind in an earlier answer must not stop following once focus moves on.
   reader.turns[0].answer.segmentViews[0].textView.setSelectedRange(NSRange(location: 0, length: 5))
   reader.updateAnswer(long, status: .streaming)
-  try check(!reader.hasSelection && abs(scroll.contentView.bounds.maxY - scroll.documentView!.frame.height) < 1,
+  try check(!reader.hasSelection && abs(scroll.contentView.bounds.minY - start(of: reader.turns[1])) < 1,
     "an inactive selection elsewhere does not pause following")
+  try check(reader.contentHeight == scroll.documentView!.frame.height, "the thread reports its unscrolled height")
 
   // Focus: removing the focused text falls back to the composer.
   let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 400), styleMask: [.borderless],
@@ -409,5 +434,28 @@ func runConversationViewTests() throws -> Int {
     "without a selection the window is centred")
   try check(windowFrame(size: CGSize(width: 2000, height: 1200), beside: nil, in: visible) == visible,
     "a window never exceeds the visible screen")
+
+  // The conversation opens small where it was placed at its largest, then grows away from the
+  // selection, and the other way once the screen's edge stops it.
+  func opening(_ region: CGRect) -> CGRect {
+    openingFrame(windowFrame(size: size, beside: region, in: visible), height: 300, beside: region, in: visible)
+  }
+  try check(opening(CGRect(x: 100, y: 500, width: 300, height: 200)) == CGRect(x: 416, y: 400, width: 460, height: 300),
+    "beside its selection, it opens level with the selection's top")
+  try check(opening(CGRect(x: 100, y: 40, width: 300, height: 100)) == CGRect(x: 416, y: 0, width: 460, height: 300),
+    "near the bottom of the screen, it opens on the screen's edge")
+  try check(opening(CGRect(x: 0, y: 700, width: 1440, height: 150)) == CGRect(x: 490, y: 384, width: 460, height: 300),
+    "below a wide selection, it opens just below it")
+  try check(opening(CGRect(x: 0, y: 40, width: 1440, height: 100)) == CGRect(x: 490, y: 156, width: 460, height: 300),
+    "above a wide selection, it opens just above it")
+  let small = CGRect(x: 100, y: 500, width: 460, height: 300)
+  try check(grownFrame(small, toHeight: 400, maximumHeight: 600, in: visible) ==
+    CGRect(x: 100, y: 400, width: 460, height: 400), "it grows down, keeping its top edge")
+  try check(grownFrame(small, toHeight: 900, maximumHeight: 600, in: visible).height == 600, "up to its largest")
+  try check(grownFrame(small, toHeight: 200, maximumHeight: 600, in: visible) == small, "and never shrinks")
+  try check(grownFrame(CGRect(x: 100, y: 50, width: 460, height: 300), toHeight: 500, maximumHeight: 600, in: visible) ==
+    CGRect(x: 100, y: 0, width: 460, height: 500), "stopped by the bottom of the screen, it grows up")
+  try check(grownFrame(small, toHeight: 400, maximumHeight: 600, upward: true, in: visible) ==
+    CGRect(x: 100, y: 500, width: 460, height: 400), "above its selection, it grows up from its bottom edge")
   return count
 }

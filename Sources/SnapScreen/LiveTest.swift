@@ -175,6 +175,10 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
     if answers == 1 {
       check(turn.answer.renderedText == ScriptedAPI.firstAnswer && !thread.thumbnail.isHidden,
         "the first answer and the screenshot's thumbnail show")
+      let scroll = thread.scrollView
+      check(scroll.documentView!.frame.height <= scroll.contentSize.height + 1 &&
+        panel.contentLayoutRect.height < SessionWindows.defaultConversationSize.height,
+        "the conversation is only as tall as its answer needs")
       if let selection = selectionOnScreen, let screen = screen,
         screen.visibleFrame.maxX - selection.maxX > panel.frame.width + 16 {
         check(panel.frame.minX >= selection.maxX, "the conversation opens beside the selection")
