@@ -6,7 +6,7 @@ enum Theme {
   /// The focused field and its caret, Send or Stop when it can act, and Copy under the pointer or
   /// once it copies.
   static let accent = NSColor(srgbRed: 34 / 255, green: 211 / 255, blue: 238 / 255, alpha: 1)
-  /// Glyphs drawn on the accent, such as Send's arrow.
+  /// Icons drawn on the accent, such as Send's arrow.
   static let onAccent = gray(0x0D)
   static let pointerSelection = NSColor(srgbRed: 59 / 255, green: 130 / 255, blue: 246 / 255, alpha: 1)
   static let keyboardSelection = NSColor(srgbRed: 167 / 255, green: 139 / 255, blue: 250 / 255, alpha: 1)
@@ -21,6 +21,8 @@ enum Theme {
   static let bubble = gray(0x26)
   static let hover = NSColor.white.withAlphaComponent(0.09)
   static let idleControl = NSColor.white.withAlphaComponent(0.12)
+  /// Send's arrow and Stop's square on `idleControl`, faint until they can act.
+  static let idleIcon = NSColor.white.withAlphaComponent(0.06)
 
   /// An opaque sRGB grey from its 8-bit level, so 0x0D is #0D0D0D.
   private static func gray(_ level: CGFloat) -> NSColor {
@@ -280,14 +282,31 @@ final class SendButton: CompanionButton {
     let circle = NSBezierPath(ovalIn: bounds.insetBy(dx: 0.5, dy: 0.5))
     (isEnabled ? Theme.accent.withAlphaComponent(isHighlighted ? 0.82 : 1) : Theme.idleControl).setFill()
     circle.fill()
-    let glyph = mode == .send ? "arrow.up" : "stop.fill"
-    let color: NSColor = isEnabled ? Theme.onAccent : .tertiaryLabelColor
-    // Scaled with the button: 13 and 10 points in a 28-point circle.
-    let pointSize = (bounds.height * (mode == .send ? 13 : 10) / 28).rounded()
-    guard let image = Theme.symbol(glyph, size: pointSize, weight: .bold, color: color) else { return }
-    let size = image.size
-    image.draw(in: NSRect(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2,
-      width: size.width, height: size.height))
+    (isEnabled ? Theme.onAccent : Theme.idleIcon).set()
+    // Paths rather than SF Symbols, whose images sit on a text baseline, so their ink is off centre.
+    // Each icon is symmetric about the circle's centre, in points of a 32-point circle with y up: an
+    // arrow 12 wide and 14 tall with 2-point strokes, or a 10-point square.
+    let unit = bounds.height / 32
+    func point(_ x: CGFloat, _ y: CGFloat) -> NSPoint {
+      NSPoint(x: bounds.midX + x * unit, y: bounds.midY + (isFlipped ? -y : y) * unit)
+    }
+    switch mode {
+    case .send:
+      let arrow = NSBezierPath()
+      arrow.move(to: point(0, -6))
+      arrow.line(to: point(0, 6))
+      arrow.move(to: point(-5, 1))
+      arrow.line(to: point(0, 6))
+      arrow.line(to: point(5, 1))
+      arrow.lineWidth = 2 * unit
+      arrow.lineCapStyle = .round
+      arrow.lineJoinStyle = .round
+      arrow.stroke()
+    case .stop:
+      let side = 10 * unit
+      NSBezierPath(roundedRect: NSRect(x: bounds.midX - side / 2, y: bounds.midY - side / 2, width: side, height: side),
+        xRadius: 2 * unit, yRadius: 2 * unit).fill()
+    }
   }
 
   override func drawFocusRingMask() { NSBezierPath(ovalIn: bounds).fill() }

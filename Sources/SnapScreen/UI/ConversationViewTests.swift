@@ -296,6 +296,42 @@ func runConversationViewTests() throws -> Int {
   layoutRoot.layoutSubtreeIfNeeded()
   try check(besideLastLine && abs(pinned.sendButton.frame.midY - pinned.bounds.midY) < 0.5,
     "Send sits beside the last line, centred while the draft is one line")
+  // Its arrow, and Stop's square, sit at the circle's centre whether or not it can act. Rendered at
+  // 2x, the icon is whatever differs from the fill, sampled above it; the circle's edge is left out.
+  let sendButton = SendButton(target: nil, action: nil)
+  sendButton.frame.size = pinned.sendButton.frame.size
+  func iconBounds() -> NSRect? {
+    let scale: CGFloat = 2
+    guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(sendButton.bounds.width * scale),
+      pixelsHigh: Int(sendButton.bounds.height * scale), bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+      isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
+    bitmap.size = sendButton.bounds.size
+    sendButton.cacheDisplay(in: sendButton.bounds, to: bitmap)
+    guard let fill = bitmap.colorAt(x: bitmap.pixelsWide / 2, y: Int(3 * scale)) else { return nil }
+    let edge = Int(6 * scale)
+    var icon: NSRect?
+    for y in edge..<(bitmap.pixelsHigh - edge) {
+      for x in edge..<(bitmap.pixelsWide - edge) {
+        guard let color = bitmap.colorAt(x: x, y: y) else { continue }
+        let difference = abs(color.redComponent - fill.redComponent) + abs(color.greenComponent - fill.greenComponent) +
+          abs(color.blueComponent - fill.blueComponent) + abs(color.alphaComponent - fill.alphaComponent)
+        guard difference > 0.02 else { continue }
+        let pixel = NSRect(x: CGFloat(x) / scale, y: CGFloat(y) / scale, width: 1 / scale, height: 1 / scale)
+        icon = icon.map { $0.union(pixel) } ?? pixel
+      }
+    }
+    return icon
+  }
+  var iconsCentred = sendButton.frame.width == 32 && sendButton.frame.height == 32
+  for mode in [SendButton.Mode.send, .stop] {
+    for enabled in [true, false] {
+      sendButton.mode = mode
+      sendButton.isEnabled = enabled
+      let icon = iconBounds()
+      iconsCentred = iconsCentred && icon?.midX == sendButton.bounds.midX && icon?.midY == sendButton.bounds.midY
+    }
+  }
+  try check(iconsCentred, "Send is a 32-point circle with its arrow, or Stop's square, centred, enabled or not")
   pinned.clear()
   layoutWindow.contentView = nil
   composer.canSubmit = false

@@ -2,7 +2,7 @@ import AppKit
 
 /// Plain-text follow-up input with a placeholder; reports focus so its container can draw a ring.
 final class ComposerTextView: NSTextView {
-  var placeholder = "Ask a follow-up…" { didSet { needsDisplay = true } }
+  var placeholder = "Ask anything" { didSet { needsDisplay = true } }
   var onFocusChange: (() -> Void)?
 
   override func becomeFirstResponder() -> Bool {
