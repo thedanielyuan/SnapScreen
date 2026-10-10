@@ -25,14 +25,23 @@ final class ComposerTextView: NSTextView {
   override func draw(_ dirtyRect: NSRect) {
     super.draw(dirtyRect)
     guard string.isEmpty, !hasMarkedText() else { return }
-    let origin = NSPoint(x: textContainerInset.width + (textContainer?.lineFragmentPadding ?? 0), y: textContainerInset.height)
-    NSAttributedString(string: placeholder, attributes: [
-      .font: font ?? AnswerStyle.proseFont, .foregroundColor: NSColor.placeholderTextColor]).draw(at: origin)
+    // Laid out as the draft is, so the placeholder sits exactly where typing starts. String drawing
+    // places a fixed line height's extra space differently.
+    var attributes = ComposerView.attributes
+    attributes[.foregroundColor] = NSColor.placeholderTextColor
+    let storage = NSTextStorage(string: placeholder, attributes: attributes)
+    let manager = NSLayoutManager()
+    let container = NSTextContainer(size: NSSize(width: textContainer?.containerSize.width ?? bounds.width,
+      height: .greatestFiniteMagnitude))
+    container.lineFragmentPadding = textContainer?.lineFragmentPadding ?? 0
+    manager.addTextContainer(container)
+    storage.addLayoutManager(manager)
+    manager.drawGlyphs(forGlyphRange: manager.glyphRange(for: container), at: textContainerOrigin)
   }
 }
 
-/// The follow-up composer: a field that grows to six lines, and a Send button that becomes Stop
-/// while an answer is in progress. Return asks; Shift-Return or Option-Return adds a line.
+/// The follow-up composer: a field that grows to six lines, then scrolls, and a Send button that
+/// becomes Stop while an answer is in progress. Return asks; Shift-Return or Option-Return adds a line.
 final class ComposerView: NSView, NSTextViewDelegate {
   let textView = ComposerTextView(frame: .zero)
   private let scroll = NSScrollView(frame: .zero)
@@ -50,11 +59,26 @@ final class ComposerView: NSView, NSTextViewDelegate {
   private var rejectedInput = false
   override var isFlipped: Bool { true }
 
-  static let font = NSFont.systemFont(ofSize: 14)
-  static let minimumFieldHeight: CGFloat = 40
+  static let font = NSFont.systemFont(ofSize: 15)
+  static let lineHeight: CGFloat = 20
+  /// The draft's attributes, and its placeholder's: 15-point text on 20-point lines. TextKit puts a
+  /// line's extra height above the text, so it's raised until its capitals sit centred in the line,
+  /// level with the centre of Send.
+  static let attributes: [NSAttributedString.Key: Any] = {
+    let paragraph = NSMutableParagraphStyle()
+    paragraph.minimumLineHeight = lineHeight
+    paragraph.maximumLineHeight = lineHeight
+    let raise = lineHeight / 2 + font.descender - font.capHeight / 2
+    return [.font: font, .foregroundColor: NSColor.labelColor, .paragraphStyle: paragraph, .baselineOffset: raise]
+  }()
   static let maximumLines: CGFloat = 6
-  private static let buttonSize: CGFloat = 28
-  private static let textInsets = NSEdgeInsets(top: 10, left: 14, bottom: 10, right: 44)
+  private static let verticalPadding: CGFloat = 16
+  static let minimumFieldHeight = lineHeight + verticalPadding * 2
+  private static let buttonSize: CGFloat = 32
+  /// On one line the button is centred, as far from the field's right edge as from its top and bottom.
+  private static let buttonInset = (minimumFieldHeight - buttonSize) / 2
+  private static let textInsets = NSEdgeInsets(top: verticalPadding, left: 18, bottom: verticalPadding,
+    right: buttonInset + buttonSize + 10)
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -65,7 +89,8 @@ final class ComposerView: NSView, NSTextViewDelegate {
     textView.font = Self.font
     textView.textColor = .labelColor
     textView.insertionPointColor = Theme.accent
-    textView.typingAttributes = [.font: Self.font, .foregroundColor: NSColor.labelColor]
+    textView.defaultParagraphStyle = Self.attributes[.paragraphStyle] as? NSParagraphStyle
+    textView.typingAttributes = Self.attributes
     textView.isAutomaticQuoteSubstitutionEnabled = false
     textView.isAutomaticDashSubstitutionEnabled = false
     textView.isAutomaticTextReplacementEnabled = false
@@ -122,19 +147,15 @@ final class ComposerView: NSView, NSTextViewDelegate {
     textChanged()
   }
 
-  private var lineHeight: CGFloat {
-    ceil(textView.layoutManager?.defaultLineHeight(for: Self.font) ?? 17)
-  }
-
   /// The draft's height at the text view's width, before the field caps it at six lines.
   private var contentHeight: CGFloat {
-    guard let container = textView.textContainer, let manager = textView.layoutManager else { return lineHeight }
+    guard let container = textView.textContainer, let manager = textView.layoutManager else { return Self.lineHeight }
     manager.ensureLayout(for: container)
     let used = max(manager.usedRect(for: container).height, manager.extraLineFragmentRect.maxY)
-    return max(lineHeight, ceil(used))
+    return max(Self.lineHeight, ceil(used))
   }
 
-  private var textHeight: CGFloat { min(contentHeight, lineHeight * Self.maximumLines) }
+  private var textHeight: CGFloat { min(contentHeight, Self.lineHeight * Self.maximumLines) }
 
   private var fieldHeight: CGFloat {
     max(Self.minimumFieldHeight, textHeight + Self.textInsets.top + Self.textInsets.bottom)
@@ -158,7 +179,7 @@ final class ComposerView: NSView, NSTextViewDelegate {
     }
     let field = fieldRect
     let contentHeight = self.contentHeight
-    let textHeight = min(contentHeight, lineHeight * Self.maximumLines)
+    let textHeight = min(contentHeight, Self.lineHeight * Self.maximumLines)
     // A scroller only while the draft overflows the field: an always-visible one, as macOS draws
     // with a mouse attached, could otherwise linger at one line as a stub beside Send.
     let overflows = contentHeight > textHeight
@@ -168,9 +189,10 @@ final class ComposerView: NSView, NSTextViewDelegate {
     textView.minSize = NSSize(width: 0, height: textHeight)
     textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
     textView.frame.size.width = scroll.contentSize.width
+    // In the bottom-right corner, beside the last line: centred while the draft is one line.
     let size = Self.buttonSize
-    let inset = (Self.minimumFieldHeight - size) / 2
-    sendButton.frame = NSRect(x: field.maxX - inset - size, y: field.maxY - inset - size, width: size, height: size)
+    sendButton.frame = NSRect(x: field.maxX - Self.buttonInset - size, y: field.maxY - Self.buttonInset - size,
+      width: size, height: size)
     hintLabel.sizeToFit()
     hintLabel.frame = NSRect(x: 6, y: field.maxY + 4, width: max(1, bounds.width - 12), height: hintLabel.frame.height)
   }
@@ -179,7 +201,8 @@ final class ComposerView: NSView, NSTextViewDelegate {
 
   override func draw(_ dirtyRect: NSRect) {
     let field = fieldRect.insetBy(dx: 1, dy: 1)
-    let radius = min(20, field.height / 2)
+    // A capsule on one line, keeping its rounding as the field grows.
+    let radius = min(Self.minimumFieldHeight, field.height) / 2
     let shape = NSBezierPath(roundedRect: field, xRadius: radius, yRadius: radius)
     Theme.surface.setFill()
     shape.fill()

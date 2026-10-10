@@ -282,7 +282,9 @@ final class SendButton: CompanionButton {
     circle.fill()
     let glyph = mode == .send ? "arrow.up" : "stop.fill"
     let color: NSColor = isEnabled ? Theme.onAccent : .tertiaryLabelColor
-    guard let image = Theme.symbol(glyph, size: mode == .send ? 13 : 10, weight: .bold, color: color) else { return }
+    // Scaled with the button: 13 and 10 points in a 28-point circle.
+    let pointSize = (bounds.height * (mode == .send ? 13 : 10) / 28).rounded()
+    guard let image = Theme.symbol(glyph, size: pointSize, weight: .bold, color: color) else { return }
     let size = image.size
     image.draw(in: NSRect(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2,
       width: size.width, height: size.height))
