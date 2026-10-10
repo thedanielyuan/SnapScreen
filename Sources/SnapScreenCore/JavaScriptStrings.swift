@@ -14,7 +14,7 @@ let javaScriptWhitespace = CharacterSet(charactersIn:
 
 extension String {
   /// JavaScript's `trim()`.
-  var jsTrimmed: String { trimmingCharacters(in: javaScriptWhitespace) }
+  public var jsTrimmed: String { trimmingCharacters(in: javaScriptWhitespace) }
 
   /// Whether `trim()` would leave nothing.
   var isBlank: Bool { unicodeScalars.allSatisfy { javaScriptWhitespace.contains($0) } }
@@ -56,7 +56,7 @@ func normalizeLineEndings(_ text: String) -> String {
 }
 
 /// A whole number with comma grouping, like `toLocaleString()` in an English locale.
-func groupedDigits(_ value: Int) -> String {
+public func groupedDigits(_ value: Int) -> String {
   let digits = String(value.magnitude)
   var grouped = ""
   for (index, digit) in digits.enumerated() {

@@ -37,7 +37,7 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate {
   #endif
 
   func applicationDidFinishLaunching(_ notification: Notification) {
-    installEditingMenu()
+    installEditingMenu(applicationName: "SnapScreen Companion")
     // These events control only the resize shield. No input, clipboard, geometry or content logging.
     monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] event in
       guard let self = self else { return event }
@@ -73,33 +73,6 @@ final class Host: NSObject, NSApplicationDelegate, NSWindowDelegate {
       }
       DispatchQueue.main.async { self?.expire() }
     }
-  }
-
-  private func installEditingMenu() {
-    let mainMenu = NSMenu(title: "Main")
-    // AppKit reserves the first menu for the application. Keep File and Edit separate.
-    let appItem = NSMenuItem(title: "SnapScreen Companion", action: nil, keyEquivalent: "")
-    appItem.submenu = NSMenu(title: "SnapScreen Companion")
-    mainMenu.addItem(appItem)
-    let fileItem = NSMenuItem(title: "File", action: nil, keyEquivalent: "")
-    let fileMenu = NSMenu(title: "File")
-    // CompanionPanel closes on the key's release; this item documents the shortcut.
-    fileMenu.addItem(withTitle: "Close window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
-    fileItem.submenu = fileMenu
-    mainMenu.addItem(fileItem)
-    let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
-    let editMenu = NSMenu(title: "Edit")
-    editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
-    let redo = editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
-    redo.keyEquivalentModifierMask = [.command, .shift]
-    editMenu.addItem(.separator())
-    editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-    editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-    editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-    editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
-    editItem.submenu = editMenu
-    mainMenu.addItem(editItem)
-    NSApp.mainMenu = mainMenu
   }
 
   private func armTimeout(seconds: TimeInterval) {
