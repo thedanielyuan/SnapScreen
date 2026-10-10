@@ -31,7 +31,7 @@ macOS asks again after every rebuild.
   answer, or press ⇧⌘C for the newest answer and ⌥⌘C for the newest code block.
 - **Close All Conversations** in the menu bar menu closes every conversation.
 - Settings holds your API key, a Default Prompt for first answers, the advanced limits, and Open
-  at login.
+  at login. Closing it saves your changes.
 
 ## Development
 

@@ -187,6 +187,30 @@ func runSettingsWindowTests() throws -> Int {
     settings.removeKeyButton.isEnabled, "an unreadable key is reported and can still be removed")
   keys.failure = nil
 
+  // Closing saves what you changed, as Save does, and stays open to show what can't be saved.
+  let closing = SettingsWindowController(services: services)
+  let stored = { SessionSettings.load(from: defaults) }
+  let before = stored()
+  try check(!closing.hasUnsavedChanges && closing.windowShouldClose(closing.window) && closing.statusLabel.stringValue.isEmpty,
+    "unchanged Settings close without saving")
+  closing.promptView.string = "Answer briefly."
+  closing.inputCharactersField.stringValue = "500"
+  try check(closing.hasUnsavedChanges && closing.windowShouldClose(closing.window) &&
+    stored() == SessionSettings(defaultPrompt: "Answer briefly.",
+      limits: SnapScreenLimits(maxInputCharacters: 500, maxScreenshotBytes: before.limits.maxScreenshotBytes,
+        maxScreenshotDimension: before.limits.maxScreenshotDimension, maxConversationTurns: before.limits.maxConversationTurns)),
+    "closing saves an edited prompt and limit")
+  let saved = stored()
+  closing.screenshotEdgeField.stringValue = "9999"
+  try check(!closing.windowShouldClose(closing.window) && closing.statusLabel.stringValue.hasPrefix("Screenshot edge limit must") &&
+    !closing.limitsSection.isHidden && stored() == saved, "a limit that isn't allowed keeps Settings open, saving nothing")
+  closing.screenshotEdgeField.stringValue = String(saved.limits.maxScreenshotDimension)
+  closing.keyField.stringValue = "sk-ant-typed"
+  try check(closing.windowShouldClose(closing.window) && keys.key == "sk-ant-typed", "closing saves a newly typed key")
+  closing.keyField.stringValue = ""
+  try check(!closing.hasUnsavedChanges, "an emptied key field isn't a change, since Save keeps the saved key")
+  closing.window.close()
+
   try check(settings.screenRecordingLabel.stringValue == "SnapScreen needs Screen Recording permission to snip.",
     "missing Screen Recording permission is shown")
   settings.screenRecordingButton.performClick(nil)
