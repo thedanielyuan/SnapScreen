@@ -249,6 +249,19 @@ func runConversationViewTests() throws -> Int {
   layoutWindow.setContentSize(NSSize(width: 900, height: 400))
   layoutRoot.layoutSubtreeIfNeeded()
   try check(pinned.frame.height == wideHeight, "widening it again shrinks the field back")
+  // Only a draft past six lines gets a scroller, even where macOS draws scrollers always.
+  let draftScroll = pinned.textView.enclosingScrollView!
+  draftScroll.scrollerStyle = .legacy
+  pinned.setDraft("d")
+  layoutRoot.layoutSubtreeIfNeeded()
+  try check(!draftScroll.hasVerticalScroller, "a short draft has no scroller beside the button")
+  pinned.setDraft((1...9).map { "Line \($0)" }.joined(separator: "\n"))
+  layoutRoot.layoutSubtreeIfNeeded()
+  try check(draftScroll.hasVerticalScroller && draftScroll.verticalScroller?.isHidden == false,
+    "a draft past six lines scrolls")
+  pinned.setDraft("d")
+  layoutRoot.layoutSubtreeIfNeeded()
+  try check(!draftScroll.hasVerticalScroller, "the scroller goes once the draft fits again")
   pinned.clear()
   layoutWindow.contentView = nil
   composer.canSubmit = false
