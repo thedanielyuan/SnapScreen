@@ -1,9 +1,9 @@
 import AppKit
 
 /// The frozen screenshot, fitted inside its window, for selecting a region: drag and release to
-/// ask, click to cancel. Return places a keyboard selection that arrow keys
-/// move and Shift + arrow keys resize; Return again asks. All coordinates stay normalized to the
-/// fitted image, including while the window is resized.
+/// ask, click to cancel, and hold Space while dragging to move the region. Return places a keyboard
+/// selection that arrow keys move and Shift + arrow keys resize; Return again asks. All coordinates
+/// stay normalized to the fitted image, including while the window is resized.
 final class SelectionView: NSView {
   static let instruction = "Drag to select a region. Click to cancel"
   /// The keyboard selection's step and the smallest selection, in display points.
@@ -30,6 +30,10 @@ final class SelectionView: NSView {
   var onConfirm: ((NormalizedRect) -> Void)?
   var onCancel: (() -> Void)?
   private var anchor: CGPoint?
+  /// Where the pointer is during a drag, normalized to the image.
+  private var pointer: CGPoint?
+  /// While Space is held during a drag: the pointer, selection and anchor when it was pressed.
+  private var move: (pointer: CGPoint, selection: CGRect, anchor: CGPoint)?
   private var cursorTracking: NSTrackingArea?
   override var isFlipped: Bool { true }
   override var acceptsFirstResponder: Bool { true }
@@ -98,6 +102,7 @@ final class SelectionView: NSView {
     setAccessibilityRoleDescription("screenshot region selector")
     setAccessibilityLabel("Select a screen region")
     setAccessibilityHelp("Drag a region and release to ask about it, or click without dragging to cancel. " +
+      "Hold Space while dragging to move the region. " +
       "Return places a keyboard selection; arrow keys move it, Shift with arrow keys resizes it, " +
       "and Option makes one-point adjustments. Return again asks. Escape cancels.")
     var actions = [("Move left", UInt16(123), false), ("Move right", UInt16(124), false),
@@ -284,6 +289,8 @@ final class SelectionView: NSView {
     // A drag that starts in the margin is clamped to the image edge.
     let point = normalizedPoint(event)
     anchor = point
+    pointer = point
+    move = nil
     isDragging = true
     isKeyboardSelection = false
     selection = CGRect(origin: point, size: .zero)
@@ -292,6 +299,15 @@ final class SelectionView: NSView {
   override func mouseDragged(with event: NSEvent) {
     guard let anchor = anchor else { return }
     let point = normalizedPoint(event)
+    pointer = point
+    if let move = move {
+      // The selection keeps its size and follows the pointer, stopping at the image's edges.
+      let dx = min(max(point.x - move.pointer.x, -move.selection.minX), 1 - move.selection.maxX)
+      let dy = min(max(point.y - move.pointer.y, -move.selection.minY), 1 - move.selection.maxY)
+      self.anchor = CGPoint(x: move.anchor.x + dx, y: move.anchor.y + dy)
+      selection = move.selection.offsetBy(dx: dx, dy: dy)
+      return
+    }
     selection = CGRect(x: min(point.x, anchor.x), y: min(point.y, anchor.y),
       width: abs(point.x - anchor.x), height: abs(point.y - anchor.y))
   }
@@ -300,6 +316,8 @@ final class SelectionView: NSView {
     guard anchor != nil else { return }
     mouseDragged(with: event)
     anchor = nil
+    pointer = nil
+    move = nil
     isDragging = false
     // Release asks; a click or a drag under the minimum cancels, as in the tested prototype.
     if canConfirm { confirm() } else { selection = nil; onCancel?() }
@@ -353,9 +371,19 @@ final class SelectionView: NSView {
       guard anchor == nil, selection != nil else { return }
       adjustSelection(keyCode: event.keyCode, resize: event.modifierFlags.contains(.shift),
         fine: event.modifierFlags.contains(.option))
+    case 49:
+      // Holding Space during a drag moves the selection, as in macOS's own screenshot selection.
+      // It's Space rather than Option or Shift, which are often still held from the shortcut.
+      guard move == nil, let anchor = anchor, let pointer = pointer, let selection = selection else { return }
+      move = (pointer, selection, anchor)
     default:
       break
     }
+  }
+
+  /// Releasing Space resizes again, from the corner the move left opposite the pointer.
+  override func keyUp(with event: NSEvent) {
+    if event.keyCode == 49 { move = nil }
   }
 
   @objc func confirm() {
