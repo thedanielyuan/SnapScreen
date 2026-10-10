@@ -162,6 +162,25 @@ enum AnswerStyle {
     style.lineSpacing = 2
     return style
   }()
+  /// A list item's marker at the start of a line, after at most eight spaces or tabs: a number or
+  /// letter followed by `.` or `)`, one in parentheses, or a bullet, then a space and text.
+  static let listMarker = try! NSRegularExpression(
+    pattern: "^[ \\t]{0,8}(?:(?:\\d{1,3}|[A-Za-z])[.)]|\\((?:\\d{1,3}|[A-Za-z])\\)|[-*•◦–])[ \\t]+(?=\\S)")
+  static let listItemSpacing: CGFloat = 4
+
+  /// A list item hangs its wrapped lines under its text, a little apart from the line before it.
+  /// Only the layout changes: the text stays as written, so selecting and copying it don't.
+  static func listItemParagraph(_ line: String, first: Bool) -> NSParagraphStyle? {
+    let value = line as NSString
+    guard let marker = listMarker.firstMatch(in: line, range: NSRange(location: 0, length: value.length)) else {
+      return nil
+    }
+    let style = proseParagraph.mutableCopy() as! NSMutableParagraphStyle
+    style.headIndent = ceil(NSAttributedString(string: value.substring(with: marker.range),
+      attributes: [.font: proseFont]).size().width)
+    style.paragraphSpacingBefore = first ? 0 : listItemSpacing
+    return style
+  }
 }
 
 /// Each segment keeps its text view while streaming, so selections, keyboard focus and copy
@@ -216,14 +235,15 @@ final class AnswerSegmentView: NSView {
     segment = value
     if !textView.string.utf16.elementsEqual(value.text.utf16) {
       let selections = textView.selectedRanges
-      let oldText = textView.string as NSString
+      // A count, not the string: the text view's string is its live storage, which grows below.
+      let oldLength = (textView.string as NSString).length
       let newText = value.text as NSString
       let changedRange: NSRange
       // Appending only the new tail leaves already-read text and its selection intact.
       if value.text.utf16.starts(with: textView.string.utf16) {
-        textView.textStorage?.replaceCharacters(in: NSRange(location: oldText.length, length: 0),
-          with: newText.substring(from: oldText.length))
-        changedRange = NSRange(location: oldText.length, length: newText.length - oldText.length)
+        textView.textStorage?.replaceCharacters(in: NSRange(location: oldLength, length: 0),
+          with: newText.substring(from: oldLength))
+        changedRange = NSRange(location: oldLength, length: newText.length - oldLength)
       } else {
         textView.string = value.text
         changedRange = NSRange(location: 0, length: newText.length)
@@ -232,6 +252,7 @@ final class AnswerSegmentView: NSView {
       // storage is empty. Always attach the intended font and dynamic color to inserted text.
       textView.textStorage?.setAttributes([.font: contentFont, .foregroundColor: NSColor.labelColor,
         .paragraphStyle: paragraph], range: changedRange)
+      if !value.isCode { styleListItems(touching: changedRange) }
       // Plain NSTextView normalizes its storage to its own uniform typing attributes when
       // selection changes. Update those defaults too, including after an empty first insertion.
       textView.font = contentFont
@@ -256,6 +277,19 @@ final class AnswerSegmentView: NSView {
   private func updateCopyVisibility() {
     guard case .code(_, _, let complete) = segment else { return }
     copyButton?.isHidden = !(complete || answerIsFinal)
+  }
+
+  /// Lays out each prose paragraph that a change touched as a list item or a plain paragraph. A
+  /// streamed line is styled again as it grows, so its marker counts once it's complete.
+  private func styleListItems(touching range: NSRange) {
+    guard let storage = textView.textStorage, storage.length > 0, NSMaxRange(range) <= storage.length else { return }
+    let text = storage.string as NSString
+    storage.beginEditing()
+    text.enumerateSubstrings(in: text.paragraphRange(for: range), options: .byParagraphs) { line, _, enclosing, _ in
+      let style = line.flatMap { AnswerStyle.listItemParagraph($0, first: enclosing.location == 0) } ?? self.paragraph
+      storage.addAttribute(.paragraphStyle, value: style, range: enclosing)
+    }
+    storage.endEditing()
   }
 
   func height(for width: CGFloat) -> CGFloat {

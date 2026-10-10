@@ -88,6 +88,16 @@ func runAnswerViewTests() throws -> Int {
   try check(block.copyButton?.contentTintColor == .secondaryLabelColor, "Copy is grey again at rest")
   try check(hasTextAttributes(prose.textView, font: AnswerStyle.proseFont) && hasTextAttributes(block.textView, font: AnswerStyle.codeFont),
     "streamed append preserves font and dynamic foreground on every character")
+  func lineSpacing(_ text: NSTextView) -> Set<CGFloat> {
+    var spacings: Set<CGFloat> = []
+    text.textStorage?.enumerateAttribute(.paragraphStyle, in: NSRange(location: 0, length: text.textStorage!.length)) { value, _, _ in
+      spacings.insert((value as? NSParagraphStyle)?.lineSpacing ?? -1)
+    }
+    return spacings
+  }
+  try check(lineSpacing(prose.textView) == [AnswerStyle.proseParagraph.lineSpacing] &&
+    lineSpacing(block.textView) == [AnswerStyle.codeParagraph.lineSpacing],
+    "streamed text, first and appended, takes its paragraph's line spacing")
   view.render("```js\nopen(", final: false)
   try check(view.segmentViews[0].copyButton?.isHidden == true, "an unclosed fence hides Copy while streaming")
   view.render("```js\nopen(", final: true)
@@ -102,6 +112,48 @@ func runAnswerViewTests() throws -> Int {
   let level = { (color: NSColor) in color.usingColorSpace(.deviceRGB)!.redComponent }
   try check(level(Theme.background) < 0.06 && level(Theme.background) < level(Theme.surface) &&
     level(Theme.surface) < level(Theme.surfaceBorder), "code and the field sit a shade lighter than the near-black window, outlined")
+  // List items hang wrapped lines under their text, a little apart, and the text stays as written.
+  let list = AnswerView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
+  let item = "1. The first cause is long enough to wrap onto a second line at this width."
+  let items = "Three causes:\n\(item)\n(b) Lettered\n  - Bullet\n2026. Not a list item\n1.5 is a number"
+  list.render(items, final: true)
+  let listText = list.segmentViews[0].textView
+  let storage = listText.textStorage!
+  func paragraphStyle(_ prefix: String) -> NSParagraphStyle? {
+    storage.attribute(.paragraphStyle, at: (storage.string as NSString).range(of: prefix).location,
+      effectiveRange: nil) as? NSParagraphStyle
+  }
+  func width(_ text: String) -> CGFloat { ceil(NSAttributedString(string: text, attributes: [.font: AnswerStyle.proseFont]).size().width) }
+  try check(listText.string == items && list.renderedText == items, "list layout keeps the answer's text as written")
+  try check(paragraphStyle("Three")?.headIndent == 0 && paragraphStyle("1. The")?.headIndent == width("1. ") &&
+    paragraphStyle("1. The")?.paragraphSpacingBefore == AnswerStyle.listItemSpacing,
+    "a numbered item's wrapped lines hang under its text")
+  try check(paragraphStyle("(b)")?.headIndent == width("(b) ") && paragraphStyle("  - ")?.headIndent == width("  - "),
+    "lettered and indented bulleted items hang too")
+  try check(paragraphStyle("2026.")?.headIndent == 0 && paragraphStyle("1.5")?.headIndent == 0,
+    "years and decimals stay plain lines")
+  _ = list.height(for: 300)
+  let manager = listText.layoutManager!
+  let itemRange = (storage.string as NSString).range(of: item)
+  let firstLine = manager.lineFragmentUsedRect(forGlyphAt: manager.glyphIndexForCharacter(at: itemRange.location),
+    effectiveRange: nil)
+  let lastLine = manager.lineFragmentUsedRect(forGlyphAt: manager.glyphIndexForCharacter(at: NSMaxRange(itemRange) - 1),
+    effectiveRange: nil)
+  try check(lastLine.minY > firstLine.minY && firstLine.minX == 0 && lastLine.minX == width("1. "),
+    "the item's second line starts under its text")
+  listText.setSelectedRange(NSRange(location: itemRange.location + 3, length: 5))
+  try check(paragraphStyle("1. The")?.headIndent == width("1. "), "selecting text keeps the layout")
+  list.render("Steps:\n1", final: false)
+  list.render("Steps:\n1. Open it", final: false)
+  let streamed = list.segmentViews[0].textView
+  streamed.setSelectedRange(NSRange(location: 0, length: 5))
+  list.render("Steps:\n1. Open it\n2. Close it", final: false)
+  let streamedStorage = streamed.textStorage!
+  let headIndents = [7, 18].map { (streamedStorage.attribute(.paragraphStyle, at: $0, effectiveRange: nil) as? NSParagraphStyle)?.headIndent }
+  try check(headIndents == [width("1. "), width("2. ")] && streamed.selectedRange() == NSRange(location: 0, length: 5),
+    "streamed items take the layout as their markers arrive, keeping the reader's selection")
+  list.clear()
+
   view.copyEnabled = false
   view.render("```\n\u{00E9}\n```", final: true)
   let canonicalBlock = view.segmentViews[0]
