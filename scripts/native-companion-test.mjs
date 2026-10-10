@@ -12,7 +12,7 @@ if (result.stdout.includes('test hooks')) {
   process.exit(1);
 }
 const testFiles = ['native-companion-install.node-test.mjs', 'native-companion-package.node-test.mjs',
-  'native-companion-acceptance.node-test.mjs', 'native-extension-artifact.node-test.mjs']
+  'native-companion-acceptance.node-test.mjs', 'native-extension-artifact.node-test.mjs', 'app-acceptance.node-test.mjs']
   .map(file => fileURLToPath(new URL(file, import.meta.url)));
 const installer = spawnSync(process.execPath, ['--test', ...testFiles], { stdio: 'inherit' });
 if (installer.error) throw installer.error;

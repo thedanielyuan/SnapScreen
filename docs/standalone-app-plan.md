@@ -263,14 +263,28 @@ the live test, which passes 13 checks.
 
 ### Phase 4: Acceptance and switch-over (small)
 
-- One physical round of 5–7 steps:
-  - Open a page that logs `focus`, `blur` and `visibilitychange`, and press the shortcut over
-    Chrome, first in a normal window and then in fullscreen. I set the window state.
+- **The round (done).** One physical round of five steps, which `npm run experiment:app`
+  (`scripts/app-acceptance.mjs`) runs:
+  - Press the shortcut over Chrome on a page that logs `focus`, `blur`, `visibilitychange`, keys
+    and pointer events, first in a normal window and then in fullscreen.
   - Select a region, read the answer, ask a follow-up, and copy a code block.
-  - Snip a window outside Chrome, such as a PDF in Preview.
+  - Snip a PDF in Preview.
   - Rebuild, and check that Screen Recording and the Keychain work without prompts.
+
+  The runner builds and restarts the app, opens the page in a fresh Chrome profile, and sets up
+  each step itself when the previous snip's windows close. `scripts/app-acceptance-observer.swift`
+  records SnapScreen's windows, the frontmost app, prompts and pasteboard changes, never titles
+  or contents. Unchanged sources build an identical signature, so the rebuild sets
+  `SNAPSCREEN_BUILD_NUMBER`, which changes it as a code change would. The report and its summary
+  go to `build/acceptance/`.
 - It passes when the page keeps focus and visibility during selection and answering, and the
   app never takes focus. Modifier keys reaching the page remains the accepted known limitation.
+- Done on 10 October 2026, on macOS 27.0.1 and Chrome 154, with a 2× and a 1× display.
+  SnapScreen never became the frontmost app, the page kept focus and visibility, and no keys,
+  text or clicks reached it. After the rebuild, the app snipped and answered with no Screen
+  Recording or Keychain prompt. You accepted one finding as a second known limitation: macOS's
+  periodic alert for apps that capture the screen without the system picker appeared on the
+  first snip and had focus for the 2 s until you dismissed it. SnapScreen can't suppress it.
 - **You:** remove the native host registration and uninstall the extension before Phase 5
   deletes the installer:
 
@@ -281,7 +295,7 @@ the live test, which passes 13 checks.
 ### Phase 5: Remove the extension (medium, mostly deletion)
 
 - Delete:
-  - `src/` and `scripts/*.mjs`
+  - `src/`, `scripts/*.mjs` and `scripts/app-acceptance-observer.swift`
   - `vite.config.ts`, `vite.native.config.ts`, `tsconfig.json` and `eslint.config.js`
   - `package.json` and `package-lock.json`
   - `native/macos/` and `experiments/native-phase1/`
@@ -307,8 +321,8 @@ Done when: the repo contains only the app and CI is green.
 
 ## Risks
 
-- **Chrome page visibility under the overlay.** Phase 4 measures it. If it fails, fall back to
-  live selection with a translucent dim.
+- **Chrome page visibility under the overlay.** Phase 4 measured it: the page stayed visible in
+  a normal window and in fullscreen, so the freeze-frame overlay stays.
 - **Approvals reset on rebuild** if the app isn't signed with an Apple Development certificate
   (Phase 0).
 - **Shortcut conflict** while both the app and the extension exist. Handled by using ⌃⌥⇧S until

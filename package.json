@@ -18,6 +18,7 @@
     "package:native": "node scripts/native-companion-package.mjs",
     "test:native-packaged": "node scripts/native-companion-packaged-test.mjs",
     "experiment:native-packaged": "node scripts/native-companion-acceptance.mjs",
+    "experiment:app": "node scripts/app-acceptance.mjs",
     "install:native": "node scripts/native-companion-install.mjs",
     "build:native-prototype": "node scripts/native-phase1-build.mjs && sh experiments/native-phase1/native/build.sh",
     "test:native-prototype": "node --test experiments/native-phase1/extension/*.node-test.mjs && experiments/native-phase1/build/SnapScreenPhase1.app/Contents/MacOS/SnapScreenPhase1 --self-test",
