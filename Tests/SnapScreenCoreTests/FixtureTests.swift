@@ -4,7 +4,8 @@ import Testing
 
 // Replays the golden fixtures that src/lib/core-fixtures.test.ts records from the extension's
 // TypeScript. Every client call must send the same request and reach the same result, and every
-// conversation-state step must produce the same output.
+// conversation-state step must produce the same output. The session fixtures also replay through
+// SessionController.
 
 private let fixturesURL = Bundle.module.url(forResource: "Fixtures", withExtension: nil)!
 private let fixtureNames = (try? FileManager.default.contentsOfDirectory(atPath: fixturesURL.path))
@@ -147,6 +148,10 @@ private func replayCall(_ step: Step, _ location: Comment) async throws {
   }
   let request = try #require(transport.requests.first, location)
   #expect(transport.requests.count == 1, location)
+  try expectRequest(request, matches: expected, location)
+}
+
+private func expectRequest(_ request: URLRequest, matches expected: RecordedRequest, _ location: Comment) throws {
   #expect(request.url?.absoluteString == expected.url, location)
   #expect(request.httpMethod == expected.method, location)
   var expectedHeaders = Dictionary(uniqueKeysWithValues: expected.headers.map { ($0.key.lowercased(), $0.value) })
@@ -206,5 +211,80 @@ private func replayStateChange(_ step: Step, _ location: Comment) throws {
     #expect(failed.userText == (try output["userText"]?.decode(String.self)), location)
   default:
     Issue.record("\(location.rawValue): unknown step \(step.op)")
+  }
+}
+
+/// Replays a session fixture through `SessionController` and the real client, as the user would:
+/// select a region, then ask or Retry. Each answer must send the recorded request, report the
+/// recorded notice and result, and leave the recorded conversation.
+@Test(arguments: fixtureNames.filter { $0.hasPrefix("session-") }) @MainActor
+func replaysSessionThroughTheController(_ name: String) async throws {
+  let fixture = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: fixturesURL.appending(path: name)))
+  // Each answer takes three steps: aligning the conversation, the client call, and settling it.
+  let answers = stride(from: 0, to: fixture.steps.count, by: 3).map { Array(fixture.steps[$0..<$0 + 3]) }
+  let first = try fixture.steps[1].input.decode(AnalyzeInput.self)
+  let image = dataURLBytes(first.image)
+  let transport = MockTransport(answers.compactMap { $0[1].response })
+  let log = EventLog()
+  let controller = SessionController(answers: AnthropicClient(transport: transport), apiKey: { first.apiKey },
+    settings: { SessionSettings(defaultPrompt: first.hiddenInstruction ?? "", limits: first.limits) },
+    scheduler: ManualTimers().scheduler, cropSelection: { _, _, _ in image })
+  controller.delegate = log
+  let session = try #require(controller.start { FrozenScreen(image: try decodePNG(image), displayID: 1) })
+  transport.onStop = { Task { @MainActor in session.stop() } }
+  try await waitUntil { session.phase == .selecting }
+
+  for (index, steps) in answers.enumerated() {
+    let (aligned, call, settled) = (steps[0], steps[1], steps[2])
+    let location = Comment(rawValue: "\(name) answer \(index + 1): \(call.note ?? call.op)")
+    let reported = log.events.count
+    let requests = transport.requests.count
+    // A question asked from the current conversation; otherwise Retry resends an earlier one.
+    let base = try aligned.input.decode(StateOutput.self).state
+    let question = try (call.input["text"] ?? call.input["userQuestion"])?.decode(String.self)
+    if index == 0 {
+      #expect(session.select(CGRect(x: 0, y: 0, width: 1, height: 1)), location)
+    } else if let question,
+      base == ConversationState(displayMessages: session.display, conversationHistory: session.history) {
+      #expect(session.ask(question), location)
+    } else {
+      #expect(session.retry(), location)
+    }
+    try await waitUntil { log.events.dropFirst(reported).contains(where: \.endsAnswer) }
+    let events = log.events.dropFirst(reported)
+
+    if let expected = call.request {
+      #expect(transport.requests.count == requests + 1, location)
+      try expectRequest(transport.requests[requests], matches: expected, location)
+    } else {
+      #expect(transport.requests.count == requests, location)
+    }
+    let removedTurns = try aligned.output?["removedTurns"]?.decode(Int.self) ?? 0
+    if removedTurns > 0 {
+      let notice = try #require(aligned.output?["notice"], location).decode(String.self)
+      #expect(events.contains(.notice(notice, removedTurns: removedTurns)), location)
+    } else {
+      #expect(!events.contains { if case .notice = $0 { true } else { false } }, location)
+    }
+    let outcome = try #require(call.outcome, location)
+    let result: SessionEvent = switch outcome.type {
+    case "answer": .answer(outcome.text ?? "", .done)
+    case "stopped": .answer(try settled.input["partialAnswer"]?.decode(String.self) ?? "", .stopped)
+    default: .failed(AnthropicError(outcome.code ?? "", outcome.message ?? ""))
+    }
+    #expect(events.last(where: \.endsAnswer) == result, location)
+    let state = try #require(settled.output, location).decode(StateOutput.self).state
+    #expect(ConversationState(displayMessages: session.display, conversationHistory: session.history) == state,
+      location)
+  }
+  session.close()
+}
+
+private extension SessionEvent {
+  var endsAnswer: Bool {
+    switch self {
+    case .answer(_, .done), .answer(_, .stopped), .failed: true
+    default: false
+    }
   }
 }

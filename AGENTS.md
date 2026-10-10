@@ -41,7 +41,8 @@ npm run lint && npm run typecheck && npm test && npm run test:extension-artifact
 - `Package.swift`, `Sources/SnapScreen/` — the standalone app that will replace the extension
   (`docs/standalone-app-plan.md`). The companion's views live in `Sources/SnapScreen/UI/` and
   compile into both. `Sources/SnapScreenCore/` is `src/lib/`'s API client, conversation state,
-  limits and image fitting ported to Swift, tested in `Tests/SnapScreenCoreTests/`.
+  limits and image fitting, and `native-session.ts`'s sessions, ported to Swift and tested in
+  `Tests/SnapScreenCoreTests/`.
 - `experiments/native-phase1/` — finished prototype and evidence. Frozen: don't edit unless asked.
 
 ## Conventions
@@ -170,6 +171,8 @@ open build/SnapScreen.app                                    # the menu bar app
   `npm test` fails once the TypeScript no longer produces them. After an intended change to the
   client, conversation state, limits or prompt, rewrite them with
   `npx vitest run src/lib/core-fixtures.test.ts -u` and update the Swift core in the same change.
+  `SessionController.swift` is `native-session.ts` without the bridge: change their conversation
+  behavior together.
 - `swift test` skips `LiveAPITests` unless `SNAPSCREEN_LIVE_API_KEY` is set. Like the TypeScript
   live test, it spends API credit.
 - `build-app.sh` signs with the user's Apple Development certificate (ad hoc in CI). Keep the
