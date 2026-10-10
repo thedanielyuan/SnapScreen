@@ -83,7 +83,6 @@ final class ComposerView: NSView, NSTextViewDelegate {
     scroll.documentView = textView
     scroll.drawsBackground = false
     scroll.borderType = .noBorder
-    scroll.hasVerticalScroller = true
     scroll.autohidesScrollers = true
     scroll.verticalScrollElasticity = .none
     addSubview(scroll)
@@ -127,12 +126,15 @@ final class ComposerView: NSView, NSTextViewDelegate {
     ceil(textView.layoutManager?.defaultLineHeight(for: Self.font) ?? 17)
   }
 
-  private var textHeight: CGFloat {
+  /// The draft's height at the text view's width, before the field caps it at six lines.
+  private var contentHeight: CGFloat {
     guard let container = textView.textContainer, let manager = textView.layoutManager else { return lineHeight }
     manager.ensureLayout(for: container)
     let used = max(manager.usedRect(for: container).height, manager.extraLineFragmentRect.maxY)
-    return min(max(lineHeight, ceil(used)), lineHeight * Self.maximumLines)
+    return max(lineHeight, ceil(used))
   }
+
+  private var textHeight: CGFloat { min(contentHeight, lineHeight * Self.maximumLines) }
 
   private var fieldHeight: CGFloat {
     max(Self.minimumFieldHeight, textHeight + Self.textInsets.top + Self.textInsets.bottom)
@@ -155,7 +157,12 @@ final class ComposerView: NSView, NSTextViewDelegate {
       invalidateIntrinsicContentSize()
     }
     let field = fieldRect
-    let textHeight = self.textHeight
+    let contentHeight = self.contentHeight
+    let textHeight = min(contentHeight, lineHeight * Self.maximumLines)
+    // A scroller only while the draft overflows the field: an always-visible one, as macOS draws
+    // with a mouse attached, could otherwise linger at one line as a stub beside Send.
+    let overflows = contentHeight > textHeight
+    if scroll.hasVerticalScroller != overflows { scroll.hasVerticalScroller = overflows }
     scroll.frame = NSRect(x: Self.textInsets.left, y: field.midY - textHeight / 2,
       width: max(1, field.width - Self.textInsets.left - Self.textInsets.right), height: textHeight)
     textView.minSize = NSSize(width: 0, height: textHeight)
