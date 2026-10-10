@@ -42,7 +42,7 @@ public struct Answer: Equatable, Sendable {
   }
 }
 
-/// The Messages API client, ported from src/lib/anthropic.ts. Cancelling the calling task stops a
+/// The Messages API client. Cancelling the calling task stops a
 /// request with `CancellationError`; every other failure is an `AnthropicError`.
 public struct AnthropicClient: Sendable {
   public static let model = "claude-opus-5-5"

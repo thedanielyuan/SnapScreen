@@ -1,6 +1,6 @@
 import AppKit
 
-/// Colours shared with the In Chrome interface (`src/content/overlay.css`).
+/// SnapScreen's colours.
 enum Theme {
   static let accent = NSColor(srgbRed: 108 / 255, green: 92 / 255, blue: 231 / 255, alpha: 1)
   static let pointerSelection = NSColor(srgbRed: 59 / 255, green: 130 / 255, blue: 246 / 255, alpha: 1)
@@ -27,8 +27,8 @@ enum Theme {
   }
 }
 
-/// Native panels never activate the companion, so Chrome stays the active app. A key released
-/// after its panel closes would therefore reach the page. Escape and Command-W close on release.
+/// Panels never activate SnapScreen, so the app beneath stays active. A key released after its
+/// panel closes would therefore reach that app. Escape and Command-W close on release.
 final class CompanionPanel: NSPanel {
   private var closingKey: UInt16?
   private var closeFallback: Timer?
@@ -136,8 +136,8 @@ class CompanionButton: NSButton {
   }
 }
 
-/// A borderless symbol button with a hover background. The companion is never the active app, so
-/// its tracking area must be active always.
+/// A borderless symbol button with a hover background. SnapScreen is never the active app, so its
+/// tracking area must be active always.
 final class ActionButton: CompanionButton {
   private var hovering = false { didSet { if hovering != oldValue { refresh() } } }
   private var tracking: NSTrackingArea?

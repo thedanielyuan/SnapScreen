@@ -3,9 +3,6 @@ import Foundation
 import Testing
 @testable import SnapScreenCore
 
-// Ported from src/background/native-session.test.ts. Its cases about the native messaging
-// protocol (handshakes, envelopes, transfer caps and a lost host) have no counterpart in the app.
-
 private let frozen = FrozenScreen(image: try! decodePNG(makePNG(width: 4, height: 2)), displayID: 7)
 private let cropped = Data("CROP".utf8)
 private let half = CGRect(x: 0, y: 0, width: 0.5, height: 0.5)

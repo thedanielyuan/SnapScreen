@@ -12,7 +12,6 @@ func runConversationViewTests() throws -> Int {
   }
   _ = NSApplication.shared
 
-  // Thread structure mirrors the In Chrome conversation.
   let thread = ConversationView(frame: NSRect(x: 0, y: 0, width: 460, height: 300))
   var previews = 0
   var retries = 0
@@ -36,7 +35,7 @@ func runConversationViewTests() throws -> Int {
   try check(first.state == .thinking && first.pending.thinking, "thinking keeps the pending indicator")
   first.pending.since = Date(timeIntervalSinceNow: -2)
   first.pending.update()
-  try check(first.pending.label.stringValue.isEmpty, "pending label waits five seconds, as in Chrome")
+  try check(first.pending.label.stringValue.isEmpty, "pending label waits five seconds")
   first.pending.since = Date(timeIntervalSinceNow: -65)
   first.pending.update()
   try check(first.pending.label.stringValue == "Thinking…", "pending label names thinking after the delay")
@@ -83,12 +82,12 @@ func runConversationViewTests() throws -> Int {
   thread.updateAnswer("Refused partial text", status: .streaming)
   thread.fail("Refused.", clearAnswer: true)
   try check(fourth.answer.segmentViews.isEmpty && fourth.answer.renderedText.isEmpty,
-    "refused text is cleared, as in the extension")
+    "refused text is cleared")
   try check(first.isHeld(asFirst: false) && first.isHeld(asFirst: true), "a finished answer is always held")
   try check(fourth.isHeld(asFirst: false) && !fourth.isHeld(asFirst: true),
     "a failed follow-up is held, but a first answer that failed without text is cleared")
 
-  // Pruning mirrors the extension: it keeps the first answer and drops the oldest follow-ups.
+  // Pruning keeps the first answer and drops the oldest follow-ups.
   thread.beginTurn(question: "Fifth?")
   let fifth = thread.latestTurn!
   try check(thread.heldTurns.map { $0 === first || $0 === third || $0 === fourth } == [true, true, true] &&
@@ -260,7 +259,7 @@ func runConversationViewTests() throws -> Int {
   try check(focusThread.turns.isEmpty && focusThread.thumbnail.screenshot == nil, "clear releases the thread")
   window.contentView = nil
 
-  // Escape and Command-W close on key release, so the release cannot reach Chrome.
+  // Escape and Command-W close on key release, so the release can't reach the app beneath.
   final class CloseCounter: NSObject, NSWindowDelegate {
     var count = 0
     func windowShouldClose(_ sender: NSWindow) -> Bool { count += 1; return false }

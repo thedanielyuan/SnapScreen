@@ -14,8 +14,8 @@ func runAppShellTests() throws -> Int {
   _ = NSApplication.shared
 
   let snip = Hotkey.Combination.snip
-  try check(snip.keyCode == UInt32(kVK_ANSI_S) && snip.modifiers == UInt32(controlKey | optionKey | shiftKey) &&
-    snip.display == "⌃⌥⇧S", "the shortcut is ⌃⌥⇧S while the extension keeps ⌥⇧S")
+  try check(snip.keyCode == UInt32(kVK_ANSI_S) && snip.modifiers == UInt32(optionKey | shiftKey) && snip.display == "⌥⇧S",
+    "the shortcut is ⌥⇧S")
   // A combination nobody uses, so the check never takes a real shortcut.
   let unused = Hotkey.Combination(keyCode: UInt32(kVK_F19), modifiers: UInt32(controlKey | optionKey | shiftKey | cmdKey),
     display: "⌃⌥⇧⌘F19", menuKey: "", menuModifiers: [])
@@ -38,7 +38,7 @@ func runAppShellTests() throws -> Int {
     shortcut: .snip)
   try check(menu.items.map(\.title) == ["Snip", "Settings…", "", "Quit SnapScreen"] && menu.items[2].isSeparatorItem,
     "the menu has Snip, Settings… and Quit")
-  try check(menu.items[0].keyEquivalent == "s" && menu.items[0].keyEquivalentModifierMask == [.control, .option, .shift],
+  try check(menu.items[0].keyEquivalent == "s" && menu.items[0].keyEquivalentModifierMask == [.option, .shift],
     "Snip shows its shortcut")
   try check(menu.items[3].action == #selector(NSApplication.terminate(_:)) && menu.items[3].keyEquivalent == "q",
     "Quit terminates the app")

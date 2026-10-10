@@ -131,7 +131,7 @@ func runSettingsWindowTests() throws -> Int {
   settings.promptView.string = String(repeating: "😀", count: 100)
   settings.save()
   try check(settings.statusLabel.stringValue == "Settings saved. Existing API key unchanged.",
-    "the prompt limit counts code points, as in Chrome")
+    "the prompt limit counts code points")
 
   keys.failure = KeychainError(operation: .save, status: errSecAuthFailed)
   settings.keyField.stringValue = "sk-ant-other"
@@ -216,11 +216,11 @@ func runSettingsWindowTests() throws -> Int {
     settings.loginSwitch.state == .off, "a failed change is reported and the switch shows the real state")
 
   try check(settings.shortcutLabel.stringValue ==
-    "Start a snip with ⌃⌥⇧S, or choose Snip from SnapScreen's menu bar icon.", "Settings shows the shortcut")
+    "Start a snip with ⌥⇧S, or choose Snip from SnapScreen's menu bar icon.", "Settings shows the shortcut")
   var unavailable = services
   unavailable.shortcut = nil
   try check(SettingsWindowController(services: unavailable).shortcutLabel.stringValue ==
-    "Another app is using ⌃⌥⇧S, so choose Snip from SnapScreen's menu bar icon.",
+    "Another app is using ⌥⇧S, so choose Snip from SnapScreen's menu bar icon.",
     "Settings says when another app has the shortcut")
   return count
 }

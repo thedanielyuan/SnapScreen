@@ -24,7 +24,7 @@ private func fenceRun(_ line: Substring.UnicodeScalarView) -> (marker: Unicode.S
 
 private func openingFence(_ line: Substring.UnicodeScalarView) -> OpeningFence? {
   guard let run = fenceRun(line) else { return nil }
-  // JavaScript's `.` stops at these line separators, so the extension doesn't match a fence there.
+  // The extension's JavaScript `.` stopped at these line separators, so a fence never matches there.
   if run.rest.contains(where: { $0 == "\u{2028}" || $0 == "\u{2029}" }) { return nil }
   // A backtick fence's info string can't contain backticks, so ```x``` is inline code in text.
   if run.marker == "`" && run.rest.contains("`") { return nil }
@@ -38,8 +38,7 @@ private func closes(_ line: Substring.UnicodeScalarView, _ opening: OpeningFence
 }
 
 /// Closes a code block left open by a truncated answer, so text added after it, such as the
-/// cut-off notice, is shown as prose instead of being copied as code. Ported from
-/// `closeOpenCodeFence` in src/lib/code-blocks.ts.
+/// cut-off notice, is shown as prose instead of being copied as code.
 public func closeOpenCodeFence(_ text: String) -> String {
   let lines = normalizeLineEndings(text).unicodeScalars.split(separator: "\n", omittingEmptySubsequences: false)
   var openFence: OpeningFence?

@@ -10,14 +10,10 @@ permissions:
 
 jobs:
   live-api:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
       - name: Call the real Anthropic API
         env:
           SNAPSCREEN_LIVE_API_KEY: ${{ secrets.SNAPSCREEN_LIVE_API_KEY }}
@@ -26,4 +22,4 @@ jobs:
             echo "::error::Add a SNAPSCREEN_LIVE_API_KEY repository secret: a dedicated Anthropic key with a low spend limit."
             exit 1
           fi
-          npx vitest run src/lib/anthropic.live.test.ts
+          swift test --filter LiveAPITests

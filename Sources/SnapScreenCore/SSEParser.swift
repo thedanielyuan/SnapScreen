@@ -1,6 +1,6 @@
 import Foundation
 
-/// Splits a server-sent events byte stream into events, as src/lib/anthropic.ts does. An event ends
+/// Splits a server-sent events byte stream into events. An event ends
 /// at two line endings, each CRLF, LF or CR. A CR at the end of the bytes so far waits for the next
 /// chunk, because it may be the first half of a CRLF.
 struct SSEEventSplitter {
@@ -8,8 +8,8 @@ struct SSEEventSplitter {
   /// Positions before this one have been checked, and no later bytes can make them a boundary.
   private var searchStart = 0
 
-  // Like the TypeScript regex, the first of these to match at the leftmost position wins, so a CRLF
-  // is never read as a CR and an LF.
+  // As in the regex this replaced, the first of these to match at the leftmost position wins, so
+  // a CRLF is never read as a CR and an LF.
   private static let boundaries: [[UInt8]] = [
     [13, 10, 13, 10], [13, 10, 10], [10, 13, 10], [13, 13, 10], [13, 10, 13], [10, 10], [13, 13], [10, 13],
   ]

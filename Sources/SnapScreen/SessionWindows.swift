@@ -48,7 +48,7 @@ final class SnipWindows: SessionControllerDelegate {
 
 /// One session's windows: the overlay over its frozen display, then its conversation beside the
 /// selection and the screenshot preview. None of them activates SnapScreen, so the app you snip
-/// keeps focus, and Escape and Command-W close on key release, as in the companion.
+/// keeps focus, and Escape and Command-W close on key release.
 @MainActor
 final class SessionWindows: NSObject, NSWindowDelegate {
   static let endedMessage = "Snip again to start a new capture."
@@ -274,7 +274,7 @@ final class SessionWindows: NSObject, NSWindowDelegate {
     shields.liveResizeEnded()
   }
 
-  /// The session ended on its own. As in the companion, an open conversation keeps only a notice.
+  /// The session ended on its own, so an open conversation keeps only a notice.
   private func end() {
     clearContent()
     guard let window = panel else {

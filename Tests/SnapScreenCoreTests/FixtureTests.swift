@@ -2,16 +2,17 @@ import Foundation
 import Testing
 @testable import SnapScreenCore
 
-// Replays the golden fixtures that src/lib/core-fixtures.test.ts records from the extension's
-// TypeScript. Every client call must send the same request and reach the same result, and every
-// conversation-state step must produce the same output. The session fixtures also replay through
+// Replays the golden fixtures recorded from the Chrome extension's TypeScript before it was
+// removed. Every client call must send the same request and reach the same result, and every
+// conversation-state step must produce the same output. Edit them by hand only for an intended
+// change to the client, conversation state, limits or prompt. The session fixtures also replay through
 // SessionController.
 
 private let fixturesURL = Bundle.module.url(forResource: "Fixtures", withExtension: nil)!
 private let fixtureNames = (try? FileManager.default.contentsOfDirectory(atPath: fixturesURL.path))
   .map { $0.filter { $0.hasSuffix(".json") }.sorted() } ?? []
 private let systemPromptReference = "(system-prompt.txt)"
-// The Chrome extension needs this header for CORS; the app deliberately doesn't send it.
+// The Chrome extension needed this header for CORS; the app deliberately doesn't send it.
 private let browserOnlyHeader = "anthropic-dangerous-direct-browser-access"
 
 private struct Fixture: Decodable {
@@ -75,7 +76,7 @@ private struct StateOutput: Decodable {
   }
 }
 
-@Test func systemPromptMatchesTheExtension() throws {
+@Test func systemPromptMatchesItsFixture() throws {
   let recorded = try String(contentsOf: fixturesURL.appending(path: "system-prompt.txt"), encoding: .utf8)
   #expect(screenshotQASystemPrompt.jsEquals(recorded))
 }

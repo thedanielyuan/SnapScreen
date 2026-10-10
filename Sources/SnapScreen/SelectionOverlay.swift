@@ -1,9 +1,9 @@
 import AppKit
 
 /// The panel that covers a display with its frozen image, for selecting a region. It stays
-/// non-opaque: the native prototype found that a screen-sized non-opaque panel caused no
-/// visibility change in Chrome (docs/native-phase1-results.md), and an opaque one could make
-/// Chrome mark the page as hidden. Like every SnapScreen panel, it takes the keyboard without
+/// non-opaque: the native prototype and Phase 4's acceptance round found that a screen-sized
+/// non-opaque panel caused no visibility change in Chrome, and an opaque one could make Chrome
+/// mark the page as hidden. Like every SnapScreen panel, it takes the keyboard without
 /// activating the app.
 enum SelectionOverlay {
   static let title = "SnapScreen — Select region"

@@ -1,4 +1,4 @@
-// The system prompt, verbatim from src/lib/screenshot-qa-prompt.ts. First answers and follow-ups
+// The system prompt, which Fixtures/system-prompt.txt pins. First answers and follow-ups
 // share it, because a different system prompt would miss the prompt cache. Follow-up rules therefore
 // live here, never in a separate prompt. Answers are plain text except fenced code blocks, which
 // AnswerView.swift parses for Copy buttons, so change the formatting rules and that parser together.

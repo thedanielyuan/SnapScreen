@@ -1,12 +1,12 @@
 import AppKit
 
-/// The frozen screenshot, fitted inside its window, with the In Chrome snip overlay's interaction:
-/// drag and release to ask, click to cancel. Return places a keyboard selection that arrow keys
+/// The frozen screenshot, fitted inside its window, for selecting a region: drag and release to
+/// ask, click to cancel. Return places a keyboard selection that arrow keys
 /// move and Shift + arrow keys resize; Return again asks. All coordinates stay normalized to the
 /// fitted image, including while the window is resized.
 final class SelectionView: NSView {
   static let instruction = "Drag to select a region. Click to cancel"
-  /// Matches the extension's `KEYBOARD_CROP_STEP` and `MIN_CROP_SIZE`, in display points.
+  /// The keyboard selection's step and the smallest selection, in display points.
   static let keyboardStep: CGFloat = 10
   static let minimumSize: CGFloat = 5
   static let dim = NSColor.black.withAlphaComponent(0.35)
@@ -33,7 +33,7 @@ final class SelectionView: NSView {
   private var cursorTracking: NSTrackingArea?
   override var isFlipped: Bool { true }
   override var acceptsFirstResponder: Bool { true }
-  // A drag must work even after the user clicked Chrome and the panel resigned key.
+  // A drag must work even after the user clicked the app beneath and the panel resigned key.
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
   override init(frame frameRect: NSRect) {
@@ -66,7 +66,7 @@ final class SelectionView: NSView {
     return rect.isValid ? rect : nil
   }
 
-  /// Screenshot pixels, rounded at both edges like the extension's crop.
+  /// Screenshot pixels, rounded at both edges as the crop is.
   private var pixelBounds: (left: Int, top: Int, width: Int, height: Int)? {
     guard let image = image, let rect = normalizedSelection else { return nil }
     let left = Int((rect.x * image.size.width).rounded())
@@ -147,7 +147,7 @@ final class SelectionView: NSView {
   override func updateTrackingAreas() {
     super.updateTrackingAreas()
     if let tracking = cursorTracking { removeTrackingArea(tracking) }
-    // Cursor rects alone need an active app; the companion never activates.
+    // Cursor rects alone need an active app, and SnapScreen never activates.
     let area = NSTrackingArea(rect: .zero, options: [.cursorUpdate, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
       owner: self, userInfo: nil)
     addTrackingArea(area)
@@ -278,7 +278,7 @@ final class SelectionView: NSView {
   override func mouseDown(with event: NSEvent) {
     window?.makeFirstResponder(self)
     guard image != nil, imageRect.width > 0 else { return }
-    // As in Chrome, a drag that starts in the margin is clamped to the image edge.
+    // A drag that starts in the margin is clamped to the image edge.
     let point = normalizedPoint(event)
     anchor = point
     isDragging = true
@@ -302,7 +302,7 @@ final class SelectionView: NSView {
     if canConfirm { confirm() } else { selection = nil; onCancel?() }
   }
 
-  /// Places the In Chrome keyboard selection: centred, half the image but at most 320 × 180 points.
+  /// Places the keyboard selection: centred, half the image but at most 320 × 180 points.
   @discardableResult
   func placeKeyboardSelection() -> Bool {
     let fitted = imageRect
@@ -361,7 +361,7 @@ final class SelectionView: NSView {
   }
 }
 
-/// Shows only the extension-accepted crop, fitted and never enlarged beyond its pixel size.
+/// Shows only the accepted crop, fitted and never enlarged beyond its pixel size.
 final class PreviewView: NSView {
   var image: NSImage? {
     didSet {
