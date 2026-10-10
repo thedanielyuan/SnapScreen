@@ -154,11 +154,12 @@ npm run test:native-packaged  # extracted archive + shipped installer in disposa
 ```bash
 swift test                                                   # the core's tests and fixture replays
 scripts/build-app.sh                                         # → build/SnapScreen.app, signed
-build/SnapScreen.app/Contents/MacOS/SnapScreen --self-test   # the shared views' checks
+build/SnapScreen.app/Contents/MacOS/SnapScreen --self-test   # the views' and app shell's checks
+open build/SnapScreen.app                                    # the menu bar app
 ```
 
 - Build it phase by phase from `docs/standalone-app-plan.md`, and keep the plan current. The
-  extension stays the product until Phase 5, so leave ⌥⇧S to it.
+  extension stays the product until Phase 5, so leave ⌥⇧S to it: the app registers ⌃⌥⇧S.
 - After touching `Package.swift`, `Sources/` or `Tests/`, run the commands above.
   `Sources/SnapScreen/UI/` also builds into the companion, whose minimum is macOS 13 while the
   package's is macOS 15: keep those views to macOS 13 APIs and run the companion's checks too.
@@ -171,8 +172,13 @@ build/SnapScreen.app/Contents/MacOS/SnapScreen --self-test   # the shared views'
   `npx vitest run src/lib/core-fixtures.test.ts -u` and update the Swift core in the same change.
 - `swift test` skips `LiveAPITests` unless `SNAPSCREEN_LIVE_API_KEY` is set. Like the TypeScript
   live test, it spends API credit.
-- `build-app.sh` signs with the user's self-signed "SnapScreen Local" certificate (ad hoc in CI).
-  Keep the bundle ID and that signature: macOS ties Screen Recording and Keychain approvals to them.
+- `build-app.sh` signs with the user's Apple Development certificate (ad hoc in CI). Keep the
+  bundle ID and that certificate: macOS ties Screen Recording approval to the signature, and the
+  Keychain lets a rebuilt app read the key without a password prompt only when it has the same
+  Apple team, which a self-signed certificate lacks.
+- Quit a running copy before opening a rebuild, since opening the app while one runs only shows
+  that copy's Settings. `--self-test` adds and removes a Keychain item under its own service,
+  `com.snapscreen.app.self-test`, never the real key's.
 
 ## Build and release gotchas
 

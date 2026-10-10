@@ -41,7 +41,7 @@ These differences are deliberate:
 
 ## Decisions
 
-Each row shows the default I'd pick. Tell me which ones to change.
+You kept every default on 10 October 2026.
 
 | Decision | Default | Alternative |
 | --- | --- | --- |
@@ -107,14 +107,25 @@ Each phase leaves CI green.
   and session checks stay with the companion. The companion still runs all 318 checks.
 - Point `scripts/native-companion-build.mjs` at the new paths. The companion behaves exactly as
   before.
-- Add `scripts/build-app.sh`. It signs with a `SnapScreen Local` identity when one exists, and
-  otherwise signs ad hoc and prints a warning.
+- Add `scripts/build-app.sh`. It signs with an Apple Development certificate when one exists,
+  and otherwise signs ad hoc and prints a warning. (Until Phase 2 it used a self-signed
+  `SnapScreen Local` certificate.)
 - In the CI `native` job, add `scripts/build-app.sh` and the app's `--self-test`. `swift test`
   arrives with the core target in Phase 1.
-- **You, once:** create a self-signed code-signing certificate named `SnapScreen Local`
-  (Keychain Access → Certificate Assistant → Create a Certificate). macOS ties Screen Recording
-  and Keychain approvals to the app's signature, and an ad hoc build loses both approvals on
-  every rebuild. This is local only. Done on 10 October 2026.
+- **You, once:** create an Apple Development certificate, which is free with an Apple ID: Xcode →
+  Settings → Accounts → your Apple ID → Manage Certificates → + → Apple Development. macOS ties
+  Screen Recording and Keychain approvals to the app's signature, and an ad hoc build loses both
+  on every rebuild. The Keychain also checks the signature's Apple team. A self-signed
+  certificate has no team, so the Keychain treats each rebuild as a new app and asks for your
+  login password. The `SnapScreen Local` certificate made on 10 October 2026 had that problem,
+  so Phase 2 replaced it. This is local only. Done on 10 October 2026.
+
+  If `codesign` can't build a chain for the certificate, the Keychain is missing Apple's
+  intermediate certificate. Xcode includes the G3 one that personal teams' certificates use:
+
+  ```bash
+  security add-certificates -k ~/Library/Keychains/login.keychain-db /Applications/Xcode.app/Contents/SharedFrameworks/DVTFoundation.framework/Versions/A/Resources/AppleWWDRCA-2030.cer
+  ```
 
 Done when: CI builds the package and the companion's tests pass unchanged.
 
@@ -157,13 +168,20 @@ Done when: CI builds the package and the companion's tests pass unchanged.
 Done when: Swift request bodies equal the fixtures as JSON, and every ported case passes.
 Done on 10 October 2026: 18 fixture files replay, and 80 Swift tests pass.
 
-### Phase 2: App shell (medium)
+### Phase 2: App shell (medium, done)
 
 - `AppDelegate` with the `.accessory` policy, a single-instance guard, and the menu bar menu.
+  A second copy exits, and opening the app again while it runs shows Settings. Settings also
+  opens at launch while no key is saved, as the extension's does on install.
 - Register the global shortcut with Carbon `RegisterEventHotKey`, which needs no Accessibility
-  permission. Until Phase 5 it registers ⌃⌥⇧S, so ⌥⇧S still reaches the extension.
+  permission. Until Phase 5 it registers ⌃⌥⇧S, so ⌥⇧S still reaches the extension. The
+  registration is exclusive: if another app has the shortcut, a notice and Settings say so, and
+  the menu stops showing it.
 - Settings live in `UserDefaults` and are checked with `normalizeLimits`. The key is stored in
-  the Keychain as a generic password.
+  the Keychain as a generic password (service `com.snapscreen.app`, account
+  `anthropic-api-key`).
+- Until Phase 3, Snip checks Screen Recording and then shows a notice that snipping isn't built
+  yet.
 - The Settings window has the options page's fields:
   - the key, with show/hide, Save, Test key and Remove key
   - the Default Prompt
@@ -178,14 +196,15 @@ Done on 10 October 2026: 18 fixture files replay, and 80 Swift tests pass.
 - Add a standalone app section to `docs/security.md`.
 
 Done when: the menu, shortcut and Settings work, and the key survives a rebuild with no Keychain
-prompt.
+prompt. Done on 10 October 2026: 63 new self-test checks pass, and a rebuild signed with your
+Apple Development certificate reads the previous build's Keychain item without a prompt.
 
 ### Phase 3: Snip to answer (large)
 
 - **`ScreenCapturer`.** Use `SCShareableContent` to find the display under the pointer, filter
   out SnapScreen's own windows, and capture with `SCScreenshotManager` at full pixel resolution,
-  without the cursor. Check permission first. If it's denied, show `NoticePanel` with Open
-  System Settings.
+  without the cursor. Check permission first, as Phase 2's Snip does: if it's denied, show
+  `NoticePanel` with Open System Settings.
 - **`SelectionOverlay`.** A borderless, non-opaque panel that never activates the app. It covers
   that display above the menu bar (`canJoinAllSpaces`, `fullScreenAuxiliary`) and draws the
   frozen capture 1:1 with a dim.
@@ -267,7 +286,8 @@ Done when: the repo contains only the app and CI is green.
 
 - **Chrome page visibility under the overlay.** Phase 4 measures it. If it fails, fall back to
   live selection with a translucent dim.
-- **Approvals reset on rebuild** if the app isn't signed with the local identity from Phase 0.
+- **Approvals reset on rebuild** if the app isn't signed with an Apple Development certificate
+  (Phase 0).
 - **Shortcut conflict** while both the app and the extension exist. Handled by using ⌃⌥⇧S until
   Phase 5.
 - **Swift 6 strict concurrency.** It adds early friction, but only in the core target.

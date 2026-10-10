@@ -114,6 +114,36 @@ requests and does not change the shipped extension's manifest or isolation bound
 nonactivating panel is not a focus-preservation guarantee; see the
 [observed results](native-phase1-results.md) before drawing interaction conclusions.
 
+## Standalone app (in development)
+
+The menu bar app in `Sources/SnapScreen/` will replace the extension
+([plan](standalone-app-plan.md)), but it isn't the product yet. So far it has its menu, global
+shortcut, Settings and notices. It doesn't capture the screen yet, and it calls Anthropic's API
+only when you choose **Test key**.
+
+Its API key is a generic password in your login keychain (service `com.snapscreen.app`, account
+`anthropic-api-key`), never in a file or `UserDefaults`, which holds only the Default Prompt and
+limits. The item trusts the app that created it. macOS lets a rebuilt app read it without your
+login password only when it's signed by the same Apple team, which is why
+`scripts/build-app.sh` signs with an Apple Development certificate. Other apps, and builds signed
+any other way, must ask for that password. The app reads the key when Settings opens, and
+closing Settings clears it from the window. Checking whether a key exists reads only the item's
+attributes, never the key.
+
+The shortcut (⌃⌥⇧S until the extension is removed) is registered with Carbon's
+`RegisterEventHotKey`, which needs no Accessibility or Input Monitoring permission: the app
+receives that one combination and no other keystrokes. Settings checks Screen Recording with
+`CGPreflightScreenCaptureAccess`, which never prompts. Its **Open System Settings** button
+requests access, so macOS lists the app, and then opens that list. **Open at login** registers
+the app with `SMAppService` only when you turn it on.
+
+The app takes no commands from other processes: it has no URL scheme, socket or XPC service,
+and the only Apple events it acts on are the standard ones, where reopening the app shows
+Settings. A second copy exits when it finds one running. Notices about failures before a
+conversation exists use a panel that never activates the app or takes the keyboard. The app's
+`--self-test` adds and removes a throwaway Keychain item under its own service,
+`com.snapscreen.app.self-test`, and never reads the real key.
+
 ## API key
 
 Your API key is stored unencrypted in `chrome.storage.local` on your device and is sent
