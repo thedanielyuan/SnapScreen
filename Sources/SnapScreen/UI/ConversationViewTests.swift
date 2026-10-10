@@ -173,6 +173,34 @@ func runConversationViewTests() throws -> Int {
     "an inactive selection elsewhere does not pause following")
   try check(reader.contentHeight == scroll.documentView!.frame.height, "the thread reports its unscrolled height")
 
+  // ⇧⌘C and ⌥⌘C press the newest Copy buttons. These checks write to a private pasteboard, never
+  // the clipboard.
+  let general = Clipboard.pasteboard
+  let pasteboard = NSPasteboard(name: NSPasteboard.Name("com.snapscreen.self-test.\(UUID().uuidString)"))
+  Clipboard.pasteboard = pasteboard
+  let copier = ConversationView(frame: NSRect(x: 0, y: 0, width: 460, height: 300))
+  copier.beginTurn(question: nil)
+  try check(copier.answerToCopy == nil && !copier.copyLatestAnswer() && !copier.copyLatestCode(),
+    "nothing is copied while the first answer is pending")
+  let coded = "First\n```js\none()\n```\nThen\n```py\ntwo()\n```"
+  copier.updateAnswer(coded, status: .done)
+  copier.beginTurn(question: "More?")
+  copier.updateAnswer("Streaming", status: .streaming)
+  try check(copier.copyLatestAnswer() && pasteboard.string(forType: .string) == coded,
+    "while a newer answer streams, ⇧⌘C copies the newest finished one")
+  try check(copier.copyLatestCode() && pasteboard.string(forType: .string) == "two()", "⌥⌘C copies the newest code block")
+  let blocks = copier.turns[0].answer.segmentViews
+  try check(copier.turns[0].copyButton.toolTip == "Copy answer (⇧⌘C)" && blocks[3].copyButton?.toolTip == "Copy py code (⌥⌘C)" &&
+    blocks[1].copyButton?.toolTip == "Copy js code", "tooltips name the shortcuts on the buttons they press")
+  copier.updateAnswer("Done now", status: .done)
+  try check(copier.answerToCopy === copier.turns[1] && copier.turns[0].copyButton.toolTip == "Copy answer" &&
+    copier.turns[1].copyButton.toolTip == "Copy answer (⇧⌘C)", "the shortcut moves to the newest answer")
+  copier.actionsEnabled = false
+  try check(!copier.copyLatestAnswer() && !copier.copyLatestCode(), "an ended session copies nothing")
+  copier.clear()
+  Clipboard.pasteboard = general
+  pasteboard.releaseGlobally()
+
   // Focus: removing the focused text falls back to the composer.
   let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 400), styleMask: [.borderless],
     backing: .buffered, defer: false)
@@ -230,12 +258,24 @@ func runConversationViewTests() throws -> Int {
   try check(composer.sendButton.mode == .stop && !composer.sendButton.isEnabled, "Stop waits for the answer to start")
   _ = composer.textView(composer.textView, doCommandBy: #selector(NSResponder.insertNewline(_:)))
   try check(submitted.count == 1, "Return does not ask while an answer is in progress")
+  try check(composer.isQueued && !composer.hintLabel.isHidden && composer.hintLabel.stringValue == ComposerView.queuedMessage,
+    "Return while an answer is in progress queues the draft, and says so")
+  composer.setDraft(" ")
+  try check(!composer.isQueued && composer.hintLabel.isHidden, "emptying a queued draft takes it out of the queue")
+  composer.setDraft("short")
+  _ = composer.textView(composer.textView, doCommandBy: #selector(NSResponder.insertNewline(_:)))
+  composer.cancelQueue()
+  try check(!composer.isQueued && composer.draft == "short", "a cancelled queue leaves the draft in the field")
+  _ = composer.textView(composer.textView, doCommandBy: #selector(NSResponder.insertNewline(_:)))
   composer.canStop = true
   composer.sendButton.performClick(nil)
   try check(stops == 1 && submitted.count == 1, "the button stops a running answer")
   try check(window.firstResponder === composer.textView, "after Stop, typing continues in the field")
   composer.isRunning = false
   composer.canSubmit = true
+  composer.sendQueued()
+  try check(submitted == ["Hi", "short"] && !composer.isQueued && composer.hintLabel.isHidden,
+    "a queued draft goes once the answer finishes")
   composer.maximumCharacters = 4000
   composer.setDraft("Sent with the button")
   window.makeFirstResponder(composer.sendButton)

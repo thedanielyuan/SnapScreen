@@ -26,8 +26,10 @@ macOS asks again after every rebuild.
 - Press ⌥⇧S, or choose **Snip** from the menu bar icon, to freeze the display under the pointer.
 - Drag over a region and release to ask; hold Space while dragging to move the region. Click or
   press Escape to cancel; Return selects with the keyboard.
-- Ask follow-ups in the conversation window. You can Stop or Retry an answer, open the
-  screenshot, and copy a code block or the answer.
+- Ask follow-ups in the conversation window; Return while an answer streams sends yours when it
+  finishes. You can Stop or Retry an answer, open the screenshot, and copy a code block or the
+  answer, or press ⇧⌘C for the newest answer and ⌥⌘C for the newest code block.
+- **Close All Conversations** in the menu bar menu closes every conversation.
 - Settings holds your API key, a Default Prompt for first answers, the advanced limits, and Open
   at login.
 

@@ -57,6 +57,15 @@ public protocol SessionControllerDelegate: AnyObject {
   func session(_ session: SnipSession, didReport event: SessionEvent)
   /// A snip failed before it showed anything, so a notice should say why.
   func sessionController(_ controller: SessionController, showNotice message: String)
+  /// A snip was refused because `SessionController.maxSessions` sessions are open. Unless the
+  /// delegate offers more, a notice says so with `SessionController.fullMessage`.
+  func sessionControllerIsFull(_ controller: SessionController)
+}
+
+extension SessionControllerDelegate {
+  public func sessionControllerIsFull(_ controller: SessionController) {
+    sessionController(controller, showNotice: SessionController.fullMessage)
+  }
 }
 
 /// What a session needs from `AnthropicClient`, so tests can script answers.
@@ -85,6 +94,8 @@ struct SessionScheduler: Sendable {
 @MainActor
 public final class SessionController {
   public static let maxSessions = 4
+  /// What a snip refused at `maxSessions` says.
+  public nonisolated static let fullMessage = "Close a SnapScreen window before starting another snip."
   /// An unfinished selection ends after this long.
   static let selectionTimeout: Duration = .seconds(120)
   /// Streaming answer text reaches the windows at most this often.
@@ -119,12 +130,12 @@ public final class SessionController {
   }
 
   /// Starts a snip. `capture` freezes the display to snip. A selection that hasn't been accepted
-  /// yet ends, reporting `ended`. With four sessions open, this shows a notice and returns nil.
+  /// yet ends, reporting `ended`. With four sessions open, it tells the delegate and returns nil.
   @discardableResult
   public func start(capture: @escaping @Sendable () async throws -> FrozenScreen) -> SnipSession? {
     for session in sessions where !session.isAccepted { session.expire() }
     guard sessions.count < Self.maxSessions else {
-      delegate?.sessionController(self, showNotice: "Close a SnapScreen window before starting another snip.")
+      delegate?.sessionControllerIsFull(self)
       return nil
     }
     let session = SnipSession(controller: self, settings: settings())

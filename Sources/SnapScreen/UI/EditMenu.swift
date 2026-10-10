@@ -22,6 +22,11 @@ func installEditingMenu(applicationName: String) {
   editMenu.addItem(.separator())
   editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
   editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+  // A conversation's newest answer and code block, which its window's delegate copies.
+  let copyAnswer = editMenu.addItem(withTitle: "Copy Answer", action: Selector(("copyAnswer:")), keyEquivalent: "c")
+  copyAnswer.keyEquivalentModifierMask = [.command, .shift]
+  let copyCode = editMenu.addItem(withTitle: "Copy Code", action: Selector(("copyLastCode:")), keyEquivalent: "c")
+  copyCode.keyEquivalentModifierMask = [.command, .option]
   editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
   editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
   editItem.submenu = editMenu

@@ -198,6 +198,9 @@ final class AnswerSegmentView: NSView {
   /// A streaming code block has no Copy control until its fence closes or the answer ends.
   var answerIsFinal = false { didSet { updateCopyVisibility() } }
   var copyEnabled = true { didSet { copyButton?.isEnabled = copyEnabled } }
+  /// The shortcut that copies this block, while it's the newest that offers Copy.
+  var copyShortcut: String? { didSet { updateCopyTooltip() } }
+  private var copyLabel = "Copy code"
   override var isFlipped: Bool { true }
 
   static let codeHeaderHeight: CGFloat = 32
@@ -267,11 +270,15 @@ final class AnswerSegmentView: NSView {
     if case .code(_, let language, _) = value {
       languageLabel?.stringValue = language.isEmpty ? "code" : language
       textView.setAccessibilityLabel(language.isEmpty ? "Code block" : "\(language) code block")
-      let label = language.isEmpty ? "Copy code" : "Copy \(language) code"
-      copyButton?.toolTip = label
-      copyButton?.setAccessibilityLabel(label)
+      copyLabel = language.isEmpty ? "Copy code" : "Copy \(language) code"
+      copyButton?.setAccessibilityLabel(copyLabel)
+      updateCopyTooltip()
     }
     updateCopyVisibility()
+  }
+
+  private func updateCopyTooltip() {
+    copyButton?.toolTip = copyLabel + (copyShortcut.map { " (\($0))" } ?? "")
   }
 
   private func updateCopyVisibility() {
@@ -329,8 +336,7 @@ final class AnswerSegmentView: NSView {
   /// No streaming/render path writes the clipboard. This action runs only from the explicit button.
   @objc private func copyCode() {
     guard copyEnabled, case .code(let code, _, _) = segment else { return }
-    NSPasteboard.general.clearContents()
-    NSPasteboard.general.setString(code, forType: .string)
+    Clipboard.copy(code)
     copyButton?.showFeedback(symbol: "checkmark", title: "Copied", label: "Copied", color: Theme.accent)
   }
 

@@ -41,7 +41,8 @@ final class ComposerTextView: NSTextView {
 }
 
 /// The follow-up composer: a field that grows to six lines, then scrolls, and a Send button that
-/// becomes Stop while an answer is in progress. Return asks; Shift-Return or Option-Return adds a line.
+/// becomes Stop while an answer is in progress. Return asks, or while an answer is in progress
+/// queues the draft until it finishes; Shift-Return or Option-Return adds a line.
 final class ComposerView: NSView, NSTextViewDelegate {
   let textView = ComposerTextView(frame: .zero)
   private let scroll = NSScrollView(frame: .zero)
@@ -56,6 +57,20 @@ final class ComposerView: NSView, NSTextViewDelegate {
   /// A request is in progress: the button stops it instead of sending.
   var isRunning = false { didSet { refreshButton() } }
   var canStop = false { didSet { refreshButton() } }
+  /// A draft asked while an answer is in progress waits in the field, and goes once it finishes.
+  private(set) var isQueued = false {
+    didSet {
+      guard isQueued != oldValue else { return }
+      updateHint()
+      // Its hint changes the field's height, which its host fits around.
+      onChange?()
+      if isQueued {
+        NSAccessibility.post(element: hintLabel, notification: .announcementRequested,
+          userInfo: [.announcement: Self.queuedMessage, .priority: NSAccessibilityPriorityLevel.medium.rawValue])
+      }
+    }
+  }
+  static let queuedMessage = "Sends when this answer finishes"
   private var rejectedInput = false
   override var isFlipped: Bool { true }
 
@@ -144,6 +159,7 @@ final class ComposerView: NSView, NSTextViewDelegate {
     textView.string = ""
     textView.undoManager?.removeAllActions()
     rejectedInput = false
+    isQueued = false
     textChanged()
   }
 
@@ -253,11 +269,14 @@ final class ComposerView: NSView, NSTextViewDelegate {
     if rejectedInput {
       hintLabel.stringValue = "Follow-up is too long. The limit is \(maximumCharacters.formatted()) characters."
       hintLabel.textColor = .systemRed
+    } else if isQueued {
+      hintLabel.stringValue = Self.queuedMessage
+      hintLabel.textColor = .secondaryLabelColor
     } else {
       hintLabel.stringValue = "\(count.formatted()) / \(maximumCharacters.formatted())"
       hintLabel.textColor = count > maximumCharacters ? .systemRed : .secondaryLabelColor
     }
-    let hidden = !(rejectedInput || near)
+    let hidden = !(rejectedInput || near || isQueued)
     if hintLabel.isHidden != hidden {
       hintLabel.isHidden = hidden
       invalidateIntrinsicContentSize()
@@ -266,6 +285,8 @@ final class ComposerView: NSView, NSTextViewDelegate {
   }
 
   private func textChanged() {
+    // Emptying a queued draft takes it out of the queue; editing it sends the edit.
+    if isQueued && !hasSendableDraft { isQueued = false }
     updateHint()
     refreshButton()
     invalidateIntrinsicContentSize()
@@ -318,12 +339,30 @@ final class ComposerView: NSView, NSTextViewDelegate {
     }
   }
 
-  /// Asks the draft when the session allows it. The host clears the draft once it is sent.
+  /// Asks the draft when the session allows it, or queues it while an answer is in progress. The
+  /// host clears the draft once it is sent.
   func submit() {
-    guard !isRunning, canSubmit else { return }
+    guard isRunning || canSubmit else { return }
     commitMarkedText()
     guard hasSendableDraft else { return }
+    if isRunning {
+      isQueued = true
+      return
+    }
+    isQueued = false
     onSubmit?(trimProtocolText(draft))
+  }
+
+  /// The answer a queued draft waited for has finished, so the draft goes now.
+  func sendQueued() {
+    guard isQueued else { return }
+    isQueued = false
+    submit()
+  }
+
+  /// The answer failed or was stopped, so a queued draft stays in the field, unsent.
+  func cancelQueue() {
+    isQueued = false
   }
 
   @objc private func sendPressed() {

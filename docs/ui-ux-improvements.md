@@ -3,7 +3,7 @@
 Proposal, 10 October 2026. Changes to how SnapScreen looks and responds that keep what it does:
 the same requests, features and limits, and windows that never activate the app, with Escape and
 Command-W closing on key release. Offscreen renders of the current views confirmed items 1 and 3.
-Items 1–4 matter most for daily use; 1–4 and 8 are done.
+Items 1–4 matter most for daily use; 1–8 are done.
 
 ## Highest value
 
@@ -67,33 +67,33 @@ nothing, since they're often still held from ⌥⇧S. The README mentions it.
 
 ## Medium
 
-### 5. Copy from the keyboard
+### 5. Copy from the keyboard (done)
 
-Add Copy Answer (⇧⌘C) and Copy Code (⌥⌘C, the latest answer's last code block) to the Edit menu in
-`UI/EditMenu.swift`, with no target, so `SessionWindows`, the conversation panel's delegate,
-receives them through the responder chain. Show the same checkmark as the buttons, and name the
-shortcuts in their tooltips.
+Done on 11 October 2026: the Edit menu in `UI/EditMenu.swift` has Copy Answer (⇧⌘C) and Copy Code
+(⌥⌘C), with no target, so `SessionWindows`, the conversation panel's delegate, receives them
+through the responder chain and enables them only when there's something to copy. They press the
+Copy buttons of the newest answer that offers Copy, even while a newer one streams, and of the
+newest code block, so they show the same checkmark. Those buttons' tooltips name the shortcuts.
+Copy now writes through `Clipboard`, which the self-test points at a private pasteboard.
 
-### 6. Say what Return does while an answer streams
+### 6. Queue Return while an answer streams (done)
 
-`ComposerView.submit` returns silently while a request runs, and the draft stays in the field.
-Either:
+`ComposerView.submit` returned silently while a request ran, and the draft stayed in the field.
 
-- send the draft when the answer finishes, showing it as waiting until then, and leave it in the
-  field if the answer fails or you stop it. This is smoother, but it sends without a second key
-  press; or
-- keep sending as it is and show why, with a hint under the field or a pulse on the Stop button.
+Done on 11 October 2026: Return while an answer is in progress queues the draft, and the field says
+"Sends when this answer finishes". Once the answer finishes, the draft is sent as it then reads. If
+the answer fails or you stop it, the draft stays in the field, unsent, and emptying the field
+takes it out of the queue.
 
-### 7. Recover from the four-window limit
+### 7. Recover from the four-window limit (done)
 
-With four sessions open, a snip shows "Close a SnapScreen window before starting another snip."
-and does nothing else.
+With four sessions open, a snip showed "Close a SnapScreen window before starting another snip."
+and did nothing else.
 
-- Give that notice a Close Oldest button (`NoticeAction` supports one), and add Close All to the
-  menu bar menu while conversations are open.
-- `SessionControllerDelegate.sessionController(_:showNotice:)` passes only text, so give this case
-  its own delegate method rather than matching the string. The text is pinned in
-  `SessionControllerTests.swift` and `SessionWindowsTests.swift`.
+Done on 11 October 2026: that notice has a Close Oldest button, which closes the conversation that
+opened first, and the menu bar menu has Close All Conversations, enabled while one is open. The
+core tells its delegate through a new `sessionControllerIsFull(_:)`, whose default shows the same
+notice without a button, so the core's tests and fixtures don't change.
 
 ## Polish
 

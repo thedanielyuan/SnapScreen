@@ -36,6 +36,17 @@ enum Theme {
   }
 }
 
+/// Where Copy writes: the general pasteboard. The self-test swaps in a private one, so it never
+/// touches your clipboard.
+enum Clipboard {
+  static var pasteboard = NSPasteboard.general
+
+  static func copy(_ text: String) {
+    pasteboard.clearContents()
+    pasteboard.setString(text, forType: .string)
+  }
+}
+
 /// Panels never activate SnapScreen, so the app beneath stays active. A key released after its
 /// panel closes would therefore reach that app. Escape and Command-W close on release.
 final class CompanionPanel: NSPanel {

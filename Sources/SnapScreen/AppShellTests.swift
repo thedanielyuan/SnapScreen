@@ -29,24 +29,28 @@ func runAppShellTests() throws -> Int {
 
   final class MenuTarget: NSObject {
     var snips = 0
+    var closes = 0
     var settings = 0
     @objc func snip() { snips += 1 }
+    @objc func closeAll() { closes += 1 }
     @objc func showSettings() { settings += 1 }
   }
   let target = MenuTarget()
-  let menu = StatusMenu.make(target: target, snip: #selector(MenuTarget.snip), settings: #selector(MenuTarget.showSettings),
-    shortcut: .snip)
-  try check(menu.items.map(\.title) == ["Snip", "Settings…", "", "Quit SnapScreen"] && menu.items[2].isSeparatorItem,
-    "the menu has Snip, Settings… and Quit")
+  let menu = StatusMenu.make(target: target, snip: #selector(MenuTarget.snip), closeAll: #selector(MenuTarget.closeAll),
+    settings: #selector(MenuTarget.showSettings), shortcut: .snip)
+  try check(menu.items.map(\.title) == ["Snip", "Close All Conversations", "Settings…", "", "Quit SnapScreen"] &&
+    menu.items[3].isSeparatorItem, "the menu has Snip, Close All Conversations, Settings… and Quit")
   try check(menu.items[0].keyEquivalent == "s" && menu.items[0].keyEquivalentModifierMask == [.option, .shift],
     "Snip shows its shortcut")
-  try check(menu.items[3].action == #selector(NSApplication.terminate(_:)) && menu.items[3].keyEquivalent == "q",
+  try check(menu.items[4].action == #selector(NSApplication.terminate(_:)) && menu.items[4].keyEquivalent == "q",
     "Quit terminates the app")
   menu.performActionForItem(at: 0)
   menu.performActionForItem(at: 1)
-  try check(target.snips == 1 && target.settings == 1, "Snip and Settings… reach the app")
-  let taken = StatusMenu.make(target: target, snip: #selector(MenuTarget.snip), settings: #selector(MenuTarget.showSettings),
-    shortcut: nil)
+  menu.performActionForItem(at: 2)
+  try check(target.snips == 1 && target.closes == 1 && target.settings == 1,
+    "Snip, Close All Conversations and Settings… reach the app")
+  let taken = StatusMenu.make(target: target, snip: #selector(MenuTarget.snip), closeAll: #selector(MenuTarget.closeAll),
+    settings: #selector(MenuTarget.showSettings), shortcut: nil)
   try check(taken.items[0].keyEquivalent.isEmpty, "a shortcut another app has isn't shown")
   try check(StatusMenu.icon?.isTemplate == true, "the menu bar icon adapts to the menu bar")
 
@@ -57,6 +61,12 @@ func runAppShellTests() throws -> Int {
     "the Edit menu gives Settings' fields copy and paste")
   try check(NSApp.mainMenu?.item(withTitle: "File")?.submenu?.item(withTitle: "Close window")?.keyEquivalent == "w",
     "Command-W closes a window")
+  let copyAnswer = edit?.item(withTitle: "Copy Answer")
+  let copyCode = edit?.item(withTitle: "Copy Code")
+  try check(copyAnswer?.keyEquivalent == "c" && copyAnswer?.keyEquivalentModifierMask == [.command, .shift] &&
+    copyAnswer?.action == #selector(SessionWindows.copyAnswer(_:)) && copyCode?.keyEquivalent == "c" &&
+    copyCode?.keyEquivalentModifierMask == [.command, .option] && copyCode?.action == #selector(SessionWindows.copyLastCode(_:)),
+    "⇧⌘C copies a conversation's newest answer and ⌥⌘C its newest code block")
 
   var performed = 0
   var closed = 0
