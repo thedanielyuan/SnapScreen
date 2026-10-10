@@ -77,7 +77,8 @@ use a panel that never activates the app or takes the keyboard.
 
 The app's `--self-test` adds and removes a throwaway Keychain item under its own service,
 `com.snapscreen.app.self-test`, and never reads the real key. Its snips use a scripted client and
-a made-up capture, so they need neither the network nor Screen Recording. The live test,
+a made-up capture, so they need neither the network nor Screen Recording, and its copy checks
+write to a private pasteboard, never your clipboard. The live test,
 `scripts/test-app-live.sh`, runs a separate test-hooks build in `build/test-hooks/`. That build
 has its own bundle ID and an ad hoc signature, replaces the capture and the API with scripted
 ones, and reads no key. `build-app.sh` refuses to make a production app that contains its code.
