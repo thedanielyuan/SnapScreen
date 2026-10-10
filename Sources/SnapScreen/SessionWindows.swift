@@ -314,7 +314,8 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
     let window = CompanionPanel.make(title: "Screenshot", contentSize: size, minimumSize: NSSize(width: 240, height: 180),
       media: true)
     window.delegate = self
-    window.setFrame(windowFrame(size: size, beside: nil, in: visible), display: false)
+    // Beside the conversation, so the preview covers neither it nor the middle of the screen.
+    window.setFrame(windowFrame(size: size, beside: panel?.frame, in: visible), display: false)
     let preview = PreviewView(image: image)
     window.contentView = preview
     previewPanel = window

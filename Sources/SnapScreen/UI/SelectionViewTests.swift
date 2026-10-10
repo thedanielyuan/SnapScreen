@@ -229,8 +229,8 @@ func runSelectionViewTests() throws -> Int {
     let fitted = dimmed.imageRect
     let inside = red(dimmed, CGPoint(x: fitted.minX + fitted.width * 0.25, y: fitted.midY)) ?? 0
     let outside = red(dimmed, CGPoint(x: fitted.minX + fitted.width * 0.9, y: fitted.midY)) ?? 0
-    // Inside, only the selection's light tint changes the colour.
-    try check(inside > 0.85 && abs(outside - 0.65) < 0.03,
+    // Inside, a dragged selection shows its true colour, untinted.
+    try check(inside > 0.99 && abs(outside - 0.65) < 0.03,
       fills ? "the overlay dims only outside the selection" : "the selection window dims only outside the selection")
   }
   return count

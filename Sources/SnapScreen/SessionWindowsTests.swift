@@ -157,6 +157,14 @@ func runSessionWindowsTests() throws -> Int {
   let top = panel.frame.maxY
   try check(panel.frame.height < largest.height && fitsThread() && windows.fitsContent,
     "the conversation opens only as tall as its answer needs")
+  try check(panel.standardWindowButton(.closeButton)?.isHidden == false &&
+    panel.standardWindowButton(.miniaturizeButton)?.isHidden == true && panel.standardWindowButton(.zoomButton)?.isHidden == true &&
+    panel.titleVisibility == .hidden && panel.title == "SnapScreen", "the conversation's title bar holds only its close button")
+  windows.conversation?.onPreview?()
+  try check(windows.previewPanel.map { !$0.frame.intersects(panel.frame) } == true,
+    "the screenshot preview opens beside the conversation")
+  windows.previewPanel?.performClose(nil)
+  try check(windows.previewPanel == nil && windows.panel === panel, "closing the preview keeps the conversation")
 
   windows.composer?.setDraft("Why?")
   windows.composer?.submit()

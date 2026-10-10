@@ -14,7 +14,7 @@ struct SettingsServices {
 }
 
 /// The Settings window: the key, the Default Prompt and the advanced limits, plus Screen
-/// Recording status and Open at login.
+/// Recording status and Open at login. Closing it saves what you changed.
 final class SettingsWindowController: NSObject, NSWindowDelegate {
   static let contentWidth: CGFloat = 440
   static let consoleURL = URL(string: "https://console.anthropic.com/")!
@@ -49,6 +49,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
   private let services: SettingsServices
   private var hasStoredKey = false
+  /// The key as last read or saved, so closing knows whether a typed one is new. Like the field,
+  /// it's held only while Settings is open.
+  private var savedKey = ""
   private var testPending = false
   private var removalEpoch = 0
   private var testTask: Task<Void, Never>?
@@ -273,6 +276,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     if hasStoredKey {
       do {
         keyField.stringValue = try services.keyStore.read() ?? ""
+        savedKey = keyField.stringValue
       } catch {
         showStatus(Self.message(for: error), isError: true, sticky: true)
       }
@@ -281,11 +285,25 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   }
 
   private func setLimits(_ limits: SnapScreenLimits) {
-    inputCharactersField.stringValue = String(limits.maxInputCharacters)
-    conversationTurnsField.stringValue = String(limits.maxConversationTurns)
-    screenshotSizeField.stringValue = limits.maxScreenshotBytes % megabyte == 0
-      ? String(limits.maxScreenshotBytes / megabyte) : String(Double(limits.maxScreenshotBytes) / Double(megabyte))
-    screenshotEdgeField.stringValue = String(limits.maxScreenshotDimension)
+    for (input, value) in zip(limitInputs, limitStrings(limits)) { input.field.stringValue = value }
+  }
+
+  /// The limits as their fields show them, in `limitInputs` order.
+  private func limitStrings(_ limits: SnapScreenLimits) -> [String] {
+    [String(limits.maxInputCharacters), String(limits.maxConversationTurns),
+      limits.maxScreenshotBytes % megabyte == 0
+        ? String(limits.maxScreenshotBytes / megabyte) : String(Double(limits.maxScreenshotBytes) / Double(megabyte)),
+      String(limits.maxScreenshotDimension)]
+  }
+
+  /// Whether the fields differ from what's saved: the Default Prompt, a limit, or a new typed key.
+  var hasUnsavedChanges: Bool {
+    let saved = SessionSettings.load(from: services.defaults)
+    let typedPrompt = promptView.string.jsTrimmed
+    let apiKey = enteredKey.jsTrimmed
+    return (typedPrompt.isEmpty ? SessionSettings.defaults.defaultPrompt : typedPrompt) != saved.defaultPrompt ||
+      limitInputs.map { $0.field.stringValue.jsTrimmed } != limitStrings(saved.limits) ||
+      (!apiKey.isEmpty && apiKey != savedKey)
   }
 
   private struct LimitInput {
@@ -326,13 +344,15 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
       maxScreenshotDimension: values[3], maxConversationTurns: values[1])
   }
 
-  @objc func save() {
-    guard let limits = readLimits() else { return }
+  /// Saves the key, Default Prompt and limits, or reports the first that can't be saved and saves
+  /// nothing more. Returns whether it saved.
+  @objc @discardableResult func save() -> Bool {
+    guard let limits = readLimits() else { return false }
     let typedPrompt = promptView.string.jsTrimmed
     let prompt = typedPrompt.isEmpty ? SessionSettings.defaults.defaultPrompt : typedPrompt
     guard countTextCharacters(prompt) <= limits.maxInputCharacters else {
       showStatus("Default Prompt exceeds the \(groupedDigits(limits.maxInputCharacters)) character limit.", isError: true)
-      return
+      return false
     }
     let apiKey = enteredKey.jsTrimmed
     if !apiKey.isEmpty {
@@ -340,9 +360,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         try services.keyStore.save(apiKey)
       } catch {
         showStatus(Self.message(for: error), isError: true)
-        return
+        return false
       }
       hasStoredKey = true
+      savedKey = apiKey
     }
     SessionSettings.save(defaultPrompt: prompt, to: services.defaults)
     SessionSettings.save(limits: limits, to: services.defaults)
@@ -353,6 +374,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
       showStatus(hasStoredKey ? "Settings saved. Existing API key unchanged."
         : "Settings saved. Add an API key to analyze screenshots.")
     }
+    return true
   }
 
   @objc func testKey() {
@@ -397,6 +419,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
       return
     }
     hasStoredKey = false
+    savedKey = ""
     keyField.stringValue = ""
     visibleKeyField.stringValue = ""
     setKeyVisible(false)
@@ -487,6 +510,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   /// Returning from System Settings may have changed either.
   func windowDidBecomeKey(_ notification: Notification) { refreshSystemStatus() }
 
+  /// Closing saves what you changed, as Save does. If something can't be saved, Settings stays open
+  /// showing why.
+  func windowShouldClose(_ sender: NSWindow) -> Bool {
+    !hasUnsavedChanges || save()
+  }
+
   func windowWillClose(_ notification: Notification) {
     testTask?.cancel()
     testTask = nil
@@ -495,6 +524,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     // The key stays in memory only while Settings is open.
     keyField.stringValue = ""
     visibleKeyField.stringValue = ""
+    savedKey = ""
     onClose?()
   }
 }

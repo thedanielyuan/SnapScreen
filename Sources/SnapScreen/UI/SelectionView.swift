@@ -241,8 +241,11 @@ final class SelectionView: NSView {
       inner.stroke()
     }
     let color = isKeyboardSelection ? Theme.keyboardSelection : Theme.pointerSelection
-    color.withAlphaComponent(isKeyboardSelection ? 0.16 : 0.12).setFill()
-    rect.fill()
+    // A dragged region shows its true colours, as it's sent; the undimmed area and border mark it.
+    if isKeyboardSelection {
+      color.withAlphaComponent(0.16).setFill()
+      rect.fill()
+    }
     color.setStroke()
     let border = NSBezierPath(rect: rect.insetBy(dx: 1, dy: 1))
     border.lineWidth = 2

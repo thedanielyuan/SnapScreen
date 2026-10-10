@@ -3,7 +3,7 @@
 Proposal, 10 October 2026. Changes to how SnapScreen looks and responds that keep what it does:
 the same requests, features and limits, and windows that never activate the app, with Escape and
 Command-W closing on key release. Offscreen renders of the current views confirmed items 1 and 3.
-Items 1–4 matter most for daily use; 1–8 are done.
+Items 1–4 matter most for daily use. All twelve are done, from 10 to 11 October 2026.
 
 ## Highest value
 
@@ -102,18 +102,21 @@ notice without a button, so the core's tests and fixtures don't change.
    (`ConversationView.reserveScreenshot`) and keeps it, so the crop fills its place without moving
    the thread. It doesn't show a crop of the frozen screen meanwhile: `CGImage.cropping` shares its
    pixels, which would keep the whole display in memory.
-9. **Trim the panel's title bar.** The conversation panel shows a disabled minimize button, a zoom
-   button that stretches a floating panel over the app you're snipping, and the title
-   "SnapScreen". Hide all three in `CompanionPanel.make` (`UI/Panels.swift`).
-10. **Drop the tint inside a drawn selection.** `SelectionView.drawSelection` fills the region with
-    12% blue, so it looks different from what's sent. The undimmed region and its border already
-    mark it. The keyboard selection's ring and fill can stay, so the two remain distinguishable.
-11. **Open the preview beside the conversation.** `SessionWindows.showPreview` centers it on the
-    screen (`beside: nil`). Passing the conversation panel's frame puts it to one side.
-12. **Don't lose Settings edits.** Closing Settings drops unsaved Default Prompt and limit edits
-    without a word (`SettingsWindowController.windowWillClose`), while Open at login applies at
-    once. Save on close when the fields are valid, or apply each field when you finish editing
-    it. Low priority: it only matters when you edit the prompt or limits.
+9. **Trim the panel's title bar (done).** Panels showed a disabled minimize button, a zoom button
+   that stretched a floating panel over the app you're snipping, and the title "SnapScreen".
+   `CompanionPanel.make` (`UI/Panels.swift`) now hides all three, for the conversation and the
+   preview; the title stays for accessibility.
+10. **Drop the tint inside a drawn selection (done).** `SelectionView.drawSelection` filled the
+    region with 12% blue, so it looked different from what's sent. A dragged region now shows in
+    its true colours, marked by the undimmed area and its border. The keyboard selection keeps
+    its ring and fill, so the two remain distinguishable.
+11. **Open the preview beside the conversation (done).** `SessionWindows.showPreview` centered it
+    on the screen. It now passes the conversation panel's frame to `windowFrame`, so the preview
+    opens to one side of it.
+12. **Don't lose Settings edits (done).** Closing Settings dropped unsaved Default Prompt and limit
+    edits without a word. Now closing saves them, and a newly typed key, as Save does
+    (`SettingsWindowController.windowShouldClose`). If a value isn't allowed, Settings stays open
+    showing why, and nothing is saved. The Save button stays, for saving without closing.
 
 ## Not proposed
 

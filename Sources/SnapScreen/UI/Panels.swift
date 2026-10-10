@@ -2,7 +2,9 @@ import AppKit
 
 extension CompanionPanel {
   /// A floating panel that never activates the app. Media panels (selection and preview) show an
-  /// image edge to edge under a transparent title bar. The caller sets the delegate.
+  /// image edge to edge under a transparent title bar. The title bar holds only the close button:
+  /// the title stays for accessibility but isn't drawn, a panel can't be minimized, and zooming
+  /// one would cover the app you snip. The caller sets the delegate.
   static func make(title: String, contentSize: NSSize, minimumSize: NSSize, media: Bool) -> CompanionPanel {
     var style: NSWindow.StyleMask = [.titled, .closable, .resizable, .nonactivatingPanel]
     if media { style.insert(.fullSizeContentView) }
@@ -18,13 +20,11 @@ extension CompanionPanel {
     value.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     value.acceptsMouseMovedEvents = true
     value.titlebarAppearsTransparent = true
+    value.titleVisibility = .hidden
+    value.standardWindowButton(.miniaturizeButton)?.isHidden = true
+    value.standardWindowButton(.zoomButton)?.isHidden = true
     value.contentMinSize = minimumSize
-    if media {
-      value.titleVisibility = .hidden
-      value.backgroundColor = Theme.backdrop
-    } else {
-      value.backgroundColor = Theme.background
-    }
+    value.backgroundColor = media ? Theme.backdrop : Theme.background
     return value
   }
 
