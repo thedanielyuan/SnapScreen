@@ -95,6 +95,9 @@ opened first, and the menu bar menu has Close All Conversations, enabled while o
 core tells its delegate through a new `sessionControllerIsFull(_:)`, whose default shows the same
 notice without a button, so the core's tests and fixtures don't change.
 
+Later on 11 October 2026, each snip's conversation began replacing the previous one, so the app can
+no longer reach the limit, and the Close Oldest button was removed. Close All Conversations stays.
+
 ## Polish
 
 8. **Reserve the thumbnail's space (done).** The thumbnail arrived with `.accepted`, after the

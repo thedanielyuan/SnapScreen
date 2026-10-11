@@ -94,9 +94,11 @@ func runSessionWindowsTests() throws -> Int {
   let slot = KeySlot()
   var notices: [String] = []
   var noticeActions: [NoticeAction?] = []
+  // The window shown last, which would have the keyboard.
+  weak var presented: NSWindow?
   let controller = SessionController(answers: answers, apiKey: { slot.key }, settings: { .defaults })
   let snips = SnipWindows(controller: controller, showNotice: { notices.append($0); noticeActions.append($1) },
-    present: { _ in })
+    present: { presented = $0 })
   defer { snips.shields.stop() }
   let context = CGContext(data: nil, width: 64, height: 40, bitsPerComponent: 8, bytesPerRow: 0,
     space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue)!
@@ -359,29 +361,29 @@ func runSessionWindowsTests() throws -> Int {
   try check(waitUntil { finished.conversation?.latestTurn?.state == .done } && finished.dismissesOnOutsideClick,
     "a successful Retry makes the conversation dismissible again")
 
-  // Starting another snip leaves it open and dismissible. Selecting happens in SnapScreen's overlay,
-  // which the monitor never sees.
+  // A new snip leaves it open and dismissible while you select. Selecting happens in SnapScreen's
+  // overlay, which the monitor never sees.
   guard let selecting = snip() else { throw SessionWindowsTestError.failed("another snip") }
   try check(selecting.overlay != nil && finished.panel === finishedPanel && finished.dismissesOnOutsideClick &&
-    snips.sessions.count == 2, "a new snip leaves a finished conversation open and dismissible")
+    snips.sessions.count == 2, "a new snip leaves a finished conversation open and dismissible while you select")
   selecting.overlay?.closeAction?()
-  try check(snips.sessions.count == 1 && finished.dismissesOnOutsideClick, "cancelling the new snip leaves it as it was")
+  try check(snips.sessions.count == 1 && finished.panel === finishedPanel && finished.dismissesOnOutsideClick,
+    "cancelling the new snip leaves it as it was")
 
   // The click closes both windows through the close button's path, which ends the session, releases
-  // the screenshot, answers and draft, and stops watching. Meanwhile no other panel, such as a second
-  // conversation, can take the keyboard, which AppKit would otherwise hand it from the closing ones.
+  // the screenshot, answers and draft, and stops watching. Meanwhile no other panel, such as a new
+  // snip's overlay, can take the keyboard, which AppKit would otherwise hand it from the closing
+  // ones.
   guard let finishedThread = finished.conversation, let finishedComposer = finished.composer,
     let finishedPreview = finished.previewPanel, let finishedPreviewView = finishedPreview.contentView as? PreviewView else {
     throw SessionWindowsTestError.failed("the conversation and preview stay open")
   }
   try check(finishedPreviewView !== previewView && finishedPreviewView.image != nil, "the preview opens again")
-  guard let second = snip(), select(second), let secondPanel = second.panel else {
-    throw SessionWindowsTestError.failed("a second conversation")
-  }
+  guard let next = snip(), let nextOverlay = next.overlay else { throw SessionWindowsTestError.failed("a new snip's overlay") }
   var keyableWhileClosing: Bool?
   let closed = finished.onClose
   finished.onClose = {
-    keyableWhileClosing = secondPanel.canBecomeKey
+    keyableWhileClosing = nextOverlay.canBecomeKey
     closed?()
   }
   finishedComposer.setDraft("Not sent")
@@ -392,12 +394,62 @@ func runSessionWindowsTests() throws -> Int {
     "a click in another app ends the session and closes the conversation and preview")
   try check(finishedPreviewView.image == nil && finishedThread.turns.isEmpty && finishedThread.thumbnail.screenshot == nil &&
     finishedComposer.draft.isEmpty, "closing them releases the screenshot, answers and unsent draft")
-  try check(keyableWhileClosing == false && secondPanel.canBecomeKey && snips.sessions.count == 1 && second.panel === secondPanel &&
-    second.dismissesOnOutsideClick, "another conversation can't take the keyboard while they close, stays open, and can take it after")
+  try check(keyableWhileClosing == false && nextOverlay.canBecomeKey && snips.sessions.count == 1 && next.overlay === nextOverlay,
+    "a new snip's overlay can't take the keyboard while they close, stays up, and can take it after")
   finished.clickedOutside(at: elsewhere())
   try check(finished.session.phase == .ended && snips.sessions.count == 1, "a later click finds nothing more to close")
-  second.clickedOutside(at: NSPoint(x: secondPanel.frame.minX - 60, y: secondPanel.frame.midY))
-  try check(second.session.phase == .ended && second.panel == nil && snips.sessions.isEmpty, "a click elsewhere closes the other too")
+
+  // Selecting a region in a new snip closes the earlier conversation and preview through the close
+  // button's path, even while it answers, which ends its session and releases its screenshot,
+  // answers and draft. The new conversation opens with the keyboard first, so they hand it nowhere.
+  guard select(next), let nextPanel = next.panel, let nextThread = next.conversation, let nextComposer = next.composer else {
+    throw SessionWindowsTestError.failed("the new snip's conversation")
+  }
+  next.conversation?.onPreview?()
+  guard let nextPreview = next.previewPanel, let nextPreviewView = nextPreview.contentView as? PreviewView else {
+    throw SessionWindowsTestError.failed("the new snip's preview")
+  }
+  answers.pauses = true
+  nextComposer.setDraft("Still answering")
+  nextComposer.submit()
+  try check(waitUntil { nextThread.latestTurn?.state == .streaming }, "the conversation answers a follow-up")
+  nextComposer.setDraft("Not sent")
+  guard let latest = snip() else { throw SessionWindowsTestError.failed("a snip while the answer streams") }
+  try check(next.panel === nextPanel && next.previewPanel === nextPreview && next.session.phase == .running &&
+    snips.sessions.count == 2, "a new snip leaves a streaming conversation open while you select")
+  var shownFirst: Bool?
+  let closedNext = next.onClose
+  next.onClose = {
+    shownFirst = latest.panel != nil && presented === latest.panel
+    closedNext?()
+  }
+  latest.selectionView?.selection = CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
+  latest.selectionView?.confirm()
+  try check(next.session.phase == .ended && next.panel == nil && next.previewPanel == nil && next.conversation == nil &&
+    snips.sessions.count == 1 && snips.sessions.first === latest && latest.panel != nil,
+    "selecting a region in a new snip closes the earlier conversation and preview, ending its session")
+  try check(shownFirst == true, "the new conversation opens with the keyboard before the earlier one closes")
+  try check(nextPreviewView.image == nil && nextThread.turns.isEmpty && nextThread.thumbnail.screenshot == nil &&
+    nextComposer.draft.isEmpty, "closing them releases the screenshot, answers and unsent draft")
+  answers.pauses = false
+  try check(waitUntil { latest.conversation?.latestTurn?.state == .done } &&
+    answers.questions.suffix(2) == ["Still answering", "(first)"], "the new snip is answered, and the stopped one isn't")
+
+  // A new snip ends a selection that's still being cropped, which leaves a notice in its
+  // conversation. Selecting the new snip's region closes that too.
+  guard let cropping = snip() else { throw SessionWindowsTestError.failed("a snip to crop") }
+  cropping.selectionView?.selection = CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
+  cropping.selectionView?.confirm()
+  try check(latest.panel == nil && latest.session.phase == .ended && snips.sessions.count == 1,
+    "each snip's conversation replaces the one before")
+  guard let replacing = snip() else { throw SessionWindowsTestError.failed("a snip during cropping") }
+  try check(cropping.session.phase == .ended && cropping.panel?.contentView is SessionEndedView && snips.sessions.count == 2,
+    "a new snip ends a selection that's being cropped, leaving a notice")
+  guard select(replacing) else { throw SessionWindowsTestError.failed("the replacing snip's answer") }
+  try check(cropping.panel == nil && snips.sessions.count == 1 && snips.sessions.first === replacing,
+    "selecting the new snip's region closes the notice too")
+  replacing.panel?.performClose(nil)
+  try check(replacing.session.phase == .ended && snips.sessions.isEmpty, "closing the last conversation leaves none")
 
   // A scroller that comes and goes as the conversation grows changes how wide its thread is, so how
   // its text wraps and how tall its thumbnail is. It still ends up fitting. This conversation opens
@@ -427,24 +479,21 @@ func runSessionWindowsTests() throws -> Int {
   controller.start { throw CaptureError("The display was disconnected.") }
   try check(waitUntil { notices == ["The display was disconnected."] } && snips.sessions.isEmpty &&
     noticeActions.count == 1 && noticeActions[0] == nil, "a capture failure shows its notice, without a button")
-  var open: [SessionWindows] = []
-  for _ in 0..<SessionController.maxSessions {
+  // Each snip's conversation replaces the last, so snipping more often than the session limit
+  // never reaches it.
+  var answered: [SessionWindows] = []
+  for _ in 0...SessionController.maxSessions {
     guard let windows = snip(), select(windows) else { throw SessionWindowsTestError.failed("an answered snip") }
-    open.append(windows)
+    answered.append(windows)
   }
-  let next = open[0].panel.map { $0.contentRect(forFrameRect: $0.frame).size }
-  try check(next.map { $0.width == chosen.width && $0.height <= chosen.height } == true && open[0].fitsContent,
-    "a later conversation opens at the width you chose, and fits its thread up to your height")
-  try check(controller.start { frozen } == nil && notices.last == "Close a SnapScreen window before starting another snip." &&
-    noticeActions.last??.title == "Close Oldest", "a fifth snip offers to close the oldest conversation")
-  noticeActions.last??.perform()
-  try check(open[0].panel == nil && open[0].session.phase == .ended && snips.sessions.count == 3 &&
-    snips.sessions.first === open[1], "Close Oldest closes the conversation that opened first")
+  try check(snips.sessions.count == 1 && snips.sessions.first === answered.last && notices.count == 1 &&
+    answered.dropLast().allSatisfy { $0.panel == nil && $0.session.phase == .ended },
+    "snipping more often than the session limit replaces each conversation, without a notice")
+  let latestSize = answered.last?.panel.map { $0.contentRect(forFrameRect: $0.frame).size }
+  try check(latestSize.map { $0.width == chosen.width && $0.height <= chosen.height } == true &&
+    answered.last?.fitsContent == true, "a later conversation opens at the width you chose, and fits its thread up to your height")
   snips.closeAll()
-  try check(snips.sessions.isEmpty && open.allSatisfy { $0.panel == nil && $0.session.phase == .ended },
-    "Close All closes every conversation")
-  let room = controller.start { frozen }
-  try check(snips.sessions.isEmpty && room != nil, "closing conversations makes room again")
-  room?.close()
+  try check(snips.sessions.isEmpty && answered.allSatisfy { $0.panel == nil && $0.session.phase == .ended },
+    "Close All closes the conversation")
   return count
 }

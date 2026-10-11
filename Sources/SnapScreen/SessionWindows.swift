@@ -1,7 +1,8 @@
 import AppKit
 import SnapScreenCore
 
-/// Gives each snip its windows, and shows a notice when a snip fails before it has any.
+/// Gives each snip its windows, and shows a notice when a snip fails before it has any. Each snip's
+/// conversation replaces the earlier snips' windows, so only one is open at a time.
 @MainActor
 final class SnipWindows: SessionControllerDelegate {
   let controller: SessionController
@@ -28,6 +29,7 @@ final class SnipWindows: SessionControllerDelegate {
     } else if case .captured = event {
       let windows = SessionWindows(session: session, shields: shields, chosenSize: chosenSize, present: present)
       windows.onClose = { [weak self, weak windows] in self?.closed(windows) }
+      windows.onOpenConversation = { [weak self, weak windows] in self?.closeEarlier(than: windows) }
       sessions.append(windows)
       windows.handle(event)
     }
@@ -37,19 +39,17 @@ final class SnipWindows: SessionControllerDelegate {
     showNotice(message, nil)
   }
 
-  /// With every session open, the notice offers to close the oldest conversation.
-  func sessionControllerIsFull(_ controller: SessionController) {
-    showNotice(SessionController.fullMessage, NoticeAction(title: "Close Oldest") { [weak self] in self?.closeOldest() })
-  }
-
-  /// Closes the conversation that opened first, ending its session.
-  func closeOldest() {
-    sessions.first?.closeConversation()
-  }
-
   /// Closes every conversation, ending their sessions.
   func closeAll() {
     for windows in sessions { windows.closeConversation() }
+  }
+
+  /// Once a snip's conversation has opened, closes the earlier snips' conversations, previews and
+  /// ended notices through their close button's path, ending their sessions. Cancelling a snip
+  /// leaves them open. The new conversation already has the keyboard, so closing these windows,
+  /// which don't, hands it to nothing, and no app is activated.
+  private func closeEarlier(than windows: SessionWindows?) {
+    for earlier in sessions where earlier !== windows { earlier.closeConversation() }
   }
 
   private func closed(_ windows: SessionWindows?) {
@@ -73,7 +73,7 @@ final class ChosenConversationSize {
 /// selection and the screenshot preview. None of them activates SnapScreen, so the app you snip
 /// keeps focus, and Escape and Command-W close on key release. The conversation opens small and
 /// grows to fit its thread until you resize it. Once its answer has finished, a click in another
-/// app closes the conversation and preview.
+/// app closes the conversation and preview. Selecting a region in a new snip closes them too.
 @MainActor
 final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
   static let endedMessage = "Snip again to start a new capture."
@@ -91,6 +91,8 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
   let session: SnipSession
   /// Called once every window has closed.
   var onClose: (() -> Void)?
+  /// Called once the conversation has replaced the overlay and taken the keyboard.
+  var onOpenConversation: (() -> Void)?
   private(set) var overlay: CompanionPanel?
   private(set) var selectionView: SelectionView?
   private(set) var panel: CompanionPanel?
@@ -184,6 +186,7 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
     let screen = window.screen
     releaseOverlay()
     showConversation(beside: anchor, on: screen, cropSize: cropSize)
+    onOpenConversation?()
   }
 
   private func cancelSelection() {
@@ -393,7 +396,7 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
     guard ![panel, previewPanel].contains(where: { $0?.frame.insetBy(dx: -margin, dy: -margin).contains(point) == true })
     else { return }
     // Closing them would make AppKit give the keyboard back to another SnapScreen panel, such as a
-    // second conversation, taking it from the app you clicked, so no panel takes it meanwhile.
+    // new snip's overlay, taking it from the app you clicked, so no panel takes it meanwhile.
     CompanionPanel.refusesKeyboard = true
     defer { CompanionPanel.refusesKeyboard = false }
     closeConversation()

@@ -73,12 +73,23 @@ follow-up or a Retry runs, or after one fails or stops. Clicks in SnapScreen's o
 as the conversation, the preview or a new snip's overlay, never reach the monitor. A click within
 8 points of either panel, where it may have been meant to resize one, or while a panel is pressed
 or resized, leaves them open. Closing them activates no app. Closing a panel makes AppKit hand
-the keyboard to another SnapScreen panel, such as a second conversation, even after your click
+the keyboard to another SnapScreen panel, such as a new snip's overlay, even after your click
 gave it to the app you clicked, so while they close no SnapScreen panel can take it. On 11 October
 2026 a scripted copy of the app measured this over Chrome in a normal window and in fullscreen,
 before and after the change: the page kept focus and visibility, and a key typed after the
 dismissing click reached it. A click in another app blurred the page, as it does without
 SnapScreen.
+
+Selecting a region in a new snip closes the previous snip's conversation and preview the same
+way, whatever state they're in, so only one conversation is open at a time. Cancelling the new
+snip leaves them open. They close only after the new conversation has opened with the keyboard,
+so closing them hands the keyboard to no other window, and nothing is activated or refocused. On
+11 October 2026 a scripted copy of the app measured this over Chrome in a normal window and in
+fullscreen, before and after the change. Replacing a finished conversation and its preview, or one
+still answering, and cancelling a new snip, changed neither the page's focus nor its visibility,
+and SnapScreen never became frontmost. Once the new conversation closed, a key typed next reached
+the page; before the change, the old preview took it. A click in another app blurred the page
+once, as it did with no SnapScreen running.
 
 Two limitations are known and accepted. The shortcut's modifier keys reach the app beneath,
 because they're pressed before the S that macOS hands to SnapScreen. And macOS periodically shows
