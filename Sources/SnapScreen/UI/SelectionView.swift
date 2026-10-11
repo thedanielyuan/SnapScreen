@@ -163,8 +163,30 @@ final class SelectionView: NSView {
   }
 
   override func cursorUpdate(with event: NSEvent) { NSCursor.crosshair.set() }
-  override func mouseEntered(with event: NSEvent) { NSCursor.crosshair.set() }
+  override func mouseEntered(with event: NSEvent) { holdCrosshair() }
   override func mouseExited(with event: NSEvent) { NSCursor.arrow.set() }
+  override func mouseMoved(with event: NSEvent) { showCrosshair() }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    if window != nil { holdCrosshair() }
+  }
+
+  /// The app the pointer leaves resets the cursor as the overlay covers it, sometimes just after
+  /// this view set the crosshair, so it's set again over the next second, and on each move and press.
+  private func holdCrosshair() {
+    showCrosshair()
+    for delay in [0.02, 0.05, 0.1, 0.3, 1] {
+      DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.showCrosshair() }
+    }
+  }
+
+  /// Only while the pointer is over the image: the key window also gets moves over other displays.
+  private func showCrosshair() {
+    guard let window = window, window.isVisible,
+      imageRect.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil)) else { return }
+    NSCursor.crosshair.set()
+  }
 
   private func displayRect(_ selection: CGRect, in fitted: CGRect) -> CGRect {
     CGRect(x: fitted.minX + selection.minX * fitted.width, y: fitted.minY + selection.minY * fitted.height,
@@ -288,6 +310,7 @@ final class SelectionView: NSView {
 
   override func mouseDown(with event: NSEvent) {
     window?.makeFirstResponder(self)
+    showCrosshair()
     guard image != nil, imageRect.width > 0 else { return }
     // A drag that starts in the margin is clamped to the image edge.
     let point = normalizedPoint(event)

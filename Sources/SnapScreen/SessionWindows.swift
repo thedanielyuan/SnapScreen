@@ -165,6 +165,7 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
     window.contentView = view
     overlay = window
     selectionView = view
+    BackgroundCursor.setEnabled(true)
     present(window)
     window.makeFirstResponder(view)
   }
@@ -186,6 +187,8 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
 
   /// Drops every reference to the frozen display.
   private func releaseOverlay() {
+    // A new snip releases the previous overlay before it shows its own.
+    if overlay != nil { BackgroundCursor.setEnabled(false) }
     selectionView?.image = nil
     selectionView?.onCancel = nil
     selectionView?.onConfirm = nil

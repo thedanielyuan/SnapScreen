@@ -63,7 +63,9 @@ show for a few seconds.
   pointer, and leaves out its own windows. Captures, crops, answers and drafts stay in memory,
   are never written to disk or logged, and are released when their session closes.
 - Panels never activate the app, so the app you snip keeps focus: close windows on key release
-  (`CompanionPanel`) and give tracking areas `.activeAlways`.
+  (`CompanionPanel`) and give tracking areas `.activeAlways`. macOS ignores cursor changes from an
+  app that isn't frontmost, so the overlay's crosshair needs `BackgroundCursor`, which it turns on
+  only while it's up.
 - The app takes no commands from other processes: no URL scheme, socket or XPC service.
 - Test hooks (`SNAPSCREEN_TEST_HOOKS`) compile only into `build/test-hooks/`, which has its own
   bundle ID, and `build-app.sh` refuses a production binary that contains them.

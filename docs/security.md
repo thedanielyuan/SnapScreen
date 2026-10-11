@@ -58,7 +58,9 @@ the app beneath. The overlay is non-opaque, because an opaque window covering th
 make Chrome mark its page as hidden. Phase 4's acceptance round
 ([plan](standalone-app-plan.md)) measured this over Chrome in a normal window and in fullscreen:
 SnapScreen never became the frontmost app, the page kept focus and visibility, and no keys, text
-or clicks reached it.
+or clicks reached it. macOS shows only the frontmost app's cursor changes, so while the overlay is
+up, SnapScreen sets the window server's private `SetsCursorInBackground` property, which lets its
+crosshair show without activating the app, and turns it off when the overlay closes.
 
 Two limitations are known and accepted. The shortcut's modifier keys reach the app beneath,
 because they're pressed before the S that macOS hands to SnapScreen. And macOS periodically shows
