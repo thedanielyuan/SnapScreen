@@ -72,6 +72,9 @@ show for a few seconds.
   an event tap, key monitoring, or app deactivation or key-window loss. Closing a panel after
   another app took the keyboard makes AppKit hand it back to another panel, so that close sets
   `CompanionPanel.refusesKeyboard`.
+- Selecting a region in a new snip closes the earlier snips' windows (`SnipWindows.closeEarlier`)
+  through `closeConversation()`, only after the new conversation has the keyboard, so their close
+  hands it nowhere. Keep that order, and don't make the close activate or refocus anything.
 - The app takes no commands from other processes: no URL scheme, socket or XPC service.
 - Test hooks (`SNAPSCREEN_TEST_HOOKS`) compile only into `build/test-hooks/`, which has its own
   bundle ID, and `build-app.sh` refuses a production binary that contains them.

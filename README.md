@@ -29,8 +29,10 @@ macOS asks again after every rebuild.
 - Ask follow-ups in the conversation window; Return while an answer streams sends yours when it
   finishes. You can Stop or Retry an answer, open the screenshot, and copy a code block or the
   answer, or press ⇧⌘C for the newest answer and ⌥⌘C for the newest code block.
-- Once an answer has finished, clicking in another app closes the conversation and its
-  screenshot. **Close All Conversations** in the menu bar menu closes every conversation.
+- Selecting a region in a new snip closes the previous conversation and its screenshot, so only
+  one is open at a time; cancelling the new snip keeps them. Once an answer has finished, clicking
+  in another app closes them too, and **Close All Conversations** in the menu bar menu closes them
+  at any time.
 - Settings holds your API key, a Default Prompt for first answers, the advanced limits, and Open
   at login. Closing it saves your changes.
 

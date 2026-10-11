@@ -18,9 +18,9 @@ explains what it handles, where that data goes, and what stays on your Mac.
 | Data | When | Where it goes | How long it's kept |
 | --- | --- | --- | --- |
 | A capture of the display under the pointer | When you press ⌥⇧S or choose Snip | In memory on your Mac | Until you select a region or cancel, start another snip, or two minutes pass |
-| The region you select | When you release the selection | Sent to Anthropic to get the answer, and shown in the conversation window | In memory until you close the conversation |
-| Questions you type | When you ask | Sent to Anthropic with the region | In memory until you close the conversation |
-| Answer text | When Anthropic responds | Shown in the conversation window | In memory until you close the conversation; Copy puts text on your clipboard |
+| The region you select | When you release the selection | Sent to Anthropic to get the answer, and shown in the conversation window | In memory until you close the conversation or snip another region |
+| Questions you type | When you ask | Sent to Anthropic with the region | In memory until you close the conversation or snip another region |
+| Answer text | When Anthropic responds | Shown in the conversation window | In memory until you close the conversation or snip another region; Copy puts text on your clipboard |
 | Your Anthropic API key | When you save it in Settings | Your login keychain, and sent to Anthropic with each request | Until you remove it in Settings |
 | Settings: the Default Prompt, limits and Open at login | When you change them | SnapScreen's preferences on your Mac; the Default Prompt is sent with first answers | Until you change them |
 | Where you click in other apps | While a conversation whose answer has finished is open | Nowhere: SnapScreen uses it only to close that conversation | Not kept |

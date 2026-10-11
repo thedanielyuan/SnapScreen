@@ -7,11 +7,13 @@ import SnapScreenCore
 // Recording, and a scripted event stream replaces the API. Everything else is the real app: the
 // session controller, the client reading the stream, and the overlay and conversation windows.
 
-/// Answers the first request and the follow-up as the API streams them, and keeps the requests.
+/// Answers the first request, the follow-up and the second snip as the API streams them, and keeps
+/// the requests.
 final class ScriptedAPI: HTTPTransport, @unchecked Sendable {
   static let firstAnswer = "SNAPSCREEN_LIVE_FIRST_ANSWER\n\n```python\nprint(2 + 2)\n```\n\nThe result is 4."
   static let followUp = "SNAPSCREEN_LIVE_FOLLOW_UP"
   static let followUpAnswer = "SNAPSCREEN_LIVE_FOLLOW_UP_ANSWER"
+  static let secondSnipAnswer = "SNAPSCREEN_LIVE_SECOND_SNIP_ANSWER"
 
   private let lock = NSLock()
   private var bodies: [Data] = []
@@ -26,7 +28,7 @@ final class ScriptedAPI: HTTPTransport, @unchecked Sendable {
       bodies.append(request.httpBody ?? Data())
       return bodies.count - 1
     }
-    let text = index == 0 ? Self.firstAnswer : Self.followUpAnswer
+    let text = [Self.firstAnswer, Self.followUpAnswer, Self.secondSnipAnswer][min(index, 2)]
     let half = text.index(text.startIndex, offsetBy: text.count / 2)
     let events: [[String: Any]] = [
       ["type": "message_start", "message": ["id": "msg_snapscreen_live", "type": "message", "role": "assistant",
@@ -60,9 +62,10 @@ final class ScriptedAPI: HTTPTransport, @unchecked Sendable {
   }
 }
 
-/// Snips once through real windows: selects a region with the keyboard, reads the answer, asks one
-/// follow-up, opens the preview, and closes both as a click in another app does. It exits 0 once
-/// every check passes, and 1 at the first that fails.
+/// Snips twice through real windows. The first snip selects a region with the keyboard, reads the
+/// answer, asks one follow-up and opens the preview. The second replaces that conversation and
+/// preview, then closes its own as a click in another app does. It exits 0 once every check
+/// passes, and 1 at the first that fails.
 @MainActor
 final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate {
   static let timeout: TimeInterval = 45
@@ -72,9 +75,12 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
   private var controller: SessionController?
   private var snips: SnipWindows?
   private var screen: NSScreen?
+  private var capture: FrozenScreen?
   private var session: SnipSession?
   private var expectedCrop: (width: Int, height: Int)?
   private var selectionOnScreen: CGRect?
+  /// The first snip's windows, open while the second snip selects.
+  private var replaced: (windows: SessionWindows, panel: CompanionPanel, preview: CompanionPanel)?
   private var answers = 0
   private var checks = 0
 
@@ -97,8 +103,9 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
       return
     }
     self.screen = screen
-    let image = Self.fixture(for: screen)
-    controller.start { FrozenScreen(image: image, displayID: displayID) }
+    let capture = FrozenScreen(image: Self.fixture(for: screen), displayID: displayID)
+    self.capture = capture
+    controller.start { capture }
   }
 
   func session(_ session: SnipSession, didReport event: SessionEvent) {
@@ -141,14 +148,18 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
   }
 
   private func selectRegion() {
-    guard let screen = screen, let windows = snips?.sessions.first, let overlay = windows.overlay,
-      let view = windows.selectionView, let image = view.image else {
+    guard let screen = screen, let windows = snips?.sessions.first(where: { $0.session === session }),
+      let overlay = windows.overlay, let view = windows.selectionView, let image = view.image else {
       fail("the capture opens the overlay")
       return
     }
     check(overlay.isVisible && overlay.frame == screen.frame && !overlay.isOpaque && overlay.level == .screenSaver,
       "the overlay covers the display, above everything, and isn't opaque")
     check(overlay.isKeyWindow && !isFrontmost, "the overlay takes the keyboard without activating SnapScreen")
+    if let earlier = replaced {
+      check(earlier.panel.isVisible && earlier.preview.isVisible && earlier.windows.session.phase == .ready,
+        "a new snip leaves the conversation and preview open while you select")
+    }
     // Return places a keyboard selection, and Return again asks about it.
     overlay.sendEvent(key(.keyDown, in: overlay))
     overlay.sendEvent(key(.keyUp, in: overlay))
@@ -162,6 +173,21 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
     overlay.sendEvent(key(.keyDown, in: overlay))
     check(windows.overlay == nil && windows.panel?.isVisible == true && windows.composer?.isRunning == true,
       "asking replaces the overlay with the conversation, waiting for its answer")
+    if let earlier = replaced {
+      guard let panel = windows.panel, let shield = snips?.shields.shield else {
+        fail("the new conversation opens above the pointer shield")
+        return
+      }
+      check(!earlier.panel.isVisible && !earlier.preview.isVisible && earlier.windows.panel == nil &&
+        earlier.windows.session.phase == .ended && snips?.sessions.count == 1,
+        "the new snip's conversation closes the earlier conversation and preview, ending its session")
+      check(panel.isKeyWindow && NSApp.keyWindow === panel && !isFrontmost,
+        "the new conversation keeps the keyboard as they close, without activating SnapScreen")
+      // Front to back, this app's windows on screen.
+      let order = (NSWindow.windowNumbers(options: []) ?? []).map(\.intValue)
+      check(order.firstIndex(of: panel.windowNumber).map { order.dropFirst($0 + 1).first == shield.windowNumber } == true &&
+        shield.isVisible && shield.ignoresMouseEvents, "the pointer shield moves beneath the new conversation")
+    }
   }
 
   private func key(_ type: NSEvent.EventType, in window: NSWindow) -> NSEvent {
@@ -172,8 +198,8 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
 
   private func answered() {
     answers += 1
-    guard let windows = snips?.sessions.first, let panel = windows.panel, let thread = windows.conversation,
-      let composer = windows.composer, let turn = thread.latestTurn else {
+    guard let windows = snips?.sessions.first(where: { $0.session === session }), let panel = windows.panel,
+      let thread = windows.conversation, let composer = windows.composer, let turn = thread.latestTurn else {
       fail("the conversation stays open while it's answered")
       return
     }
@@ -201,17 +227,34 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
       check(!windows.dismissesOnOutsideClick, "a click in another app can't close the follow-up as it's answered")
       return
     }
-    check(turn.question == ScriptedAPI.followUp && turn.answer.renderedText == ScriptedAPI.followUpAnswer,
-      "the follow-up and its answer show")
-    checkRequests()
+    if answers == 2 {
+      check(turn.question == ScriptedAPI.followUp && turn.answer.renderedText == ScriptedAPI.followUpAnswer,
+        "the follow-up and its answer show")
+      checkRequests()
+      thread.onPreview?()
+      guard let preview = windows.previewPanel, let capture = capture else {
+        fail("the screenshot preview opens")
+        return
+      }
+      check(preview.isVisible && preview.isKeyWindow && windows.dismissesOnOutsideClick,
+        "the preview opens with the keyboard, and a click in another app can close both")
+      // Snip again, as the shortcut does. Selecting its region replaces this conversation.
+      replaced = (windows, panel, preview)
+      controller?.start { capture }
+      return
+    }
+    check(turn.question == nil && thread.turns.count == 1 && turn.answer.renderedText == ScriptedAPI.secondSnipAnswer,
+      "the new snip's answer shows in a conversation of its own")
+    check(api.requests.count == 3 && (api.requests[2]["messages"] as? [[String: Any]])?.count == 1,
+      "the new snip's request carries none of the earlier conversation")
     thread.onPreview?()
     guard let preview = windows.previewPanel, let screen = screen else {
-      fail("the screenshot preview opens")
+      fail("the new snip's preview opens")
       return
     }
     check(preview.isVisible && preview.isKeyWindow && windows.dismissesOnOutsideClick,
-      "the preview opens with the keyboard, and a click in another app can close both")
-    // Another panel, as a second conversation would be, and a click in another app, which takes the
+      "the new snip's preview opens with the keyboard, and a click in another app can close both")
+    // Another panel, as a new snip's overlay would be, and a click in another app, which takes the
     // keyboard, as giving it up here does. AppKit would hand the keyboard back to that panel as these
     // close.
     let other = CompanionPanel.make(title: "Other", contentSize: SessionWindows.minimumConversationSize,
@@ -248,7 +291,7 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
       "the pointer shield is hidden and lets clicks through once they close")
     check(!isFrontmost, "SnapScreen never became the active app")
     print("SnapScreen live test passed (test hooks build): \(checks) checks, keyboard selection, streamed answer, " +
-      "follow-up, preview, and a click elsewhere closing them through real windows")
+      "follow-up, preview, a new snip replacing them, and a click elsewhere closing its windows through real windows")
     pasteboard.releaseGlobally()
     exit(0)
   }
