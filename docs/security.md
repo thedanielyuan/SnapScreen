@@ -72,8 +72,13 @@ logs nothing. It watches only while a finished conversation is open: not while a
 follow-up or a Retry runs, or after one fails or stops. Clicks in SnapScreen's own windows, such
 as the conversation, the preview or a new snip's overlay, never reach the monitor. A click within
 8 points of either panel, where it may have been meant to resize one, or while a panel is pressed
-or resized, leaves them open. Closing them activates no app: the app you clicked keeps the focus
-your click gave it.
+or resized, leaves them open. Closing them activates no app. Closing a panel makes AppKit hand
+the keyboard to another SnapScreen panel, such as a second conversation, even after your click
+gave it to the app you clicked, so while they close no SnapScreen panel can take it. On 11 October
+2026 a scripted copy of the app measured this over Chrome in a normal window and in fullscreen,
+before and after the change: the page kept focus and visibility, and a key typed after the
+dismissing click reached it. A click in another app blurred the page, as it does without
+SnapScreen.
 
 Two limitations are known and accepted. The shortcut's modifier keys reach the app beneath,
 because they're pressed before the S that macOS hands to SnapScreen. And macOS periodically shows

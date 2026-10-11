@@ -209,21 +209,41 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
       fail("the screenshot preview opens")
       return
     }
-    check(preview.isVisible && windows.dismissesOnOutsideClick, "the preview opens, and a click in another app can close both")
-    // A click in another app reaches the monitor with its position, away from both panels. It
-    // closes them as the close button does, which ends the session and releases its windows.
+    check(preview.isVisible && preview.isKeyWindow && windows.dismissesOnOutsideClick,
+      "the preview opens with the keyboard, and a click in another app can close both")
+    // Another panel, as a second conversation would be, and a click in another app, which takes the
+    // keyboard, as giving it up here does. AppKit would hand the keyboard back to that panel as these
+    // close.
+    let other = CompanionPanel.make(title: "Other", contentSize: SessionWindows.minimumConversationSize,
+      minimumSize: SessionWindows.minimumConversationSize, media: false)
+    other.setFrameOrigin(NSPoint(x: screen.visibleFrame.minX, y: screen.visibleFrame.maxY - other.frame.height))
+    other.orderFront(nil)
+    NSApp.deactivate()
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+      self?.clickElsewhere(windows, panel: panel, preview: preview, other: other, on: screen)
+    }
+  }
+
+  private func clickElsewhere(_ windows: SessionWindows, panel: CompanionPanel, preview: CompanionPanel,
+    other: CompanionPanel, on screen: NSScreen) {
+    check(!preview.isKeyWindow && !NSApp.isActive, "the other app has the keyboard")
+    // The click reaches the monitor with its position, away from the panels. It closes them as the
+    // close button does, which ends the session and releases its windows.
     let margin = SessionWindows.outsideClickMargin + 1
     let visible = screen.visibleFrame.insetBy(dx: 1, dy: 1)
     guard let elsewhere = [NSPoint(x: visible.minX, y: visible.minY), NSPoint(x: visible.maxX, y: visible.minY),
       NSPoint(x: visible.minX, y: visible.maxY), NSPoint(x: visible.maxX, y: visible.maxY)].first(where: { point in
-        ![panel.frame, preview.frame].contains { $0.insetBy(dx: -margin, dy: -margin).contains(point) }
+        ![panel.frame, preview.frame, other.frame].contains { $0.insetBy(dx: -margin, dy: -margin).contains(point) }
       }) else {
-      fail("there's room on the display away from the conversation and the preview")
+      fail("there's room on the display away from the panels")
       return
     }
     windows.clickedOutside(at: elsewhere)
     check(!panel.isVisible && !preview.isVisible && snips?.sessions.isEmpty == true && session?.phase == .ended &&
       !windows.dismissesOnOutsideClick, "a click in another app closes the conversation and preview, ending the session")
+    check(other.isVisible && !other.isKeyWindow && NSApp.keyWindow == nil && !NSApp.isActive && other.canBecomeKey,
+      "no other SnapScreen panel takes the keyboard back as they close")
+    other.close()
     check(snips?.shields.shield.map { !$0.isVisible && $0.ignoresMouseEvents } ?? false,
       "the pointer shield is hidden and lets clicks through once they close")
     check(!isFrontmost, "SnapScreen never became the active app")

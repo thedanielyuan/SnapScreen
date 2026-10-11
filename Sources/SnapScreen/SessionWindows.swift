@@ -392,6 +392,10 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
     let margin = Self.outsideClickMargin
     guard ![panel, previewPanel].contains(where: { $0?.frame.insetBy(dx: -margin, dy: -margin).contains(point) == true })
     else { return }
+    // Closing them would make AppKit give the keyboard back to another SnapScreen panel, such as a
+    // second conversation, taking it from the app you clicked, so no panel takes it meanwhile.
+    CompanionPanel.refusesKeyboard = true
+    defer { CompanionPanel.refusesKeyboard = false }
     closeConversation()
   }
 

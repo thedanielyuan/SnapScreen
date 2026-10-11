@@ -368,22 +368,36 @@ func runSessionWindowsTests() throws -> Int {
   try check(snips.sessions.count == 1 && finished.dismissesOnOutsideClick, "cancelling the new snip leaves it as it was")
 
   // The click closes both windows through the close button's path, which ends the session, releases
-  // the screenshot, answers and draft, and stops watching.
-  finished.composer?.setDraft("Not sent")
+  // the screenshot, answers and draft, and stops watching. Meanwhile no other panel, such as a second
+  // conversation, can take the keyboard, which AppKit would otherwise hand it from the closing ones.
   guard let finishedThread = finished.conversation, let finishedComposer = finished.composer,
     let finishedPreview = finished.previewPanel, let finishedPreviewView = finishedPreview.contentView as? PreviewView else {
     throw SessionWindowsTestError.failed("the conversation and preview stay open")
   }
   try check(finishedPreviewView !== previewView && finishedPreviewView.image != nil, "the preview opens again")
+  guard let second = snip(), select(second), let secondPanel = second.panel else {
+    throw SessionWindowsTestError.failed("a second conversation")
+  }
+  var keyableWhileClosing: Bool?
+  let closed = finished.onClose
+  finished.onClose = {
+    keyableWhileClosing = secondPanel.canBecomeKey
+    closed?()
+  }
+  finishedComposer.setDraft("Not sent")
   finished.clickedOutside(at: elsewhere())
   try check(finished.session.phase == .ended && finished.panel == nil && finished.previewPanel == nil &&
-    finished.conversation == nil && finished.composer == nil && !finished.dismissesOnOutsideClick && snips.sessions.isEmpty &&
+    finished.conversation == nil && finished.composer == nil && !finished.dismissesOnOutsideClick &&
     !finishedPanel.isVisible && !finishedPreview.isVisible && !snips.shields.isTrackingPanel,
     "a click in another app ends the session and closes the conversation and preview")
   try check(finishedPreviewView.image == nil && finishedThread.turns.isEmpty && finishedThread.thumbnail.screenshot == nil &&
     finishedComposer.draft.isEmpty, "closing them releases the screenshot, answers and unsent draft")
+  try check(keyableWhileClosing == false && secondPanel.canBecomeKey && snips.sessions.count == 1 && second.panel === secondPanel &&
+    second.dismissesOnOutsideClick, "another conversation can't take the keyboard while they close, stays open, and can take it after")
   finished.clickedOutside(at: elsewhere())
-  try check(finished.session.phase == .ended && snips.sessions.isEmpty, "a later click finds nothing more to close")
+  try check(finished.session.phase == .ended && snips.sessions.count == 1, "a later click finds nothing more to close")
+  second.clickedOutside(at: NSPoint(x: secondPanel.frame.minX - 60, y: secondPanel.frame.midY))
+  try check(second.session.phase == .ended && second.panel == nil && snips.sessions.isEmpty, "a click elsewhere closes the other too")
 
   // A scroller that comes and goes as the conversation grows changes how wide its thread is, so how
   // its text wraps and how tall its thumbnail is. It still ends up fitting. This conversation opens
