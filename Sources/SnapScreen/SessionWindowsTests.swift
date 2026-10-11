@@ -80,6 +80,7 @@ func runSessionWindowsTests() throws -> Int {
   try check(overlay.frame == screen.frame && overlay.level == .screenSaver &&
     overlay.collectionBehavior.contains([.canJoinAllSpaces, .fullScreenAuxiliary]),
     "the overlay covers its whole display, above the menu bar and fullscreen apps")
+  try check(BackgroundCursor.isAvailable, "the overlay can show its crosshair while SnapScreen isn't frontmost")
 
   let answers = SelfTestAnswers()
   let slot = KeySlot()
