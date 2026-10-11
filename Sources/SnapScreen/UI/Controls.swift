@@ -56,7 +56,10 @@ final class CompanionPanel: NSPanel {
   /// Replaces `performClose`, which never reaches the delegate of a window without a close
   /// button, such as the borderless selection overlay.
   var closeAction: (() -> Void)?
-  override var canBecomeKey: Bool { true }
+  /// While set, no panel takes the keyboard. Closing a panel makes AppKit hand the keyboard to
+  /// another, even after a click in another app took it.
+  static var refusesKeyboard = false
+  override var canBecomeKey: Bool { !Self.refusesKeyboard }
   override var canBecomeMain: Bool { false }
 
   /// Closes now for pointer actions; for a key press, closes when that key is released.

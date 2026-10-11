@@ -61,7 +61,8 @@ final class ScriptedAPI: HTTPTransport, @unchecked Sendable {
 }
 
 /// Snips once through real windows: selects a region with the keyboard, reads the answer, asks one
-/// follow-up, and closes. It exits 0 once every check passes, and 1 at the first that fails.
+/// follow-up, opens the preview, and closes both as a click in another app does. It exits 0 once
+/// every check passes, and 1 at the first that fails.
 @MainActor
 final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate {
   static let timeout: TimeInterval = 45
@@ -193,21 +194,61 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
         charactersIgnoringModifiers: "c", isARepeat: false, keyCode: 8)!)
       check(panel.isKeyWindow && pasteboard.string(forType: .string) == "print(2 + 2)",
         "⌥⌘C in the conversation copies its code block")
+      check(windows.dismissesOnOutsideClick, "once the answer finishes, a click in another app can close it")
       composer.setDraft(ScriptedAPI.followUp)
       composer.submit()
       check(thread.turns.count == 2 && composer.isRunning, "the follow-up starts a new turn")
+      check(!windows.dismissesOnOutsideClick, "a click in another app can't close the follow-up as it's answered")
       return
     }
     check(turn.question == ScriptedAPI.followUp && turn.answer.renderedText == ScriptedAPI.followUpAnswer,
       "the follow-up and its answer show")
     checkRequests()
-    // Close as the close button does, which ends the session and releases its windows.
-    panel.performClose(nil, during: nil)
-    check(!panel.isVisible && snips?.sessions.isEmpty == true && session?.phase == .ended,
-      "closing the conversation ends the session")
+    thread.onPreview?()
+    guard let preview = windows.previewPanel, let screen = screen else {
+      fail("the screenshot preview opens")
+      return
+    }
+    check(preview.isVisible && preview.isKeyWindow && windows.dismissesOnOutsideClick,
+      "the preview opens with the keyboard, and a click in another app can close both")
+    // Another panel, as a second conversation would be, and a click in another app, which takes the
+    // keyboard, as giving it up here does. AppKit would hand the keyboard back to that panel as these
+    // close.
+    let other = CompanionPanel.make(title: "Other", contentSize: SessionWindows.minimumConversationSize,
+      minimumSize: SessionWindows.minimumConversationSize, media: false)
+    other.setFrameOrigin(NSPoint(x: screen.visibleFrame.minX, y: screen.visibleFrame.maxY - other.frame.height))
+    other.orderFront(nil)
+    NSApp.deactivate()
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+      self?.clickElsewhere(windows, panel: panel, preview: preview, other: other, on: screen)
+    }
+  }
+
+  private func clickElsewhere(_ windows: SessionWindows, panel: CompanionPanel, preview: CompanionPanel,
+    other: CompanionPanel, on screen: NSScreen) {
+    check(!preview.isKeyWindow && !NSApp.isActive, "the other app has the keyboard")
+    // The click reaches the monitor with its position, away from the panels. It closes them as the
+    // close button does, which ends the session and releases its windows.
+    let margin = SessionWindows.outsideClickMargin + 1
+    let visible = screen.visibleFrame.insetBy(dx: 1, dy: 1)
+    guard let elsewhere = [NSPoint(x: visible.minX, y: visible.minY), NSPoint(x: visible.maxX, y: visible.minY),
+      NSPoint(x: visible.minX, y: visible.maxY), NSPoint(x: visible.maxX, y: visible.maxY)].first(where: { point in
+        ![panel.frame, preview.frame, other.frame].contains { $0.insetBy(dx: -margin, dy: -margin).contains(point) }
+      }) else {
+      fail("there's room on the display away from the panels")
+      return
+    }
+    windows.clickedOutside(at: elsewhere)
+    check(!panel.isVisible && !preview.isVisible && snips?.sessions.isEmpty == true && session?.phase == .ended &&
+      !windows.dismissesOnOutsideClick, "a click in another app closes the conversation and preview, ending the session")
+    check(other.isVisible && !other.isKeyWindow && NSApp.keyWindow == nil && !NSApp.isActive && other.canBecomeKey,
+      "no other SnapScreen panel takes the keyboard back as they close")
+    other.close()
+    check(snips?.shields.shield.map { !$0.isVisible && $0.ignoresMouseEvents } ?? false,
+      "the pointer shield is hidden and lets clicks through once they close")
     check(!isFrontmost, "SnapScreen never became the active app")
     print("SnapScreen live test passed (test hooks build): \(checks) checks, keyboard selection, streamed answer, " +
-      "follow-up and Close through real windows")
+      "follow-up, preview, and a click elsewhere closing them through real windows")
     pasteboard.releaseGlobally()
     exit(0)
   }
