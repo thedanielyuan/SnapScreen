@@ -86,6 +86,9 @@ final class PointerShieldController {
     pointerTimer = nil
   }
 
+  /// Whether a panel is pressed or live-resizing, when a click in another app mustn't close one.
+  var isTrackingPanel: Bool { pressedWindow != nil || liveResizing }
+
   /// Orders the shield directly beneath a panel, across the panel's screen. Panels call this as
   /// they appear, so the shield is in place before any resize starts. A hidden panel needs none.
   func place(below window: CompanionPanel) {

@@ -72,7 +72,8 @@ final class ChosenConversationSize {
 /// One session's windows: the overlay over its frozen display, then its conversation beside the
 /// selection and the screenshot preview. None of them activates SnapScreen, so the app you snip
 /// keeps focus, and Escape and Command-W close on key release. The conversation opens small and
-/// grows to fit its thread until you resize it.
+/// grows to fit its thread until you resize it. Once its answer has finished, a click in another
+/// app closes the conversation and preview.
 @MainActor
 final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
   static let endedMessage = "Snip again to start a new capture."
@@ -83,6 +84,9 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
   /// Between the thread and the follow-up field, and from the field to the panel's edges.
   private static let composerGap: CGFloat = 8
   private static let composerMargin: CGFloat = 14
+  /// A click in another app this close to a panel, where macOS resizes it, was probably aimed at
+  /// the panel, so it doesn't close it.
+  static let outsideClickMargin: CGFloat = 8
 
   let session: SnipSession
   /// Called once every window has closed.
@@ -105,6 +109,8 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
   private var growsUpward = false
   /// The visible frame of the display it opens on, which fitting uses until it's on screen.
   private var openingVisibleFrame = NSRect.zero
+  /// Watches clicks in other apps while the answer has finished, and only then.
+  private var outsideClickMonitor: Any?
 
   init(session: SnipSession, shields: PointerShieldController, chosenSize: ChosenConversationSize,
     present: @escaping @MainActor (NSWindow) -> Void) {
@@ -255,6 +261,8 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
   private func updateControls() {
     conversation?.canRetry = session.canRetry
     conversation?.actionsEnabled = session.phase != .ended
+    // Not while an answer, a follow-up or Retry is running, or after one failed or stopped.
+    watchOutsideClicks(panel != nil && session.phase == .ready)
     guard let composer = composer else { return }
     composer.maximumCharacters = session.maxInputCharacters
     composer.isRunning = session.phase == .cropping || session.phase == .running
@@ -357,6 +365,36 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
     close()
   }
 
+  /// Whether a click in another app closes the conversation now.
+  var dismissesOnOutsideClick: Bool { outsideClickMonitor != nil }
+
+  /// A global monitor gets a copy of each press that goes to another app. It can't change or stop
+  /// the press, so the click still reaches that app, and for mouse events it needs no permission.
+  /// It reads only where the press was, and nothing is kept or logged.
+  private func watchOutsideClicks(_ watching: Bool) {
+    if watching, outsideClickMonitor == nil {
+      outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown,
+        .otherMouseDown]) { [weak self] event in
+        // A press in another app has no window here, so its location is on the screen.
+        self?.clickedOutside(at: event.locationInWindow)
+      }
+    } else if !watching, let monitor = outsideClickMonitor {
+      NSEvent.removeMonitor(monitor)
+      outsideClickMonitor = nil
+    }
+  }
+
+  /// A click in another app, at a point on the screen, closes a finished conversation and its
+  /// preview as the close button does. Clicks in SnapScreen's own windows never arrive here. One
+  /// just outside either panel, or while one is pressed or resized, leaves them open.
+  func clickedOutside(at point: NSPoint) {
+    guard dismissesOnOutsideClick, session.phase == .ready, !shields.isTrackingPanel else { return }
+    let margin = Self.outsideClickMargin
+    guard ![panel, previewPanel].contains(where: { $0?.frame.insetBy(dx: -margin, dy: -margin).contains(point) == true })
+    else { return }
+    closeConversation()
+  }
+
   /// Edit > Copy Answer (⇧⌘C): the newest answer, as its Copy button copies it.
   @objc func copyAnswer(_ sender: Any?) {
     conversation?.copyLatestAnswer()
@@ -407,6 +445,7 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
 
   /// Releases the frozen display, screenshot, conversation and draft. The session releases its own.
   private func clearContent() {
+    watchOutsideClicks(false)
     releaseOverlay()
     (previewPanel?.contentView as? PreviewView)?.image = nil
     previewPanel?.contentView = nil

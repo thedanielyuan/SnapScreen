@@ -44,7 +44,8 @@ error text passes through `sanitizeProviderMessage` before a window shows it.
 
 The shortcut is registered with Carbon's `RegisterEventHotKey`, which needs no Accessibility or
 Input Monitoring permission: the app receives that one combination and no other keystrokes, except
-those you type into its own windows. Settings checks Screen Recording with
+those you type into its own windows. Watching for a click in another app, which closes a finished
+conversation (below), needs no permission either. Settings checks Screen Recording with
 `CGPreflightScreenCaptureAccess`, which never prompts. Its **Open System Settings** button requests
 access, so macOS lists the app, and then opens that list. Snip checks access the same way first,
 and without it shows a notice with the same button. **Open at login** registers the app with
@@ -61,6 +62,18 @@ SnapScreen never became the frontmost app, the page kept focus and visibility, a
 or clicks reached it. macOS shows only the frontmost app's cursor changes, so while the overlay is
 up, SnapScreen sets the window server's private `SetsCursorInBackground` property, which lets its
 crosshair show without activating the app, and turns it off when the overlay closes.
+
+Once an answer has finished, a click in another app closes its conversation and screenshot
+preview the way their close button does, which ends the session and releases its images and text.
+SnapScreen sees that click through an AppKit global monitor for mouse presses. The monitor gets a
+copy of each press that goes to another app and can't change or stop it, so the click still lands
+where you clicked. SnapScreen reads only where the press was, never watches keys, and keeps and
+logs nothing. It watches only while a finished conversation is open: not while an answer, a
+follow-up or a Retry runs, or after one fails or stops. Clicks in SnapScreen's own windows, such
+as the conversation, the preview or a new snip's overlay, never reach the monitor. A click within
+8 points of either panel, where it may have been meant to resize one, or while a panel is pressed
+or resized, leaves them open. Closing them activates no app: the app you clicked keeps the focus
+your click gave it.
 
 Two limitations are known and accepted. The shortcut's modifier keys reach the app beneath,
 because they're pressed before the S that macOS hands to SnapScreen. And macOS periodically shows

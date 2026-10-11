@@ -66,6 +66,10 @@ show for a few seconds.
   (`CompanionPanel`) and give tracking areas `.activeAlways`. macOS ignores cursor changes from an
   app that isn't frontmost, so the overlay's crosshair needs `BackgroundCursor`, which it turns on
   only while it's up.
+- A finished conversation closes on a click in another app, which a global mouse-down monitor
+  sees (`SessionWindows.watchOutsideClicks`). It runs only while the answer has finished, reads
+  only where the press was, and can't consume it, so the click still lands. Don't replace it with
+  an event tap, key monitoring, or app deactivation or key-window loss.
 - The app takes no commands from other processes: no URL scheme, socket or XPC service.
 - Test hooks (`SNAPSCREEN_TEST_HOOKS`) compile only into `build/test-hooks/`, which has its own
   bundle ID, and `build-app.sh` refuses a production binary that contains them.

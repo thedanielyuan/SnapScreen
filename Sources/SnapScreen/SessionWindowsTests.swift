@@ -8,6 +8,7 @@ private final class SelfTestAnswers: AnswerClient, @unchecked Sendable {
   private let lock = NSLock()
   private var holding = false
   private var delaying = false
+  private var pausing = false
   private var asked: [String] = []
 
   var holds: Bool {
@@ -19,6 +20,12 @@ private final class SelfTestAnswers: AnswerClient, @unchecked Sendable {
   var delays: Bool {
     get { lock.withLock { delaying } }
     set { lock.withLock { delaying = newValue } }
+  }
+
+  /// Answers stream until this is turned off, then finish.
+  var pauses: Bool {
+    get { lock.withLock { pausing } }
+    set { lock.withLock { pausing = newValue } }
   }
 
   /// "(first)" for each first answer without a question, then each question.
@@ -42,6 +49,7 @@ private final class SelfTestAnswers: AnswerClient, @unchecked Sendable {
     let text = "Answer to \(question)"
     handlers.onThinking()
     handlers.onDelta(text)
+    while pauses { try await Task.sleep(for: .milliseconds(10)) }
     if holds { try await Task.sleep(for: .seconds(60)) }
     if delays { try await Task.sleep(for: .milliseconds(300)) }
     return Answer(text: text, history: [])
@@ -269,6 +277,113 @@ func runSessionWindowsTests() throws -> Int {
   windows.panel?.performClose(nil)
   try check(windows.session.phase == .ended && windows.panel == nil && snips.sessions.isEmpty,
     "closing the conversation ends the session")
+
+  // Once its answer has finished, a click in another app closes the conversation and its preview,
+  // as the close button does. The global monitor never fires here, so these checks pass each
+  // click's position as it would.
+  answers.pauses = true
+  guard let finished = snip() else { throw SessionWindowsTestError.failed("a snip to dismiss") }
+  finished.selectionView?.selection = CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
+  finished.selectionView?.confirm()
+  guard let finishedPanel = finished.panel else { throw SessionWindowsTestError.failed("a conversation to dismiss") }
+  // Well clear of the conversation and the preview.
+  func elsewhere() -> NSPoint {
+    let frames = [finished.panel, finished.previewPanel].compactMap { $0?.frame }.reduce(NSRect.null) { $0.union($1) }
+    return NSPoint(x: frames.minX - 60, y: frames.midY)
+  }
+  func stillOpen(_ phase: SnipSession.Phase) -> Bool {
+    finished.clickedOutside(at: elsewhere())
+    return finished.panel === finishedPanel && finished.session.phase == phase && snips.sessions.contains { $0 === finished }
+  }
+  try check(finished.composer?.isRunning == true && !finished.dismissesOnOutsideClick && stillOpen(.cropping),
+    "a click in another app doesn't close a conversation waiting for its first answer")
+  try check(waitUntil { finished.conversation?.latestTurn?.state == .streaming } && !finished.dismissesOnOutsideClick &&
+    stillOpen(.running), "a click in another app doesn't close or stop an answer as it streams")
+  answers.pauses = false
+  try check(waitUntil { finished.conversation?.latestTurn?.state == .done } && finished.dismissesOnOutsideClick,
+    "once the answer finishes, a click in another app can close the conversation")
+
+  // Clicks in the conversation or the preview go to SnapScreen, so the monitor, which sees only
+  // other apps, never gets them, and they'd leave both open anyway. So does a click in another app
+  // just outside either panel, where a press resizes it.
+  finished.conversation?.onPreview?()
+  guard let preview = finished.previewPanel, let previewView = preview.contentView as? PreviewView else {
+    throw SessionWindowsTestError.failed("the preview opens")
+  }
+  let margin = SessionWindows.outsideClickMargin - 1
+  for point in [NSPoint(x: finishedPanel.frame.midX, y: finishedPanel.frame.midY),
+    NSPoint(x: preview.frame.midX, y: preview.frame.midY),
+    NSPoint(x: finishedPanel.frame.minX - margin, y: finishedPanel.frame.midY),
+    NSPoint(x: finishedPanel.frame.midX, y: finishedPanel.frame.maxY + margin),
+    NSPoint(x: preview.frame.maxX + margin, y: preview.frame.minY - margin)] {
+    finished.clickedOutside(at: point)
+  }
+  try check(finished.panel === finishedPanel && finished.previewPanel === preview && finished.dismissesOnOutsideClick,
+    "clicks on or at the edge of the conversation and the preview leave both open")
+  preview.performClose(nil)
+  try check(finished.previewPanel == nil && finished.panel === finishedPanel && finished.dismissesOnOutsideClick,
+    "closing the preview keeps the conversation dismissible")
+  finished.conversation?.onPreview?()
+
+  // While a panel is resized, a click elsewhere leaves it open. The resize keeps its size for the
+  // next conversation, as before.
+  let keptChosenSize = snips.chosenSize.size
+  finished.windowWillStartLiveResize(Notification(name: NSWindow.willStartLiveResizeNotification, object: finishedPanel))
+  try check(snips.shields.isTrackingPanel && stillOpen(.ready), "a click in another app during a resize leaves the conversation open")
+  finished.windowDidEndLiveResize(Notification(name: NSWindow.didEndLiveResizeNotification, object: finishedPanel))
+  try check(!snips.shields.isTrackingPanel && finished.dismissesOnOutsideClick &&
+    snips.chosenSize.size == finishedPanel.contentRect(forFrameRect: finishedPanel.frame).size,
+    "after the resize, the conversation is dismissible again and its size is kept for the next")
+  snips.chosenSize.size = keptChosenSize
+
+  // Follow-ups and Retry turn it off while they run, as do a stopped or failed answer.
+  answers.pauses = true
+  finished.composer?.setDraft("And this?")
+  finished.composer?.submit()
+  try check(waitUntil { finished.conversation?.latestTurn?.state == .streaming } && !finished.dismissesOnOutsideClick &&
+    stillOpen(.running), "a click in another app doesn't close or stop a follow-up as it streams")
+  finished.composer?.onStop?()
+  try check(!finished.dismissesOnOutsideClick && stillOpen(.stopped), "a stopped answer stays open until you close it")
+  finished.conversation?.onRetry?()
+  try check(!finished.dismissesOnOutsideClick && stillOpen(.running), "a click in another app doesn't close or stop a Retry")
+  answers.pauses = false
+  try check(waitUntil { finished.conversation?.latestTurn?.state == .done } && finished.dismissesOnOutsideClick,
+    "once the Retry finishes, a click in another app can close the conversation")
+  slot.key = nil
+  finished.composer?.setDraft("No key")
+  finished.composer?.submit()
+  try check(waitUntil { finished.session.phase == .failed } && !finished.dismissesOnOutsideClick && stillOpen(.failed),
+    "a failed answer stays open until you close it")
+  slot.key = "sk-ant-self-test"
+  finished.conversation?.onRetry?()
+  try check(waitUntil { finished.conversation?.latestTurn?.state == .done } && finished.dismissesOnOutsideClick,
+    "a successful Retry makes the conversation dismissible again")
+
+  // Starting another snip leaves it open and dismissible. Selecting happens in SnapScreen's overlay,
+  // which the monitor never sees.
+  guard let selecting = snip() else { throw SessionWindowsTestError.failed("another snip") }
+  try check(selecting.overlay != nil && finished.panel === finishedPanel && finished.dismissesOnOutsideClick &&
+    snips.sessions.count == 2, "a new snip leaves a finished conversation open and dismissible")
+  selecting.overlay?.closeAction?()
+  try check(snips.sessions.count == 1 && finished.dismissesOnOutsideClick, "cancelling the new snip leaves it as it was")
+
+  // The click closes both windows through the close button's path, which ends the session, releases
+  // the screenshot, answers and draft, and stops watching.
+  finished.composer?.setDraft("Not sent")
+  guard let finishedThread = finished.conversation, let finishedComposer = finished.composer,
+    let finishedPreview = finished.previewPanel, let finishedPreviewView = finishedPreview.contentView as? PreviewView else {
+    throw SessionWindowsTestError.failed("the conversation and preview stay open")
+  }
+  try check(finishedPreviewView !== previewView && finishedPreviewView.image != nil, "the preview opens again")
+  finished.clickedOutside(at: elsewhere())
+  try check(finished.session.phase == .ended && finished.panel == nil && finished.previewPanel == nil &&
+    finished.conversation == nil && finished.composer == nil && !finished.dismissesOnOutsideClick && snips.sessions.isEmpty &&
+    !finishedPanel.isVisible && !finishedPreview.isVisible && !snips.shields.isTrackingPanel,
+    "a click in another app ends the session and closes the conversation and preview")
+  try check(finishedPreviewView.image == nil && finishedThread.turns.isEmpty && finishedThread.thumbnail.screenshot == nil &&
+    finishedComposer.draft.isEmpty, "closing them releases the screenshot, answers and unsent draft")
+  finished.clickedOutside(at: elsewhere())
+  try check(finished.session.phase == .ended && snips.sessions.isEmpty, "a later click finds nothing more to close")
 
   // A scroller that comes and goes as the conversation grows changes how wide its thread is, so how
   // its text wraps and how tall its thumbnail is. It still ends up fitting. This conversation opens
