@@ -63,7 +63,7 @@ again.
 Done on 10 October 2026: while a drag is in progress, holding Space moves the selection instead of
 resizing it, as in ⌘⇧4, stopping at the image's edges. Releasing Space resizes again from the moved
 corner, and releasing the mouse while moving asks about the moved region. Option and Shift do
-nothing, since they're often still held from ⌥⇧S. The README mentions it.
+nothing, since they're often still held from ⌥⇧S.
 
 ## Medium
 

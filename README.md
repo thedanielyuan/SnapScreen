@@ -6,42 +6,6 @@ SnapScreen is a macOS menu bar app. Press ⌥⇧S, drag over part of your screen
 about it with your own Anthropic API key. The answer opens beside your selection, and the app you
 snipped keeps focus: SnapScreen's windows never activate it.
 
-## Build and run
-
-Requirements: macOS 15 or later and Xcode 16 or later.
-
-```bash
-scripts/build-app.sh
-open build/SnapScreen.app
-```
-
-Settings opens the first time, so you can add your API key. Your first snip asks you to allow
-Screen Recording in System Settings. Sign builds with an Apple Development certificate, which is free with an
-Apple ID, so that the Keychain and Screen Recording keep trusting the app after a rebuild; see
-Phase 0 of the [plan](docs/standalone-app-plan.md). Without one, `build-app.sh` signs ad hoc and
-macOS asks again after every rebuild.
-
-## Using it
-
-- Press ⌥⇧S, or choose **Snip** from the menu bar icon, to freeze the display under the pointer.
-- Drag over a region and release to ask; hold Space while dragging to move the region. Click or
-  press Escape to cancel; Return selects with the keyboard.
-- Ask follow-ups in the conversation window; Return while an answer streams sends yours when it
-  finishes. You can Stop or Retry an answer, open the screenshot, and copy a code block or the
-  answer, or press ⇧⌘C for the newest answer and ⌥⌘C for the newest code block.
-- Selecting a region in a new snip closes the previous conversation and its screenshot, so only
-  one is open at a time; cancelling the new snip keeps them. Once an answer has finished, clicking
-  in another app closes them too, and **Close All Conversations** in the menu bar menu closes them
-  at any time.
-- Settings holds your API key, a Default Prompt for first answers, the advanced limits, and Open
-  at login. Closing it saves your changes.
-
-## Development
-
-[AGENTS.md](AGENTS.md) lists the checks CI runs and how the package is laid out.
-[docs/standalone-app-plan.md](docs/standalone-app-plan.md) records how the app replaced the
-Chrome extension and its companion.
-
 ## License
 
 [MIT](LICENSE)
