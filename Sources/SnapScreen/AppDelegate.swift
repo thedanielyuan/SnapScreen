@@ -34,8 +34,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     if !shortcutAvailable {
       notices.show("Another app is using \(hotkey.combination.display), so choose Snip from SnapScreen's menu bar icon.")
     }
-    // Open Settings while there's no key to use.
-    if !keyStore.hasKey { showSettings() }
+    // Setup is an explicit foreground action, never an automatic activation at login.
+    if !keyStore.hasKey {
+      notices.show("Add your Anthropic API key in SnapScreen Settings to start snipping.",
+        action: NoticeAction(title: "Open Settings") { [weak self] in self?.showSettings() })
+    }
   }
 
   /// Opening the app again while it runs, from Finder or Spotlight, shows Settings.

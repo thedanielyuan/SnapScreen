@@ -83,8 +83,8 @@ func runSessionWindowsTests() throws -> Int {
   let overlay = SelectionOverlay.make(covering: screen)
   try check(!overlay.isOpaque && overlay.backgroundColor == .clear && !overlay.hasShadow,
     "the overlay is non-opaque, so Chrome doesn't mark the page as hidden")
-  try check(overlay.styleMask == [.borderless, .nonactivatingPanel] && overlay.canBecomeKey && !overlay.canBecomeMain &&
-    !overlay.hidesOnDeactivate, "the overlay takes the keyboard without activating SnapScreen")
+  try check(overlay.styleMask == [.borderless, .nonactivatingPanel] && !overlay.canBecomeKey && !overlay.canBecomeMain &&
+    !overlay.hidesOnDeactivate, "the overlay cannot take the keyboard or activate SnapScreen")
   try check(overlay.frame == screen.frame && overlay.level == .screenSaver &&
     overlay.collectionBehavior.contains([.canJoinAllSpaces, .fullScreenAuxiliary]),
     "the overlay covers its whole display, above the menu bar and fullscreen apps")
@@ -94,7 +94,7 @@ func runSessionWindowsTests() throws -> Int {
   let slot = KeySlot()
   var notices: [String] = []
   var noticeActions: [NoticeAction?] = []
-  // The window shown last, which would have the keyboard.
+  // The window shown last, which must leave the keyboard in the app beneath.
   weak var presented: NSWindow?
   let controller = SessionController(answers: answers, apiKey: { slot.key }, settings: { .defaults })
   let snips = SnipWindows(controller: controller, showNotice: { notices.append($0); noticeActions.append($1) },
@@ -116,23 +116,23 @@ func runSessionWindowsTests() throws -> Int {
     windows.selectionView?.confirm()
     return waitUntil { windows.conversation?.latestTurn?.state == .done }
   }
-  func keyEvent(_ type: NSEvent.EventType, _ code: UInt16, _ characters: String, in window: NSWindow?) -> NSEvent {
-    NSEvent.keyEvent(with: type, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: window?.windowNumber ?? 0,
-      context: nil, characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code)!
+  func pointer(_ type: NSEvent.EventType, in window: NSWindow) -> NSEvent {
+    NSEvent.mouseEvent(with: type, location: NSPoint(x: 20, y: 20), modifierFlags: [], timestamp: 0,
+      windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
   }
 
-  // Escape cancels on release, so the release never reaches the app you snip.
+  // A click without a drag cancels without needing any keyboard input.
   guard let cancelled = snip(), let cancelledOverlay = cancelled.overlay else {
     throw SessionWindowsTestError.failed("a capture opens the overlay")
   }
   try check(cancelled.selectionView?.fillsBounds == true && cancelled.selectionView?.image?.size == NSSize(width: 64, height: 40)
     && cancelledOverlay.frame == screen.frame && cancelledOverlay.contentView === cancelled.selectionView,
     "the overlay shows the frozen display, sized in its pixels")
-  cancelledOverlay.sendEvent(keyEvent(.keyDown, 53, "\u{1B}", in: cancelledOverlay))
-  try check(cancelled.session.phase == .selecting, "Escape waits for its release")
-  NSApp.sendEvent(keyEvent(.keyUp, 53, "\u{1B}", in: cancelledOverlay))
+  cancelled.selectionView?.mouseDown(with: pointer(.leftMouseDown, in: cancelledOverlay))
+  try check(cancelled.session.phase == .selecting, "a pointer press waits for its release")
+  cancelled.selectionView?.mouseUp(with: pointer(.leftMouseUp, in: cancelledOverlay))
   try check(cancelled.session.phase == .ended && cancelled.overlay == nil && snips.sessions.isEmpty,
-    "releasing Escape cancels the selection and closes the overlay")
+    "releasing a click without a drag cancels the selection and closes the overlay")
 
   // A new snip replaces a selection that hasn't been answered.
   guard let replaced = snip(), let windows = snip() else { throw SessionWindowsTestError.failed("a second snip") }
@@ -157,12 +157,17 @@ func runSessionWindowsTests() throws -> Int {
     windows.conversation?.thumbnail.isHidden == false, "the answer and the screenshot's thumbnail show")
   try check(windows.composer?.canSubmit == true && windows.composer?.isRunning == false &&
     windows.composer?.maximumCharacters == SnapScreenLimits.defaults.maxInputCharacters,
-    "the composer accepts a follow-up within the limit")
+    "the session retains follow-up state within the limit")
+  try check(windows.composer?.isReadOnly == true && windows.composer?.textView.isEditable == false &&
+    windows.composer?.textView.isSelectable == false && windows.composer?.sendButton.isHidden == true,
+    "the capture flow offers no editable or selectable field or idle Send button")
 
   // The conversation opens only as tall as its answer needs, and grows down with its thread.
   guard let panel = windows.panel, let thread = windows.conversation else {
     throw SessionWindowsTestError.failed("the conversation stays open")
   }
+  try check(!panel.canBecomeKey && !panel.canBecomeMain && panel.styleMask.contains(.nonactivatingPanel) &&
+    panel.level == .floating, "the conversation is a floating panel that cannot take keyboard focus")
   func fitsThread() -> Bool { thread.scrollView.documentView!.frame.height <= thread.scrollView.contentSize.height + 1 }
   let largest = panel.frameRect(forContentRect: NSRect(origin: .zero, size: SessionWindows.defaultConversationSize))
   let top = panel.frame.maxY
@@ -172,8 +177,9 @@ func runSessionWindowsTests() throws -> Int {
     panel.standardWindowButton(.miniaturizeButton)?.isHidden == true && panel.standardWindowButton(.zoomButton)?.isHidden == true &&
     panel.titleVisibility == .hidden && panel.title == "SnapScreen", "the conversation's title bar holds only its close button")
   windows.conversation?.onPreview?()
-  try check(windows.previewPanel.map { !$0.frame.intersects(panel.frame) } == true,
-    "the screenshot preview opens beside the conversation")
+  try check(windows.previewPanel.map { !$0.frame.intersects(panel.frame) && !$0.canBecomeKey &&
+    !$0.canBecomeMain && $0.styleMask.contains(.nonactivatingPanel) && $0.level == .floating } == true,
+    "the screenshot preview opens beside the conversation without eligibility for keyboard focus")
   windows.previewPanel?.performClose(nil)
   try check(windows.previewPanel == nil && windows.panel === panel, "closing the preview keeps the conversation")
 
@@ -206,9 +212,10 @@ func runSessionWindowsTests() throws -> Int {
   answers.holds = true
   windows.composer?.setDraft("Hold on")
   windows.composer?.submit()
-  try check(waitUntil { windows.conversation?.latestTurn?.state == .streaming } && windows.composer?.canStop == true,
-    "streaming text shows while Stop is available")
-  windows.composer?.onStop?()
+  try check(waitUntil { windows.conversation?.latestTurn?.state == .streaming } && windows.composer?.canStop == true &&
+    windows.composer?.sendButton.isHidden == false && windows.composer?.sendButton.isEnabled == true,
+    "streaming text shows while the passive composer's Stop button is available")
+  windows.composer?.sendButton.performClick(nil)
   try check(windows.conversation?.latestTurn?.state == .stopped && windows.conversation?.canRetry == true &&
     windows.composer?.isRunning == false, "Stop keeps the text so far and offers Retry")
   answers.holds = false
@@ -218,8 +225,8 @@ func runSessionWindowsTests() throws -> Int {
   try check(answers.questions == ["(first)", "Why?", longQuestion, longQuestion, "Hold on", "Hold on"],
     "each request asks its own question")
 
-  // Return while an answer streams queues the draft, which goes once the answer finishes. A
-  // stopped answer leaves its queued draft in the field, unsent.
+  // Programmatic submissions retain the controller's queue behavior even though the passive
+  // capture UI no longer accepts typed follow-ups. A stopped answer keeps its draft unsent.
   answers.delays = true
   windows.composer?.setDraft("Slowly")
   windows.composer?.submit()
@@ -228,7 +235,7 @@ func runSessionWindowsTests() throws -> Int {
   windows.composer?.submit()
   try check(windows.composer?.isQueued == true && windows.composer?.hintLabel.stringValue == ComposerView.queuedMessage &&
     windows.composer?.draft == "Queued" && windows.conversation?.latestTurn?.question == "Slowly",
-    "Return while an answer streams queues the draft")
+    "submitting while an answer streams queues the draft")
   answers.delays = false
   try check(waitUntil { windows.conversation?.latestTurn?.question == "Queued" && windows.conversation?.latestTurn?.state == .done } &&
     windows.composer?.draft.isEmpty == true && windows.composer?.isQueued == false, "the queued draft goes once the answer finishes")
@@ -243,8 +250,8 @@ func runSessionWindowsTests() throws -> Int {
   try check(windows.composer?.isQueued == false && windows.composer?.draft == "Not sent" &&
     !answers.questions.contains("Not sent"), "stopping the answer leaves its queued draft in the field, unsent")
 
-  // ⇧⌘C and ⌥⌘C copy the newest answer and code block. These checks write to a private
-  // pasteboard, never the clipboard.
+  // Copy actions still find the newest answer and code block without a key window. These checks
+  // write to a private pasteboard, never the clipboard.
   let general = Clipboard.pasteboard
   let pasteboard = NSPasteboard(name: NSPasteboard.Name("com.snapscreen.self-test.\(UUID().uuidString)"))
   Clipboard.pasteboard = pasteboard
@@ -255,9 +262,9 @@ func runSessionWindowsTests() throws -> Int {
   try check(enables(#selector(SessionWindows.copyAnswer(_:))) && enables(#selector(SessionWindows.copyLastCode(_:))),
     "Copy Answer and Copy Code are available")
   windows.copyAnswer(nil)
-  try check(pasteboard.string(forType: .string) == "Answer to Code:\n```py\nprint(1)\n```", "⇧⌘C copies the newest answer")
+  try check(pasteboard.string(forType: .string) == "Answer to Code:\n```py\nprint(1)\n```", "Copy Answer copies the newest answer")
   windows.copyLastCode(nil)
-  try check(pasteboard.string(forType: .string) == "print(1)", "⌥⌘C copies the newest code block")
+  try check(pasteboard.string(forType: .string) == "print(1)", "Copy Code copies the newest code block")
   Clipboard.pasteboard = general
   pasteboard.releaseGlobally()
 
@@ -394,14 +401,14 @@ func runSessionWindowsTests() throws -> Int {
     "a click in another app ends the session and closes the conversation and preview")
   try check(finishedPreviewView.image == nil && finishedThread.turns.isEmpty && finishedThread.thumbnail.screenshot == nil &&
     finishedComposer.draft.isEmpty, "closing them releases the screenshot, answers and unsent draft")
-  try check(keyableWhileClosing == false && nextOverlay.canBecomeKey && snips.sessions.count == 1 && next.overlay === nextOverlay,
-    "a new snip's overlay can't take the keyboard while they close, stays up, and can take it after")
+  try check(keyableWhileClosing == false && !nextOverlay.canBecomeKey && snips.sessions.count == 1 && next.overlay === nextOverlay,
+    "a new snip's overlay cannot take the keyboard during or after another conversation closes")
   finished.clickedOutside(at: elsewhere())
   try check(finished.session.phase == .ended && snips.sessions.count == 1, "a later click finds nothing more to close")
 
   // Selecting a region in a new snip closes the earlier conversation and preview through the close
   // button's path, even while it answers, which ends its session and releases its screenshot,
-  // answers and draft. The new conversation opens with the keyboard first, so they hand it nowhere.
+  // answers and draft. The new conversation is presented before the earlier one closes.
   guard select(next), let nextPanel = next.panel, let nextThread = next.conversation, let nextComposer = next.composer else {
     throw SessionWindowsTestError.failed("the new snip's conversation")
   }
@@ -428,7 +435,7 @@ func runSessionWindowsTests() throws -> Int {
   try check(next.session.phase == .ended && next.panel == nil && next.previewPanel == nil && next.conversation == nil &&
     snips.sessions.count == 1 && snips.sessions.first === latest && latest.panel != nil,
     "selecting a region in a new snip closes the earlier conversation and preview, ending its session")
-  try check(shownFirst == true, "the new conversation opens with the keyboard before the earlier one closes")
+  try check(shownFirst == true, "the new conversation is presented before the earlier one closes")
   try check(nextPreviewView.image == nil && nextThread.turns.isEmpty && nextThread.thumbnail.screenshot == nil &&
     nextComposer.draft.isEmpty, "closing them releases the screenshot, answers and unsent draft")
   answers.pauses = false

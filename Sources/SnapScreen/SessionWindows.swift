@@ -15,7 +15,7 @@ final class SnipWindows: SessionControllerDelegate {
   /// `showNotice` shows a message, with a button when it has an action. `present` shows a window;
   /// the self-test leaves windows offscreen.
   init(controller: SessionController, showNotice: @escaping (String, NoticeAction?) -> Void,
-    present: @escaping @MainActor (NSWindow) -> Void = { $0.makeKeyAndOrderFront(nil) }) {
+    present: @escaping @MainActor (NSWindow) -> Void = { $0.orderFront(nil) }) {
     self.controller = controller
     self.showNotice = showNotice
     self.present = present
@@ -46,8 +46,8 @@ final class SnipWindows: SessionControllerDelegate {
 
   /// Once a snip's conversation has opened, closes the earlier snips' conversations, previews and
   /// ended notices through their close button's path, ending their sessions. Cancelling a snip
-  /// leaves them open. The new conversation already has the keyboard, so closing these windows,
-  /// which don't, hands it to nothing, and no app is activated.
+  /// leaves them open. All capture panels refuse the keyboard, so replacing them cannot hand it
+  /// to another SnapScreen panel, and no app is activated.
   private func closeEarlier(than windows: SessionWindows?) {
     for earlier in sessions where earlier !== windows { earlier.closeConversation() }
   }
@@ -70,8 +70,8 @@ final class ChosenConversationSize {
 }
 
 /// One session's windows: the overlay over its frozen display, then its conversation beside the
-/// selection and the screenshot preview. None of them activates SnapScreen, so the app you snip
-/// keeps focus, and Escape and Command-W close on key release. The conversation opens small and
+/// selection and the screenshot preview. None activates SnapScreen or takes the keyboard.
+/// Select and cancel with the pointer; close panels with their buttons. The conversation opens small and
 /// grows to fit its thread until you resize it. Once its answer has finished, a click in another
 /// app closes the conversation and preview. Selecting a region in a new snip closes them too.
 @MainActor
@@ -91,7 +91,7 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
   let session: SnipSession
   /// Called once every window has closed.
   var onClose: (() -> Void)?
-  /// Called once the conversation has replaced the overlay and taken the keyboard.
+  /// Called once the conversation has replaced the overlay without taking the keyboard.
   var onOpenConversation: (() -> Void)?
   private(set) var overlay: CompanionPanel?
   private(set) var selectionView: SelectionView?
@@ -175,7 +175,6 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
     selectionView = view
     BackgroundCursor.setEnabled(true)
     present(window)
-    window.makeFirstResponder(view)
   }
 
   private func select(_ rect: NormalizedRect) {
@@ -226,10 +225,12 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
     let root = NSView()
     window.contentView = root
     let thread = ConversationView()
+    thread.showsCopyShortcuts = false
     thread.translatesAutoresizingMaskIntoConstraints = false
     thread.onPreview = { [weak self] in self?.showPreview() }
     thread.onRetry = { [weak self] in self?.retryAnswer() }
     let input = ComposerView()
+    input.isReadOnly = true
     input.translatesAutoresizingMaskIntoConstraints = false
     input.onSubmit = { [weak self] text in self?.ask(text) }
     input.onStop = { [weak self] in self?.stopAnswer() }
@@ -237,7 +238,6 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
       self?.updateControls()
       self?.fitPanel()
     }
-    thread.focusFallback = { [weak input] in input?.textView }
     root.addSubview(thread)
     root.addSubview(input)
     NSLayoutConstraint.activate([
@@ -258,7 +258,6 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
     fitPanel()
     present(window)
     shields.place(below: window)
-    window.makeFirstResponder(input.textView)
   }
 
   private func updateControls() {
@@ -335,7 +334,6 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
     previewPanel = window
     present(window)
     shields.place(below: window)
-    window.makeFirstResponder(preview)
   }
 
   private func announce(_ text: String) {
@@ -349,7 +347,7 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
       (previewPanel?.contentView as? PreviewView)?.image = nil
       previewPanel?.delegate = nil
       previewPanel = nil
-      // Keep typing in the conversation rather than returning keys to the app beneath.
+      // Restore the conversation's ordering without changing the browser's keyboard focus.
       DispatchQueue.main.async { [weak self] in
         guard let self = self, let window = self.panel, window.isVisible else { return }
         self.present(window)
@@ -395,10 +393,7 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
     let margin = Self.outsideClickMargin
     guard ![panel, previewPanel].contains(where: { $0?.frame.insetBy(dx: -margin, dy: -margin).contains(point) == true })
     else { return }
-    // Closing them would make AppKit give the keyboard back to another SnapScreen panel, such as a
-    // new snip's overlay, taking it from the app you clicked, so no panel takes it meanwhile.
-    CompanionPanel.refusesKeyboard = true
-    defer { CompanionPanel.refusesKeyboard = false }
+    // Every capture panel permanently refuses the keyboard, including during this close.
     closeConversation()
   }
 

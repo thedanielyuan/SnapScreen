@@ -442,6 +442,8 @@ final class ConversationView: NSView {
   var onRetry: (() -> Void)?
   /// Where keyboard focus goes when the view holding it is removed, usually the composer.
   var focusFallback: (() -> NSView?)?
+  /// Passive panels cannot receive shortcuts, so their Copy buttons must not advertise them.
+  var showsCopyShortcuts = true { didSet { updateCopyShortcuts() } }
   var canRetry = false { didSet { turns.forEach { $0.canRetry = canRetry }; relayout() } }
   var actionsEnabled = true {
     didSet {
@@ -665,9 +667,9 @@ final class ConversationView: NSView {
     let answer = answerToCopy
     let code = codeToCopy
     for turn in turns {
-      turn.copyShortcut = turn === answer ? "⇧⌘C" : nil
+      turn.copyShortcut = showsCopyShortcuts && turn === answer ? "⇧⌘C" : nil
       for block in turn.answer.segmentViews where block.segment.isCode {
-        block.copyShortcut = block === code ? "⌥⌘C" : nil
+        block.copyShortcut = showsCopyShortcuts && block === code ? "⌥⌘C" : nil
       }
     }
   }

@@ -139,7 +139,7 @@ final class NoticeCenter {
     let size = view.fittingSize
     notice.setFrame(NSRect(x: visible.maxX - size.width - 12, y: visible.maxY - size.height - 12,
       width: size.width, height: size.height), display: false)
-    notice.orderFrontRegardless()
+    notice.orderFront(nil)
     notice.invalidateShadow()
     panel = notice
     NSAccessibility.post(element: view, notification: .announcementRequested,

@@ -62,10 +62,10 @@ final class ScriptedAPI: HTTPTransport, @unchecked Sendable {
   }
 }
 
-/// Snips twice through real windows. The first snip selects a region with the keyboard, reads the
-/// answer, asks one follow-up and opens the preview. The second replaces that conversation and
-/// preview, then closes its own as a click in another app does. It exits 0 once every check
-/// passes, and 1 at the first that fails.
+/// Snips twice through real windows. Pointer events select the regions without taking keyboard
+/// focus. The first snip reads the answer, submits a follow-up programmatically and opens the
+/// preview. The second replaces that conversation and preview, then closes its own as a click in
+/// another app does. It exits 0 once every check passes, and 1 at the first that fails.
 @MainActor
 final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate {
   static let timeout: TimeInterval = 45
@@ -83,6 +83,8 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
   private var replaced: (windows: SessionWindows, panel: CompanionPanel, preview: CompanionPanel)?
   private var answers = 0
   private var checks = 0
+  private var foregroundProcessID: Int32?
+  private var focusMonitor: Timer?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     installEditingMenu(applicationName: "SnapScreen")
@@ -105,6 +107,13 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
     self.screen = screen
     let capture = FrozenScreen(image: Self.fixture(for: screen), displayID: displayID)
     self.capture = capture
+    foregroundProcessID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+    checkBackground("before capture")
+    let monitor = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+      self?.checkBackground("while capture and answer windows are displayed")
+    }
+    RunLoop.main.add(monitor, forMode: .common)
+    focusMonitor = monitor
     controller.start { capture }
   }
 
@@ -131,10 +140,21 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
     fail("no notice is shown, but one said: \(message)")
   }
 
-  /// Whether SnapScreen took over the menu bar from the app beneath. A key panel that doesn't
-  /// activate the app still makes `NSApp.isActive` true, so that can't tell.
+  /// Whether SnapScreen took over the menu bar from the app beneath.
   private var isFrontmost: Bool {
     NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier
+  }
+
+  private func checkBackground(_ stage: String) {
+    check(!isFrontmost && !NSApp.isActive && NSApp.keyWindow == nil &&
+      NSWorkspace.shared.frontmostApplication?.processIdentifier == foregroundProcessID,
+      "the original app keeps focus \(stage)")
+  }
+
+  private func checkPassive(_ panel: CompanionPanel, _ stage: String) {
+    check(panel.isVisible && !panel.canBecomeKey && !panel.canBecomeMain && !panel.isKeyWindow &&
+      panel.styleMask.contains(.nonactivatingPanel), "the \(stage) panel remains non-key")
+    checkBackground("with the \(stage) panel")
   }
 
   private func check(_ value: Bool, _ name: String) {
@@ -143,6 +163,7 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
 
   private func fail(_ name: String) {
     FileHandle.standardError.write(Data("SnapScreen live test failed: \(name)\n".utf8))
+    focusMonitor?.invalidate()
     pasteboard.releaseGlobally()
     exit(1)
   }
@@ -155,24 +176,33 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
     }
     check(overlay.isVisible && overlay.frame == screen.frame && !overlay.isOpaque && overlay.level == .screenSaver,
       "the overlay covers the display, above everything, and isn't opaque")
-    check(overlay.isKeyWindow && !isFrontmost, "the overlay takes the keyboard without activating SnapScreen")
+    checkPassive(overlay, "selection")
     if let earlier = replaced {
       check(earlier.panel.isVisible && earlier.preview.isVisible && earlier.windows.session.phase == .ready,
         "a new snip leaves the conversation and preview open while you select")
     }
-    // Return places a keyboard selection, and Return again asks about it.
-    overlay.sendEvent(key(.keyDown, in: overlay))
-    overlay.sendEvent(key(.keyUp, in: overlay))
+    // The selection is small enough that image fitting won't reduce its expected crop.
+    let width = min(320, view.imageRect.width / 2)
+    let height = min(180, view.imageRect.height / 2)
+    let start = NSPoint(x: view.imageRect.midX - width / 2, y: view.imageRect.midY - height / 2)
+    let end = NSPoint(x: start.x + width, y: start.y + height)
+    overlay.sendEvent(pointer(.leftMouseDown, at: view.convert(start, to: nil), in: overlay))
+    checkPassive(overlay, "pressed selection")
+    overlay.sendEvent(pointer(.leftMouseDragged, at: view.convert(end, to: nil), in: overlay))
     guard let selection = view.selection, let region = view.selectionDisplayRect else {
-      fail("Return places a keyboard selection")
+      fail("dragging places a pointer selection")
       return
     }
+    check(view.isDragging && !view.isKeyboardSelection && view.canConfirm,
+      "the pointer drag selects a region without keyboard input")
+    checkPassive(overlay, "dragged selection")
     selectionOnScreen = overlay.convertToScreen(view.convert(region, to: nil))
     expectedCrop = (Int(((selection.maxX) * image.size.width).rounded()) - Int((selection.minX * image.size.width).rounded()),
       Int(((selection.maxY) * image.size.height).rounded()) - Int((selection.minY * image.size.height).rounded()))
-    overlay.sendEvent(key(.keyDown, in: overlay))
+    overlay.sendEvent(pointer(.leftMouseUp, at: view.convert(end, to: nil), in: overlay))
     check(windows.overlay == nil && windows.panel?.isVisible == true && windows.composer?.isRunning == true,
-      "asking replaces the overlay with the conversation, waiting for its answer")
+      "releasing the drag replaces the overlay with the conversation, waiting for its answer")
+    if let panel = windows.panel { checkPassive(panel, "waiting conversation") }
     if let earlier = replaced {
       guard let panel = windows.panel, let shield = snips?.shields.shield else {
         fail("the new conversation opens above the pointer shield")
@@ -181,8 +211,7 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
       check(!earlier.panel.isVisible && !earlier.preview.isVisible && earlier.windows.panel == nil &&
         earlier.windows.session.phase == .ended && snips?.sessions.count == 1,
         "the new snip's conversation closes the earlier conversation and preview, ending its session")
-      check(panel.isKeyWindow && NSApp.keyWindow === panel && !isFrontmost,
-        "the new conversation keeps the keyboard as they close, without activating SnapScreen")
+      checkPassive(panel, "replacement conversation")
       // Front to back, this app's windows on screen.
       let order = (NSWindow.windowNumbers(options: []) ?? []).map(\.intValue)
       check(order.firstIndex(of: panel.windowNumber).map { order.dropFirst($0 + 1).first == shield.windowNumber } == true &&
@@ -190,10 +219,9 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
     }
   }
 
-  private func key(_ type: NSEvent.EventType, in window: NSWindow) -> NSEvent {
-    NSEvent.keyEvent(with: type, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-      windowNumber: window.windowNumber, context: nil, characters: "\r", charactersIgnoringModifiers: "\r",
-      isARepeat: false, keyCode: 36)!
+  private func pointer(_ type: NSEvent.EventType, at point: NSPoint, in window: NSWindow) -> NSEvent {
+    NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+      windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
   }
 
   private func answered() {
@@ -203,6 +231,9 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
       fail("the conversation stays open while it's answered")
       return
     }
+    checkPassive(panel, "answered conversation")
+    check(composer.isReadOnly && !composer.textView.isEditable && !composer.textView.isSelectable &&
+      composer.sendButton.isHidden, "the finished conversation offers no editable field or Send button")
     if answers == 1 {
       check(turn.answer.renderedText == ScriptedAPI.firstAnswer && !thread.thumbnail.isHidden,
         "the first answer and the screenshot's thumbnail show")
@@ -214,13 +245,13 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
         screen.visibleFrame.maxX - selection.maxX > panel.frame.width + 16 {
         check(panel.frame.minX >= selection.maxX, "the conversation opens beside the selection")
       }
-      // Pressed in the panel, ⌥⌘C reaches the Edit menu, which copies the newest code block.
-      NSApp.sendEvent(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.command, .option],
-        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: panel.windowNumber, context: nil, characters: "ç",
-        charactersIgnoringModifiers: "c", isARepeat: false, keyCode: 8)!)
-      check(panel.isKeyWindow && pasteboard.string(forType: .string) == "print(2 + 2)",
-        "⌥⌘C in the conversation copies its code block")
+      // Pointer controls keep working without a key window or a keyboard shortcut.
+      thread.codeToCopy?.copyButton?.performClick(nil)
+      check(pasteboard.string(forType: .string) == "print(2 + 2)", "the Copy button copies its code block")
+      checkPassive(panel, "conversation after Copy")
       check(windows.dismissesOnOutsideClick, "once the answer finishes, a click in another app can close it")
+      // Retain the client/history replay check through a direct submission. The passive UI never
+      // asks the user to type or takes keyboard focus for this synthetic follow-up.
       composer.setDraft(ScriptedAPI.followUp)
       composer.submit()
       check(thread.turns.count == 2 && composer.isRunning, "the follow-up starts a new turn")
@@ -236,8 +267,8 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
         fail("the screenshot preview opens")
         return
       }
-      check(preview.isVisible && preview.isKeyWindow && windows.dismissesOnOutsideClick,
-        "the preview opens with the keyboard, and a click in another app can close both")
+      checkPassive(preview, "preview")
+      check(windows.dismissesOnOutsideClick, "a click in another app can close the conversation and preview")
       // Snip again, as the shortcut does. Selecting its region replaces this conversation.
       replaced = (windows, panel, preview)
       controller?.start { capture }
@@ -252,16 +283,15 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
       fail("the new snip's preview opens")
       return
     }
-    check(preview.isVisible && preview.isKeyWindow && windows.dismissesOnOutsideClick,
-      "the new snip's preview opens with the keyboard, and a click in another app can close both")
-    // Another panel, as a new snip's overlay would be, and a click in another app, which takes the
-    // keyboard, as giving it up here does. AppKit would hand the keyboard back to that panel as these
-    // close.
+    checkPassive(preview, "new snip's preview")
+    check(windows.dismissesOnOutsideClick, "a click in another app can close the new conversation and preview")
+    // Another panel, as a new snip's overlay would be. Closing the old windows must never make it
+    // key, including when the original application has retained focus throughout.
     let other = CompanionPanel.make(title: "Other", contentSize: SessionWindows.minimumConversationSize,
       minimumSize: SessionWindows.minimumConversationSize, media: false)
     other.setFrameOrigin(NSPoint(x: screen.visibleFrame.minX, y: screen.visibleFrame.maxY - other.frame.height))
     other.orderFront(nil)
-    NSApp.deactivate()
+    checkPassive(other, "other conversation")
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
       self?.clickElsewhere(windows, panel: panel, preview: preview, other: other, on: screen)
     }
@@ -269,7 +299,7 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
 
   private func clickElsewhere(_ windows: SessionWindows, panel: CompanionPanel, preview: CompanionPanel,
     other: CompanionPanel, on screen: NSScreen) {
-    check(!preview.isKeyWindow && !NSApp.isActive, "the other app has the keyboard")
+    checkPassive(preview, "preview before outside dismissal")
     // The click reaches the monitor with its position, away from the panels. It closes them as the
     // close button does, which ends the session and releases its windows.
     let margin = SessionWindows.outsideClickMargin + 1
@@ -284,14 +314,14 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
     windows.clickedOutside(at: elsewhere)
     check(!panel.isVisible && !preview.isVisible && snips?.sessions.isEmpty == true && session?.phase == .ended &&
       !windows.dismissesOnOutsideClick, "a click in another app closes the conversation and preview, ending the session")
-    check(other.isVisible && !other.isKeyWindow && NSApp.keyWindow == nil && !NSApp.isActive && other.canBecomeKey,
-      "no other SnapScreen panel takes the keyboard back as they close")
+    checkPassive(other, "remaining conversation after dismissal")
     other.close()
     check(snips?.shields.shield.map { !$0.isVisible && $0.ignoresMouseEvents } ?? false,
       "the pointer shield is hidden and lets clicks through once they close")
-    check(!isFrontmost, "SnapScreen never became the active app")
-    print("SnapScreen live test passed (test hooks build): \(checks) checks, keyboard selection, streamed answer, " +
-      "follow-up, preview, a new snip replacing them, and a click elsewhere closing its windows through real windows")
+    checkBackground("after all windows close")
+    focusMonitor?.invalidate()
+    print("SnapScreen live test passed (test hooks build): \(checks) checks, pointer selection, streamed answer, " +
+      "programmatic follow-up, preview, replacement and dismissal through real windows without keyboard focus")
     pasteboard.releaseGlobally()
     exit(0)
   }

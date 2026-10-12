@@ -37,8 +37,8 @@ after the conversation closes.
 Anthropic keeps API inputs and outputs under its own
 [data-retention policy](https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data).
 Answer requests use prompt caching, so Anthropic keeps the conversation, including the crop,
-cached for about 5 minutes after its last use, which makes follow-up questions cheaper. Provider
-error text passes through `sanitizeProviderMessage` before a window shows it.
+cached for about 5 minutes after its last use. Provider error text passes through
+`sanitizeProviderMessage` before a window shows it.
 
 ## Permissions
 
@@ -53,13 +53,20 @@ and without it shows a notice with the same button. **Open at login** registers 
 
 ## Staying out of the way
 
-The selection overlay and the conversation panels never activate the app, so the app you snip
-keeps focus, and Escape and Command-W close them on key release, so the release doesn't reach
-the app beneath. The overlay is non-opaque, because an opaque window covering the display could
-make Chrome mark its page as hidden. Phase 4's acceptance round
-([plan](standalone-app-plan.md)) measured this over Chrome in a normal window and in fullscreen:
-SnapScreen never became the frontmost app, the page kept focus and visibility, and no keys, text
-or clicks reached it. macOS shows only the frontmost app's cursor changes, so while the overlay is
+The selection overlay, conversation, preview and notice panels use `NSPanel` with
+`.nonactivatingPanel`, appear through `orderFront(nil)`, and cannot become key or main windows.
+The capture and answer flow never activates SnapScreen or requests keyboard focus. Select a
+region by dragging, cancel by clicking, and use panel close buttons or **Close All Conversations**
+to dismiss it. The composer is read-only; Stop, Retry and Copy remain pointer actions. Keyboard
+selection, Escape, Command-W and typed follow-ups are unavailable in these passive panels.
+Keyboard input continues to go to the foreground app.
+
+Settings is a separate foreground setup flow and activates SnapScreen only when explicitly
+opened, including reopening the running app. If no API key exists at launch, a passive notice
+offers **Open Settings** rather than automatically opening Settings.
+
+The overlay is non-opaque, because an opaque window covering the display could make Chrome mark
+its page as hidden. macOS shows only the frontmost app's cursor changes, so while the overlay is
 up, SnapScreen sets the window server's private `SetsCursorInBackground` property, which lets its
 crosshair show without activating the app, and turns it off when the overlay closes.
 
@@ -68,28 +75,26 @@ preview the way their close button does, which ends the session and releases its
 SnapScreen sees that click through an AppKit global monitor for mouse presses. The monitor gets a
 copy of each press that goes to another app and can't change or stop it, so the click still lands
 where you clicked. SnapScreen reads only where the press was, never watches keys, and keeps and
-logs nothing. It watches only while a finished conversation is open: not while an answer, a
-follow-up or a Retry runs, or after one fails or stops. Clicks in SnapScreen's own windows, such
-as the conversation, the preview or a new snip's overlay, never reach the monitor. A click within
+logs nothing. It watches only while a finished conversation is open: not while an answer or a
+Retry runs, or after one fails or stops. Clicks in SnapScreen's own windows, such as the
+conversation, the preview or a new snip's overlay, never reach the monitor. A click within
 8 points of either panel, where it may have been meant to resize one, or while a panel is pressed
-or resized, leaves them open. Closing them activates no app. Closing a panel makes AppKit hand
-the keyboard to another SnapScreen panel, such as a new snip's overlay, even after your click
-gave it to the app you clicked, so while they close no SnapScreen panel can take it. On 11 October
-2026 a scripted copy of the app measured this over Chrome in a normal window and in fullscreen,
-before and after the change: the page kept focus and visibility, and a key typed after the
-dismissing click reached it. A click in another app blurred the page, as it does without
-SnapScreen.
+or resized, leaves them open. Closing them activates no app, and no snip panel can take the
+keyboard during the close.
 
 Selecting a region in a new snip closes the previous snip's conversation and preview the same
 way, whatever state they're in, so only one conversation is open at a time. Cancelling the new
-snip leaves them open. They close only after the new conversation has opened with the keyboard,
-so closing them hands the keyboard to no other window, and nothing is activated or refocused. On
-11 October 2026 a scripted copy of the app measured this over Chrome in a normal window and in
-fullscreen, before and after the change. Replacing a finished conversation and its preview, or one
-still answering, and cancelling a new snip, changed neither the page's focus nor its visibility,
-and SnapScreen never became frontmost. Once the new conversation closed, a key typed next reached
-the page; before the change, the old preview took it. A click in another app blurred the page
-once, as it did with no SnapScreen running.
+snip leaves them open. They close only after the new conversation is shown, and nothing is
+activated or refocused.
+
+On 12 October 2026, a manual check of the passive panels on macOS 27.0.1 with Chrome 154.0.8037.98
+used the real global shortcut and ScreenCaptureKit capture, then synthetic streamed answers through
+the production windows, including preview and dismissal. During the 21-second interval, all 211
+page samples retained focus and visibility, no browser blur occurred, Chrome stayed frontmost, and
+SnapScreen never became active or key. A deliberate app switch before the snip produced blur and
+focus events, validating that observer. This is evidence for that run, not a guarantee across
+browser versions, display modes or system alerts. The Phase 4 acceptance round
+([plan](standalone-app-plan.md)) and 11 October checks cover the earlier keyboard-interactive panels.
 
 Two limitations are known and accepted. The shortcut's modifier keys reach the app beneath,
 because they're pressed before the S that macOS hands to SnapScreen. And macOS periodically shows
