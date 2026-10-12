@@ -28,8 +28,9 @@ func runSelectionViewTests() throws -> Int {
     "the visible instruction says how to select and cancel")
   try check(view.isAccessibilityElement() && view.accessibilityRole() == .layoutArea,
     "selection is exposed as an accessible selection area")
-  try check(view.accessibilityHelp()?.contains("Shift with arrow keys") == true,
-    "keyboard selection is described to assistive technology")
+  try check(view.accessibilityHelp()?.contains("accessibility actions") == true &&
+    view.accessibilityHelp()?.contains("Keyboard input stays in the app beneath") == true,
+    "selection help describes accessibility actions without promising keyboard focus")
 
   var confirmations = [NormalizedRect]()
   var cancellations = 0

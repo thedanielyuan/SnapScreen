@@ -47,8 +47,9 @@ enum Clipboard {
   }
 }
 
-/// Panels never activate SnapScreen, so the app beneath stays active. A key released after its
-/// panel closes would therefore reach that app. Escape and Command-W close on release.
+/// Capture panels never activate SnapScreen or take the keyboard, including when clicked.
+/// Settings uses a separate foreground NSWindow. Keyboard-close handling is retained for actions
+/// dispatched by accessibility clients and the view tests, not for global key interception.
 final class CompanionPanel: NSPanel {
   private var closingKey: UInt16?
   private var closeFallback: Timer?
@@ -56,10 +57,7 @@ final class CompanionPanel: NSPanel {
   /// Replaces `performClose`, which never reaches the delegate of a window without a close
   /// button, such as the borderless selection overlay.
   var closeAction: (() -> Void)?
-  /// While set, no panel takes the keyboard. Closing a panel makes AppKit hand the keyboard to
-  /// another, even after a click in another app took it.
-  static var refusesKeyboard = false
-  override var canBecomeKey: Bool { !Self.refusesKeyboard }
+  override var canBecomeKey: Bool { false }
   override var canBecomeMain: Bool { false }
 
   /// Closes now for pointer actions; for a key press, closes when that key is released.

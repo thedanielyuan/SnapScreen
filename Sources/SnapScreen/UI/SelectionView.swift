@@ -1,8 +1,8 @@
 import AppKit
 
 /// The frozen screenshot, fitted inside its window, for selecting a region: drag and release to
-/// ask, click to cancel, and hold Space while dragging to move the region. Return places a keyboard
-/// selection that arrow keys move and Shift + arrow keys resize; Return again asks. All coordinates
+/// ask, or click to cancel. Accessibility actions can place, move and confirm a selection without
+/// taking the keyboard from the app beneath. All coordinates
 /// stay normalized to the fitted image, including while the window is resized.
 final class SelectionView: NSView {
   static let instruction = "Drag to select a region. Click to cancel"
@@ -37,7 +37,7 @@ final class SelectionView: NSView {
   private var cursorTracking: NSTrackingArea?
   override var isFlipped: Bool { true }
   override var acceptsFirstResponder: Bool { true }
-  // A drag must work even after the user clicked the app beneath and the panel resigned key.
+  // The overlay never becomes key; the first press must still start a drag.
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
   override init(frame frameRect: NSRect) {
@@ -102,9 +102,8 @@ final class SelectionView: NSView {
     setAccessibilityRoleDescription("screenshot region selector")
     setAccessibilityLabel("Select a screen region")
     setAccessibilityHelp("Drag a region and release to ask about it, or click without dragging to cancel. " +
-      "Hold Space while dragging to move the region. " +
-      "Return places a keyboard selection; arrow keys move it, Shift with arrow keys resizes it, " +
-      "and Option makes one-point adjustments. Return again asks. Escape cancels.")
+      "Use the selection's accessibility actions to move, resize, ask or cancel. " +
+      "Keyboard input stays in the app beneath.")
     var actions = [("Move left", UInt16(123), false), ("Move right", UInt16(124), false),
       ("Move up", UInt16(126), false), ("Move down", UInt16(125), false),
       ("Reduce width", UInt16(123), true), ("Increase width", UInt16(124), true),
@@ -309,7 +308,6 @@ final class SelectionView: NSView {
   }
 
   override func mouseDown(with event: NSEvent) {
-    window?.makeFirstResponder(self)
     showCrosshair()
     guard image != nil, imageRect.width > 0 else { return }
     // A drag that starts in the margin is clamped to the image edge.

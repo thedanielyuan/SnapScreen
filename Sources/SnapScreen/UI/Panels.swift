@@ -14,7 +14,7 @@ extension CompanionPanel {
     value.identifier = NSUserInterfaceItemIdentifier(title)
     value.level = .floating
     value.hidesOnDeactivate = false
-    value.becomesKeyOnlyIfNeeded = false
+    value.becomesKeyOnlyIfNeeded = true
     value.isReleasedWhenClosed = false
     value.autorecalculatesKeyViewLoop = true
     value.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]

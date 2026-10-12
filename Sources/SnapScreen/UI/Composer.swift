@@ -51,6 +51,16 @@ final class ComposerView: NSView, NSTextViewDelegate {
   var onSubmit: ((String) -> Void)?
   var onStop: (() -> Void)?
   var onChange: (() -> Void)?
+  /// Passive capture panels retain Stop but never offer a field that would take browser input.
+  var isReadOnly = false {
+    didSet {
+      textView.isEditable = !isReadOnly
+      textView.isSelectable = !isReadOnly
+      textView.placeholder = isReadOnly ? "Snip again for a new answer" : "Ask anything"
+      textView.setAccessibilityLabel(isReadOnly ? "Snip again for a new answer" : "Follow-up question")
+      refreshButton()
+    }
+  }
   var maximumCharacters = maxFollowupCharacters { didSet { if maximumCharacters != oldValue { updateHint() } } }
   /// The session accepts a follow-up now.
   var canSubmit = false { didSet { refreshButton() } }
@@ -250,6 +260,7 @@ final class ComposerView: NSView, NSTextViewDelegate {
 
   override func mouseDown(with event: NSEvent) {
     // A click anywhere in the field focuses the text, as in a standard text field.
+    guard !isReadOnly else { return }
     window?.makeFirstResponder(textView)
   }
 
@@ -260,6 +271,7 @@ final class ComposerView: NSView, NSTextViewDelegate {
 
   private func refreshButton() {
     sendButton.mode = isRunning ? .stop : .send
+    sendButton.isHidden = isReadOnly && !isRunning
     sendButton.isEnabled = isRunning ? canStop : (canSubmit && hasSendableDraft)
   }
 
@@ -368,7 +380,7 @@ final class ComposerView: NSView, NSTextViewDelegate {
   @objc private func sendPressed() {
     if isRunning { if canStop { onStop?() } } else { submit() }
     // The button changes role and may disable itself; keep typing in the field.
-    window?.makeFirstResponder(textView)
+    if !isReadOnly { window?.makeFirstResponder(textView) }
   }
 
   func clear() {

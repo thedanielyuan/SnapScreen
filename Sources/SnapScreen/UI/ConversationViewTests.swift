@@ -195,6 +195,17 @@ func runConversationViewTests() throws -> Int {
   copier.updateAnswer("Done now", status: .done)
   try check(copier.answerToCopy === copier.turns[1] && copier.turns[0].copyButton.toolTip == "Copy answer" &&
     copier.turns[1].copyButton.toolTip == "Copy answer (⇧⌘C)", "the shortcut moves to the newest answer")
+  copier.showsCopyShortcuts = false
+  try check(copier.turns.allSatisfy { $0.copyButton.toolTip == "Copy answer" } &&
+    blocks[3].copyButton?.toolTip == "Copy py code", "passive panels remove existing keyboard shortcut hints")
+  copier.beginTurn(question: "Passive copy")
+  copier.updateAnswer("```swift\nlet answer = 42\n```", status: .done)
+  try check(copier.latestTurn?.copyButton.toolTip == "Copy answer" &&
+    copier.latestTurn?.answer.segmentViews.first?.copyButton?.toolTip == "Copy swift code",
+    "new answers and layout keep keyboard shortcut hints hidden in passive panels")
+  try check(copier.copyLatestAnswer() && pasteboard.string(forType: .string) == "```swift\nlet answer = 42\n```" &&
+    copier.copyLatestCode() && pasteboard.string(forType: .string) == "let answer = 42",
+    "passive panels retain their answer and code Copy button actions")
   copier.actionsEnabled = false
   try check(!copier.copyLatestAnswer() && !copier.copyLatestCode(), "an ended session copies nothing")
   copier.clear()

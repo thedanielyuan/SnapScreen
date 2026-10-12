@@ -62,19 +62,21 @@ show for a few seconds.
 - The app captures only when you press the shortcut or choose Snip, only the display under the
   pointer, and leaves out its own windows. Captures, crops, answers and drafts stay in memory,
   are never written to disk or logged, and are released when their session closes.
-- Panels never activate the app, so the app you snip keeps focus: close windows on key release
-  (`CompanionPanel`) and give tracking areas `.activeAlways`. macOS ignores cursor changes from an
-  app that isn't frontmost, so the overlay's crosshair needs `BackgroundCursor`, which it turns on
-  only while it's up.
+- Capture, conversation, preview and notice panels use `.nonactivatingPanel` and `orderFront(nil)`
+  and can never become key or main. Never activate the app or request keyboard focus in this flow.
+  Selection and dismissal use the pointer; keyboard selection, Escape/Command-W and editable
+  follow-ups are unavailable. Keep Stop, Retry, Copy and close buttons usable without focus.
+  Settings is a separate foreground flow opened explicitly; a missing key shows a passive notice.
+  Give tracking areas `.activeAlways`. macOS ignores cursor changes from an app that isn't
+  frontmost, so the overlay's crosshair needs `BackgroundCursor`, enabled only while it's up.
 - A finished conversation closes on a click in another app, which a global mouse-down monitor
   sees (`SessionWindows.watchOutsideClicks`). It runs only while the answer has finished, reads
   only where the press was, and can't consume it, so the click still lands. Don't replace it with
-  an event tap, key monitoring, or app deactivation or key-window loss. Closing a panel after
-  another app took the keyboard makes AppKit hand it back to another panel, so that close sets
-  `CompanionPanel.refusesKeyboard`.
+  an event tap, key monitoring, or app deactivation or key-window loss. All snip panels remain
+  ineligible for the keyboard while closing, including when another snip is open.
 - Selecting a region in a new snip closes the earlier snips' windows (`SnipWindows.closeEarlier`)
-  through `closeConversation()`, only after the new conversation has the keyboard, so their close
-  hands it nowhere. Keep that order, and don't make the close activate or refocus anything.
+  through `closeConversation()`, only after the new conversation is shown. Keep that order, and
+  don't make the close activate or refocus anything.
 - The app takes no commands from other processes: no URL scheme, socket or XPC service.
 - Test hooks (`SNAPSCREEN_TEST_HOOKS`) compile only into `build/test-hooks/`, which has its own
   bundle ID, and `build-app.sh` refuses a production binary that contains them.
