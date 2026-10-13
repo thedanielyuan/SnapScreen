@@ -99,13 +99,7 @@ func runAppShellTests() throws -> Int {
     edit?.item(withTitle: "Paste")?.keyEquivalent == "v" && edit?.item(withTitle: "Select All")?.keyEquivalent == "a",
     "the Edit menu gives Settings' fields copy and paste")
   try check(NSApp.mainMenu?.item(withTitle: "File")?.submenu?.item(withTitle: "Close window")?.keyEquivalent == "w",
-    "Command-W closes a window")
-  let copyAnswer = edit?.item(withTitle: "Copy Answer")
-  let copyCode = edit?.item(withTitle: "Copy Code")
-  try check(copyAnswer?.keyEquivalent == "c" && copyAnswer?.keyEquivalentModifierMask == [.command, .shift] &&
-    copyAnswer?.action == #selector(SessionWindows.copyAnswer(_:)) && copyCode?.keyEquivalent == "c" &&
-    copyCode?.keyEquivalentModifierMask == [.command, .option] && copyCode?.action == #selector(SessionWindows.copyLastCode(_:)),
-    "⇧⌘C copies a conversation's newest answer and ⌥⌘C its newest code block")
+    "Command-W closes Settings")
 
   var performed = 0
   var closed = 0

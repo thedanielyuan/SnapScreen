@@ -23,17 +23,14 @@ final class SelectionView: NSView {
   /// Fills the view with the image, for the overlay that covers its display: no margin, title bar
   /// inset or backdrop.
   var fillsBounds = false { didSet { selectionChanged() } }
-  /// Normalized to the image. Nil until a drag starts or Return places a keyboard selection.
+  /// Normalized to the image. Nil until a drag starts or an accessibility action places a keyboard
+  /// selection.
   var selection: CGRect? { didSet { selectionChanged() } }
   private(set) var isKeyboardSelection = false
   private(set) var isDragging = false
   var onConfirm: ((NormalizedRect) -> Void)?
   var onCancel: (() -> Void)?
   private var anchor: CGPoint?
-  /// Where the pointer is during a drag, normalized to the image.
-  private var pointer: CGPoint?
-  /// While Space is held during a drag: the pointer, selection and anchor when it was pressed.
-  private var move: (pointer: CGPoint, selection: CGRect, anchor: CGPoint)?
   private var cursorTracking: NSTrackingArea?
   override var isFlipped: Bool { true }
   override var acceptsFirstResponder: Bool { true }
@@ -313,8 +310,6 @@ final class SelectionView: NSView {
     // A drag that starts in the margin is clamped to the image edge.
     let point = normalizedPoint(event)
     anchor = point
-    pointer = point
-    move = nil
     isDragging = true
     isKeyboardSelection = false
     selection = CGRect(origin: point, size: .zero)
@@ -323,15 +318,6 @@ final class SelectionView: NSView {
   override func mouseDragged(with event: NSEvent) {
     guard let anchor = anchor else { return }
     let point = normalizedPoint(event)
-    pointer = point
-    if let move = move {
-      // The selection keeps its size and follows the pointer, stopping at the image's edges.
-      let dx = min(max(point.x - move.pointer.x, -move.selection.minX), 1 - move.selection.maxX)
-      let dy = min(max(point.y - move.pointer.y, -move.selection.minY), 1 - move.selection.maxY)
-      self.anchor = CGPoint(x: move.anchor.x + dx, y: move.anchor.y + dy)
-      selection = move.selection.offsetBy(dx: dx, dy: dy)
-      return
-    }
     selection = CGRect(x: min(point.x, anchor.x), y: min(point.y, anchor.y),
       width: abs(point.x - anchor.x), height: abs(point.y - anchor.y))
   }
@@ -340,8 +326,6 @@ final class SelectionView: NSView {
     guard anchor != nil else { return }
     mouseDragged(with: event)
     anchor = nil
-    pointer = nil
-    move = nil
     isDragging = false
     // Release asks; a click or a drag under the minimum cancels, as in the tested prototype.
     if canConfirm { confirm() } else { selection = nil; onCancel?() }
@@ -360,13 +344,13 @@ final class SelectionView: NSView {
     return true
   }
 
-  /// Shared by arrow keys and accessibility actions: the same bounds and display-point steps.
+  /// The accessibility actions' moves and resizes, each direction named by its arrow key's code.
   @discardableResult
-  func adjustSelection(keyCode: UInt16, resize: Bool, fine: Bool = false) -> Bool {
+  func adjustSelection(keyCode: UInt16, resize: Bool) -> Bool {
     let fitted = imageRect
     guard [123, 124, 125, 126].contains(keyCode), fitted.width > 0, fitted.height > 0,
       let current = selection, normalizedSelection != nil else { return false }
-    let step = fine ? 1 : Self.keyboardStep
+    let step = Self.keyboardStep
     let dx: CGFloat = keyCode == 123 ? -step : (keyCode == 124 ? step : 0)
     let dy: CGFloat = keyCode == 126 ? -step : (keyCode == 125 ? step : 0)
     let minimumWidth = min(1, Self.minimumSize / fitted.width)
@@ -383,31 +367,6 @@ final class SelectionView: NSView {
     guard updated != current else { return false }
     selection = updated
     return true
-  }
-
-  override func keyDown(with event: NSEvent) {
-    // Selection owns keyboard input: nothing typed here is forwarded. Escape is handled by the panel.
-    switch event.keyCode {
-    case 36, 76:
-      guard anchor == nil, !event.isARepeat else { return }
-      if selection == nil { placeKeyboardSelection() } else { confirm() }
-    case 123, 124, 125, 126:
-      guard anchor == nil, selection != nil else { return }
-      adjustSelection(keyCode: event.keyCode, resize: event.modifierFlags.contains(.shift),
-        fine: event.modifierFlags.contains(.option))
-    case 49:
-      // Holding Space during a drag moves the selection, as in macOS's own screenshot selection.
-      // It's Space rather than Option or Shift, which are often still held from the shortcut.
-      guard move == nil, let anchor = anchor, let pointer = pointer, let selection = selection else { return }
-      move = (pointer, selection, anchor)
-    default:
-      break
-    }
-  }
-
-  /// Releasing Space resizes again, from the corner the move left opposite the pointer.
-  override func keyUp(with event: NSEvent) {
-    if event.keyCode == 49 { move = nil }
   }
 
   @objc func confirm() {
@@ -463,7 +422,4 @@ final class PreviewView: NSView {
     super.setFrameSize(newSize)
     needsDisplay = true
   }
-
-  // Keys aimed at the preview stay here; Escape and Command-W close it on release.
-  override func keyDown(with event: NSEvent) {}
 }
