@@ -13,6 +13,8 @@ private final class MemoryKeyStore: APIKeyStore {
     return key
   }
 
+  func readWithoutPrompt() throws -> String? { try read() }
+
   func save(_ key: String) throws {
     if let failure = failure { throw failure }
     self.key = key

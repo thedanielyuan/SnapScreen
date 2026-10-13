@@ -134,6 +134,41 @@ func runAppShellTests() throws -> Int {
     "answers read the key with Keychain prompts turned off, then turn them back on")
   try check(KeychainPrompts.disallowed { KeychainPrompts.areAllowed } == false,
     "Keychain prompts are off while an answer reads the key")
+  func checkBlockedRead(_ control: KeychainPrompts.InteractionControl?, _ name: String) throws {
+    var readAttempted = false
+    do {
+      try KeychainPrompts.disallowed(using: control) { readAttempted = true }
+    } catch let error as KeychainError {
+      try check(!readAttempted && error == KeychainError(operation: .readWithoutPrompt,
+        status: errSecInteractionNotAllowed), name)
+      return
+    }
+    throw AppShellTestError.failed(name)
+  }
+  try checkBlockedRead(nil, "missing prompt-control symbols refuse the read instead of risking a password prompt")
+  var promptChanges: [Bool] = []
+  try checkBlockedRead(KeychainPrompts.InteractionControl(getAllowed: { nil }, setAllowed: {
+    promptChanges.append($0)
+    return errSecSuccess
+  }), "an unreadable prompt setting refuses the read instead of guessing the prior setting")
+  try check(promptChanges.isEmpty, "an unreadable prompt setting is left unchanged")
+  try checkBlockedRead(KeychainPrompts.InteractionControl(getAllowed: { true }, setAllowed: {
+    promptChanges.append($0)
+    return errSecAuthFailed
+  }), "a failure to disable prompts refuses the read instead of risking a password prompt")
+  try check(promptChanges == [false], "a failed attempt to disable prompts never enables them")
+  for original in [true, false] {
+    var allowed = original
+    var changes: [Bool] = []
+    let control = KeychainPrompts.InteractionControl(getAllowed: { allowed }, setAllowed: {
+      allowed = $0
+      changes.append($0)
+      return errSecSuccess
+    })
+    let duringRead = try KeychainPrompts.disallowed(using: control) { allowed }
+    try check(!duringRead && allowed == original && changes == [false, original],
+      "a nonprompting read restores prompts to their original setting: \(original)")
+  }
   try store.remove()
   try check(!store.hasKey && (try store.read()) == nil && (try store.readWithoutPrompt()) == nil,
     "Remove key deletes the Keychain item")

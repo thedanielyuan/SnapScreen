@@ -50,7 +50,8 @@ how data is handled. Never add a privacy section to `README.md`.
 - The API key lives only in the Keychain (service `com.snapscreen.app`, account
   `anthropic-api-key`), never in files, `UserDefaults` or logs, and goes only to
   `api.anthropic.com`. Each request reads it with `readWithoutPrompt`, and no window keeps it;
-  only Settings may let macOS ask for the login password.
+  only Settings may let macOS ask for the login password. If Keychain prompts cannot be disabled,
+  fail the read without accessing the key, rather than risk a dialog taking focus.
 - Capture only on the shortcut or Snip, only the display under the pointer, without SnapScreen's
   own windows. Captures, crops and answers stay in memory, are never written to disk or logged,
   and are released when their session closes. Only Copy changes the clipboard; tests use private

@@ -16,10 +16,6 @@ protocol APIKeyStore: AnyObject {
   func remove() throws
 }
 
-extension APIKeyStore {
-  func readWithoutPrompt() throws -> String? { try read() }
-}
-
 struct KeychainError: Error, Equatable {
   enum Operation { case read, readWithoutPrompt, save, remove }
   let operation: Operation
@@ -79,7 +75,7 @@ final class KeychainStore: APIKeyStore {
     item[kSecReturnData as String] = true
     item[kSecMatchLimit as String] = kSecMatchLimitOne
     var result: CFTypeRef?
-    let status = prompting ? SecItemCopyMatching(item as CFDictionary, &result)
+    let status = try prompting ? SecItemCopyMatching(item as CFDictionary, &result)
       : KeychainPrompts.disallowed { SecItemCopyMatching(item as CFDictionary, &result) }
     let operation: KeychainError.Operation = prompting ? .read : .readWithoutPrompt
     if status == errSecItemNotFound { return nil }
@@ -111,35 +107,47 @@ final class KeychainStore: APIKeyStore {
 /// Whether the login keychain may ask for your password, which it does when an item doesn't trust
 /// the app reading it or the keychain is locked. Neither `kSecUseAuthenticationUIFail` nor an
 /// `LAContext` stops it from asking there; only SecKeychainSetUserInteractionAllowed, deprecated
-/// with the rest of the SecKeychain API, does, so it's looked up at run time. Without it, a read
-/// may still ask.
+/// with the rest of the SecKeychain API, does, so it's looked up at run time. A nonprompting read
+/// fails if that control is unavailable or can't disable prompts.
 enum KeychainPrompts {
   private typealias GetAllowed = @convention(c) (UnsafeMutablePointer<DarwinBoolean>) -> OSStatus
   private typealias SetAllowed = @convention(c) (DarwinBoolean) -> OSStatus
 
-  private static let functions: (GetAllowed, SetAllowed)? = {
+  /// Kept separate from the runtime symbols so failure checks never need a real password prompt.
+  struct InteractionControl {
+    let getAllowed: () -> Bool?
+    let setAllowed: (Bool) -> OSStatus
+  }
+
+  private static let control: InteractionControl? = {
     guard let security = dlopen("/System/Library/Frameworks/Security.framework/Security", RTLD_LAZY),
       let get = dlsym(security, "SecKeychainGetUserInteractionAllowed"),
       let set = dlsym(security, "SecKeychainSetUserInteractionAllowed") else { return nil }
-    return (unsafeBitCast(get, to: GetAllowed.self), unsafeBitCast(set, to: SetAllowed.self))
+    let getAllowed = unsafeBitCast(get, to: GetAllowed.self)
+    let setAllowed = unsafeBitCast(set, to: SetAllowed.self)
+    return InteractionControl(getAllowed: {
+      var allowed: DarwinBoolean = true
+      return getAllowed(&allowed) == errSecSuccess ? allowed.boolValue : nil
+    }, setAllowed: { setAllowed(DarwinBoolean($0)) })
   }()
 
-  static var canDisallow: Bool { functions != nil }
+  static var canDisallow: Bool { control != nil }
 
   /// Whether this process may ask now, or nil when that can't be read.
-  static var areAllowed: Bool? {
-    guard let (get, _) = functions else { return nil }
-    var allowed: DarwinBoolean = true
-    return get(&allowed) == errSecSuccess ? allowed.boolValue : nil
+  static var areAllowed: Bool? { control?.getAllowed() }
+
+  static func disallowed<T>(_ body: () -> T) throws -> T {
+    try disallowed(using: control, body)
   }
 
   /// Runs `body` with this process's keychain prompts turned off, then restores the setting. Every
-  /// keychain call is on the main thread, so none runs in between.
-  static func disallowed<T>(_ body: () -> T) -> T {
-    guard let (_, set) = functions else { return body() }
-    let saved = areAllowed ?? true
-    _ = set(false)
-    defer { _ = set(DarwinBoolean(saved)) }
+  /// keychain call is on the main thread, so none runs in between. Don't attempt the read unless
+  /// prompts are disabled and their prior setting is known, so Settings can still prompt later.
+  static func disallowed<T>(using control: InteractionControl?, _ body: () -> T) throws -> T {
+    guard let control, let saved = control.getAllowed(), control.setAllowed(false) == errSecSuccess else {
+      throw KeychainError(operation: .readWithoutPrompt, status: errSecInteractionNotAllowed)
+    }
+    defer { _ = control.setAllowed(saved) }
     return body()
   }
 }
