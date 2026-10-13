@@ -89,9 +89,8 @@ show for a few seconds. After changing activation, panels, notices, the menu or 
   the user is running; keep that, and don't widen what it accepts.
 - Test hooks (`SNAPSCREEN_TEST_HOOKS`) compile only into `build/test-hooks/`, which has its own
   bundle ID, and `build-app.sh` refuses a production binary that contains them.
-- `docs/security.md` is the full contract: update it when you change a boundary, and update
-  `PRIVACY.md` when data handling changes. Never add a privacy section or a `PRIVACY.md` link to
-  `README.md`.
+- `docs/security.md` is the full contract: update it when you change a boundary or how data is
+  handled. Never add a privacy section to `README.md`.
 
 ## Anthropic API (`Sources/SnapScreenCore/AnthropicClient.swift`)
 
