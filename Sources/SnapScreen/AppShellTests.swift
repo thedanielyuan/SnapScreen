@@ -3,8 +3,8 @@ import Carbon.HIToolbox
 
 private enum AppShellTestError: Error { case failed(String) }
 
-/// The shortcut, menus, notices and Keychain store. Windows stay offscreen. The Keychain checks use
-/// their own service and remove what they add.
+/// The shortcut, menus, quit requests, notices and Keychain store. Windows stay offscreen. The
+/// Keychain checks use their own service and remove what they add.
 func runAppShellTests() throws -> Int {
   var count = 0
   func check(_ value: Bool, _ name: String) throws {
@@ -53,6 +53,28 @@ func runAppShellTests() throws -> Int {
     settings: #selector(MenuTarget.showSettings), shortcut: nil)
   try check(taken.items[0].keyEquivalent.isEmpty, "a shortcut another app has isn't shown")
   try check(StatusMenu.icon?.isTemplate == true, "the menu bar icon adapts to the menu bar")
+
+  try check(QuitRequest.isAccepted(nil), "Quit SnapScreen, which sends no Apple event, quits")
+  func quitEvent() -> NSAppleEventDescriptor {
+    NSAppleEventDescriptor(eventClass: AEEventClass(kCoreEventClass), eventID: AEEventID(kAEQuitApplication),
+      targetDescriptor: nil, returnID: AEReturnID(kAutoGenerateReturnID), transactionID: AETransactionID(kAnyTransactionID))
+  }
+  try check(!QuitRequest.isAccepted(quitEvent()), "a quit event from an unknown sender is refused")
+  let loggingOut = quitEvent()
+  loggingOut.setParam(NSAppleEventDescriptor(typeCode: OSType(kAEReallyLogOut)), forKeyword: AEKeyword(kAEQuitReason))
+  try check(QuitRequest.isAccepted(loggingOut), "logging out, restarting or shutting down quits")
+  try check([
+    "/System/Library/CoreServices/loginwindow.app/Contents/MacOS/loginwindow",
+    "/System/Applications/Utilities/Activity Monitor.app/Contents/MacOS/Activity Monitor",
+    "/System/Library/ExtensionKit/Extensions/SecurityPrivacyExtension.appex/Contents/MacOS/SecurityPrivacyExtension",
+    "/Applications/Raycast.app/Contents/MacOS/Raycast",
+  ].allSatisfy { QuitRequest.isAccepted(senderPath: $0) }, "macOS and apps can quit SnapScreen")
+  try check(![
+    "/usr/bin/osascript", "/Applications/Xcode.app/Contents/Developer/usr/bin/python3",
+    "/Users/me/build/audit/input", "/Applications/Tool.app/Contents/Resources/helper",
+    "/System/Volumes/Data/Users/me/input", nil,
+  ].contains { QuitRequest.isAccepted(senderPath: $0) }, "command-line tools and scripts can't quit SnapScreen")
+  try check(QuitRequest.executablePath(of: 1) == "/sbin/launchd", "a quit event's sender is found from its process ID")
 
   installEditingMenu(applicationName: "SnapScreen")
   let edit = NSApp.mainMenu?.item(withTitle: "Edit")?.submenu

@@ -77,7 +77,9 @@ show for a few seconds.
 - Selecting a region in a new snip closes the earlier snips' windows (`SnipWindows.closeEarlier`)
   through `closeConversation()`, only after the new conversation is shown. Keep that order, and
   don't make the close activate or refocus anything.
-- The app takes no commands from other processes: no URL scheme, socket or XPC service.
+- The app takes no commands from other processes: no URL scheme, socket or XPC service. It refuses
+  quit events from command-line tools and scripts (`QuitRequest`), so a test can't quit the copy
+  the user is running; keep that, and don't widen what it accepts.
 - Test hooks (`SNAPSCREEN_TEST_HOOKS`) compile only into `build/test-hooks/`, which has its own
   bundle ID, and `build-app.sh` refuses a production binary that contains them.
 - `docs/security.md` is the full contract: update it when you change a boundary, and update
@@ -121,8 +123,11 @@ show for a few seconds.
 - Unchanged sources build an identical signature. To check that approvals survive a new one, set
   `SNAPSCREEN_BUILD_NUMBER`, which `build-app.sh` adds to `CFBundleVersion`.
 - The version lives only in `VERSION`, which `build-app.sh` writes into the bundle.
-- Quit a running copy before opening a rebuild, since opening the app while one runs only shows
-  that copy's Settings. `--self-test` adds and removes a Keychain item under its own service,
+- Stop a running copy with `pkill -x SnapScreen` before opening a rebuild, since opening the app
+  while one runs only shows that copy's Settings, and it refuses `osascript`'s quit. Leave the
+  user's copy as you found it: if it was running, `open build/SnapScreen.app` before you finish,
+  including after a test or audit that stopped it, and give test apps their own bundle ID.
+  `--self-test` adds and removes a Keychain item under its own service,
   `com.snapscreen.app.self-test`, never the real key's.
 - Known limitations, accepted in Phase 4: the shortcut's modifier keys reach the app beneath, and
   macOS's periodic alert for apps that capture the screen without the system picker can take focus

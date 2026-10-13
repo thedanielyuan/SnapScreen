@@ -47,6 +47,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     return false
   }
 
+  /// SnapScreen quits only when you mean it to, so a script or a test can't quit the copy you use.
+  func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    QuitRequest.isAccepted(NSAppleEventManager.shared().currentAppleEvent) ? .terminateNow : .terminateCancel
+  }
+
   @MainActor @objc func snip() {
     guard ScreenRecordingAccess.isGranted else {
       notices.show("SnapScreen needs Screen Recording permission to snip.",
@@ -88,5 +93,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     if !NSApp.windows.contains(where: { $0 !== closing.window && $0.isVisible && $0.styleMask.contains(.titled) }) {
       NSApp.hide(nil)
     }
+  }
+}
+
+/// Which requests to quit SnapScreen it accepts. Quit SnapScreen sends no Apple event. A quit event
+/// is accepted when it gives a reason, as logging out, restarting and shutting down do, or comes from
+/// macOS or an app, such as Activity Monitor, and refused from a command-line tool or script.
+enum QuitRequest {
+  static func isAccepted(_ event: NSAppleEventDescriptor?) -> Bool {
+    guard let event, event.eventClass == AEEventClass(kCoreEventClass),
+      event.eventID == AEEventID(kAEQuitApplication) else { return true }
+    let reason = AEKeyword(kAEQuitReason)
+    if event.paramDescriptor(forKeyword: reason) != nil || event.attributeDescriptor(forKeyword: reason) != nil {
+      return true
+    }
+    let sender = event.attributeDescriptor(forKeyword: AEKeyword(keySenderPIDAttr))?.int32Value ?? 0
+    return isAccepted(senderPath: sender > 0 ? executablePath(of: sender) : nil)
+  }
+
+  /// macOS's own processes and the main executables of apps and app extensions. /System/Volumes
+  /// holds the data volume, not macOS.
+  static func isAccepted(senderPath path: String?) -> Bool {
+    guard let path else { return false }
+    if path.hasPrefix("/System/") && !path.hasPrefix("/System/Volumes/") { return true }
+    let parts = URL(fileURLWithPath: path).pathComponents
+    guard parts.count >= 4, parts[parts.count - 3] == "Contents", parts[parts.count - 2] == "MacOS" else {
+      return false
+    }
+    let bundle = parts[parts.count - 4]
+    return bundle.hasSuffix(".app") || bundle.hasSuffix(".appex")
+  }
+
+  static func executablePath(of pid: pid_t) -> String? {
+    var buffer = [UInt8](repeating: 0, count: Int(MAXPATHLEN) * 4)
+    let length = proc_pidpath(pid, &buffer, UInt32(buffer.count))
+    return length > 0 ? String(decoding: buffer.prefix(Int(length)), as: UTF8.self) : nil
   }
 }
