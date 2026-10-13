@@ -14,7 +14,11 @@ ask for that password.
 
 The app reads the key when Settings opens, and closing Settings clears it from the window. Each
 answer reads it again, so a key saved in Settings applies to open conversations, and no other
-window ever gets it. Checking whether a key exists reads only the item's attributes, never the
+window ever gets it. Answers read it with Keychain prompts turned off, through the legacy
+`SecKeychainSetUserInteractionAllowed`, since the login keychain ignores
+`kSecUseAuthenticationUIFail` and `LAContext` there: if macOS would ask for your password, because
+the key doesn't trust this build yet or the keychain is locked, the answer fails and sends you to
+Settings, where reading it may ask. Checking whether a key exists reads only the item's attributes, never the
 key. The key is sent only to Anthropic's API (`api.anthropic.com`), to answer a snip or when you
 choose **Test key**, and never through another server.
 
@@ -75,6 +79,13 @@ Otherwise AppKit's `hide` hands activation back to the previous app; passive pan
 to false, so an open snip does not disappear during that handoff. If another app already has focus,
 closing Settings leaves that choice alone.
 
+Launching SnapScreen through LaunchServices, as Finder, Spotlight, `open` and login items do, leaves
+it in the background on macOS 27. Another app can still activate it, as `osascript`'s `activate`,
+launchers and the system's own handoffs do. With Settings closed, SnapScreen then hands activation
+back the same way after 150 ms, the time it waits for the reopen event that follows LaunchServices
+activating it when you open the running app again: that event opens Settings, which keeps it.
+During those 150 ms a page sees its window blur and refocus, and keys typed reach no app.
+
 The overlay is non-opaque, because an opaque window covering the display could make Chrome mark
 its page as hidden. macOS shows only the frontmost app's cursor changes, so while the overlay is
 up, SnapScreen sets the window server's private `SetsCursorInBackground` property, which lets its
@@ -106,6 +117,10 @@ focus events, validating that observer. This is evidence for that run, not a gua
 browser versions, display modes or system alerts. The Phase 4 acceptance round
 ([plan](standalone-app-plan.md)) and 11 October checks cover the earlier keyboard-interactive panels.
 
+On 13 October 2026, the same Chrome 154 page kept focus at every 100 ms sample while SnapScreen's
+menu bar menu or a right-click menu in a conversation was open and while answer text was selected:
+macOS takes key-window status from the browser during any menu, but the page saw no blur.
+
 Two limitations are known and accepted. The shortcut's modifier keys reach the app beneath,
 because they're pressed before the S that macOS hands to SnapScreen. And macOS periodically shows
 its own alert for apps that capture the screen without the system picker; while it's up, it has
@@ -135,20 +150,27 @@ ones, and reads no key. `build-app.sh` refuses to make a production app that con
 
 For WindowServer focus checks, quit the production app to free its global shortcut and run
 `scripts/test-app-live.sh --focus`, then `scripts/test-app-live.sh --focus --fullscreen`.
-These optional modes require existing event-posting approval for the launching terminal; they
-never request or change that approval. They open an isolated helper app with a local WebKit
+These optional modes require existing event-posting and Accessibility approval for the launching
+terminal; they never request or change either. They open an isolated helper app with a local WebKit
 textarea, use the actual registered shortcut and pointer events to select, copy, preview and
 dismiss, and check native focus, webpage blur, visibility, active element and keyboard input.
 A deliberate focus loss validates the observer before measuring. The test also explicitly opens
 a synthetic Settings window, then verifies that closing it returns focus with an answer open.
-The fullscreen
+Then the helper launches a copy of the real app shell through LaunchServices, with its own bundle
+ID, a key kept in memory and the same fixtures, and the test uses its missing-key notice and
+Settings, has the helper activate it, and reopens it; in a normal Space it also uses the menu bar
+item's Snip, Close All Conversations, Settings… and Quit, found through Accessibility. Only
+Settings may take the helper's place in front, and SnapScreen must hand an activation back within
+half a second. The fullscreen
 mode uses a native macOS fullscreen Space and checks panel ordering above the target window.
 The helper reports only its synthetic webpage state through private pipes. All of this code is
 test-hooks-only. These checks still use fixture captures and API answers; they do not certify
 ScreenCaptureKit permission alerts, Canvas deployments or every browser's focus behavior.
 
-On 13 October 2026, both optional modes passed on macOS 27.0.1. The local webpage retained focus,
-visibility and typed input throughout each measured capture/answer interval and the pointer
-interactions; Settings returned focus while the passive answer stayed visible. The normal run
-passed 167 checks and the fullscreen run 183 (the count includes polling). The standard live
-window test also passed, along with the core suite and the app's self-test.
+On 13 October 2026, both optional modes passed on macOS 27.0.1, the normal run with 285 checks and
+the fullscreen run with 223 (the counts include polling). The local webpage retained focus,
+visibility and typed input throughout each capture, answer and pointer interaction, the app shell's
+launch and its menus; Settings returned focus while a passive answer stayed visible; and the app
+shell handed back an activation it didn't ask for. With that handback removed, the normal run
+failed there. The signed app, checked by hand the same way, handed one back after 167 ms. The
+standard live window test also passed, along with the core suite and the app's self-test.

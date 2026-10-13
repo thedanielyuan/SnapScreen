@@ -64,6 +64,46 @@ final class ScriptedAPI: HTTPTransport, @unchecked Sendable {
   }
 }
 
+/// A key kept in memory, starting empty, so the app shell shows its missing-key notice.
+final class FocusTestKeyStore: APIKeyStore {
+  private var key: String?
+  var hasKey: Bool { key != nil }
+  func read() throws -> String? { key }
+  func save(_ key: String) throws { self.key = key }
+  func remove() throws { key = nil }
+}
+
+/// Open at login for the app shell copy, which never registers it.
+final class InertLoginItem: LoginItem {
+  var isEnabled: Bool { false }
+  var needsApproval: Bool { false }
+  func setEnabled(_ enabled: Bool) throws {}
+  func openSystemSettings() {}
+}
+
+extension AppServices {
+  /// The real app with nothing real behind it, for the focus test's app shell copy: a key kept in
+  /// memory, a made-up capture of the display, scripted answers, and Settings that leaves the
+  /// login items, System Settings and the API alone.
+  static var focusTest: AppServices {
+    let keyStore = FocusTestKeyStore()
+    return AppServices(keyStore: keyStore, answers: AnthropicClient(transport: ScriptedAPI()),
+      screenRecordingGranted: { true },
+      capture: { displayID in
+        try await MainActor.run {
+          guard let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else {
+            throw CaptureError("The display went away.")
+          }
+          return FrozenScreen(image: LiveTest.fixture(for: screen), displayID: displayID)
+        }
+      },
+      settings: { keyStore, shortcut in
+        SettingsServices(keyStore: keyStore, verifyKey: { _ in }, screenRecordingGranted: { true },
+          openScreenRecordingSettings: {}, loginItem: InertLoginItem(), shortcut: shortcut)
+      })
+  }
+}
+
 /// Snips twice through real windows. Pointer events select the regions without taking keyboard
 /// focus. The first snip reads the answer, submits a follow-up programmatically and opens the
 /// preview. The second replaces that conversation and preview, then closes its own as a click in
@@ -400,6 +440,12 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
   private var monitor: Timer?
   private var checks = 0
   private var pressedPoint: NSPoint?
+  /// Who the app shell phase lets be in front: the target; Settings, which you open yourself; or
+  /// SnapScreen, briefly, while it hands an activation it didn't ask for straight back.
+  private enum Front { case target, settings, handback }
+  private var front = Front.target
+  private var activations: [(pid: pid_t, time: Date)] = []
+  private var shellApp: NSRunningApplication?
 
   private struct Failure: Error, CustomStringConvertible {
     let description: String
@@ -450,6 +496,15 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
       Task { @MainActor in self?.receive(data) }
     }
     try target.run()
+    // If macOS refused the target's own activation, LaunchServices activates it, as a click would.
+    try await Task.sleep(for: .seconds(1))
+    if NSWorkspace.shared.frontmostApplication?.processIdentifier != target.processIdentifier {
+      let activate = Process()
+      activate.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+      activate.arguments = ["-e", "tell application id \"com.snapscreen.app.test-hooks.focus-target\" to activate"]
+      try activate.run()
+      activate.waitUntilExit()
+    }
     try await waitFor("the local webpage becomes ready") { self.messages.contains { $0["ready"] as? Bool == true } }
     let ready = messages.removeFirst()
     try require(ready["positiveControl"] as? Bool == true,
@@ -522,7 +577,7 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
     releasePostedPointer()
     try await waitFor("the explicit Settings flow takes focus") { NSApp.isActive && settings.isKeyWindow }
     settings.close()
-    SettingsFocus.returnToPreviousApp(afterClosing: settings)
+    ForegroundFocus.returnToPreviousApp(ignoring: settings)
     try await waitFor("closing Settings returns to the original app with an answer still open") {
       NSWorkspace.shared.frontmostApplication?.processIdentifier == self.target.processIdentifier && !NSApp.isActive
     }
@@ -570,8 +625,12 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
     try await waitFor("the actual outside click dismisses the answer") { self.snips?.sessions.isEmpty == true }
     try await probe("after outside dismissal")
     try require(nativeFailures == 0, "the original app remains frontmost with its key window throughout")
+    try await runAppShell(at: field, on: screen)
     print("SnapScreen focus test passed (test hooks build): \(checks) checks, actual ⌥⇧S, pointer selection, " +
-      "Settings return, Copy, preview, close and outside dismissal; webpage focus and typed input preserved" +
+      "Settings return, Copy, preview, close and outside dismissal; then the real app shell launched through " +
+      "LaunchServices, its notice, an activation it handed back, " +
+      (CommandLine.arguments.contains("--fullscreen") ? "a conversation open through Settings" :
+        "its menu's Snip, Close All, Settings and Quit,") + " and reopening; webpage focus and typed input preserved" +
       (CommandLine.arguments.contains("--fullscreen") ? " in a fullscreen Space" : "") + ". Capture and API used fixtures.")
   }
 
@@ -622,8 +681,14 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
     try await Task.sleep(for: .milliseconds(100))
   }
 
-  private func postPointer(_ type: CGEventType, at point: NSPoint) throws {
-    try requireInputTarget()
+  /// `frontmost` is the app expected in front instead of the target, such as Settings' app.
+  private func postPointer(_ type: CGEventType, at point: NSPoint, frontmost: pid_t? = nil) throws {
+    if let frontmost {
+      try require(target.isRunning && !NSApp.isActive && NSWorkspace.shared.frontmostApplication?.processIdentifier == frontmost,
+        "only the expected app is in front before posting input to it")
+    } else {
+      try requireInputTarget()
+    }
     let height = CGDisplayBounds(CGMainDisplayID()).height
     CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: CGPoint(x: point.x, y: height - point.y),
       mouseButton: .left)?.post(tap: .cghidEventTap)
@@ -653,6 +718,7 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
     snips?.closeAll()
     reports.fileHandleForReading.readabilityHandler = nil
     if target.isRunning { target.terminate() }
+    if let shellApp, !shellApp.isTerminated { shellApp.forceTerminate() }
     previousApp?.activate(options: [])
     pasteboard.releaseGlobally()
     if let failure { FileHandle.standardError.write(Data("SnapScreen focus test failed: \(failure)\n".utf8)) }
@@ -669,6 +735,263 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
         mouseCursorPosition: CGPoint(x: point.x, y: height - point.y), mouseButton: .left)?.post(tap: .cghidEventTap)
       pressedPoint = nil
     }
+  }
+}
+
+// MARK: The app shell
+
+extension LiveFocusTest {
+  /// The real AppDelegate, in a copy with its own bundle ID that the target launches through
+  /// LaunchServices, with a key kept in memory and fixtures for the capture and answers. Its menu
+  /// bar item, notice, shortcut, Settings and reopening are the real ones: Accessibility finds
+  /// them, and posted clicks use them. Only Settings, opened on purpose, may take the target's place.
+  fileprivate func runAppShell(at field: NSPoint, on screen: NSScreen) async throws {
+    try require(AXIsProcessTrusted(),
+      "Accessibility isn't approved for the terminal running --focus, so the test can't find the menu bar item")
+    try require(ProcessInfo.processInfo.environment["SNAPSCREEN_FOCUS_APP"] != nil,
+      "run the focus test through scripts/test-app-live.sh --focus")
+    // The app shell registers the shortcut itself.
+    hotkey.unregister()
+    monitor?.invalidate()
+    let observer = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification,
+      object: nil, queue: .main) { [weak self] note in
+      guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+      MainActor.assumeIsolated { self?.activations.append((app.processIdentifier, Date())) }
+    }
+    defer { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
+    let monitor = Timer(timeInterval: 0.01, repeats: true) { [weak self] _ in
+      MainActor.assumeIsolated {
+        guard let self else { return }
+        if NSApp.isActive || (self.front == .target &&
+          NSWorkspace.shared.frontmostApplication?.processIdentifier != self.target.processIdentifier) {
+          self.nativeFailures += 1
+        }
+      }
+    }
+    RunLoop.main.add(monitor, forMode: .common)
+    self.monitor = monitor
+
+    // Launched with activation, as Finder, Spotlight and login items launch it, it stays in the
+    // background. With no key saved, it shows a passive notice.
+    messages.removeAll()
+    try commands.fileHandleForWriting.write(contentsOf: Data("launch\n".utf8))
+    try await waitFor("LaunchServices launches the app shell") { self.messages.contains { $0["launched"] != nil } }
+    guard let pid = (messages.first { $0["launched"] != nil }?["launched"] as? Int).map({ pid_t($0) }), pid > 0,
+      let shell = NSRunningApplication(processIdentifier: pid) else {
+      throw Failure(description: "the app shell launches")
+    }
+    shellApp = shell
+    let app = AXUIElementCreateApplication(pid)
+    var openSettings: NSPoint?
+    try await waitFor("the app shell shows its menu bar item and its missing-key notice") {
+      openSettings = self.axButton("Open Settings", in: app).flatMap { self.axCenter($0) }
+      return self.statusItem(of: app) != nil && openSettings != nil
+    }
+    try await probe("after LaunchServices launches SnapScreen")
+
+    // The notice's Open Settings takes the keyboard on purpose, and closing Settings returns it.
+    front = .settings
+    try await click(at: openSettings!)
+    try await waitFor("the notice's Open Settings gives Settings the keyboard") { self.settingsHasKeyboard(app, pid) }
+    try await closeSettings(app, pid)
+    try await settle("after Settings opened from the notice closes", blurAllowed: true)
+    try await probe("after Settings opened from the notice closes")
+
+    // Another app activates SnapScreen, as a launcher or a script can. It has no window for the
+    // keyboard, so it hands activation back.
+    front = .handback
+    activations.removeAll()
+    try commands.fileHandleForWriting.write(contentsOf: Data("yield \(pid)\n".utf8))
+    var held: TimeInterval?
+    try await waitFor("SnapScreen is activated, then hands activation back") {
+      guard let up = self.activations.firstIndex(where: { $0.pid == pid }),
+        let back = self.activations[up...].first(where: { $0.pid == self.target.processIdentifier }) else { return false }
+      held = back.time.timeIntervalSince(self.activations[up].time)
+      return true
+    }
+    try require(held! < 0.5, "SnapScreen hands activation back within half a second, not after \(Int(held! * 1000)) ms")
+    front = .target
+    try await settle("after SnapScreen hands activation back", blurAllowed: true)
+    try await probe("after another app activates SnapScreen")
+
+    // A fullscreen Space hides the menu bar until the pointer reaches the top, which posted events
+    // don't do, so the fullscreen run keeps its conversation open through Settings and quits by
+    // request, which closes it.
+    let menuBar = !CommandLine.arguments.contains("--fullscreen")
+    if menuBar {
+      // The menu bar item's Snip opens the overlay without taking the keyboard; a click cancels it.
+      try await chooseMenuItem("Snip", in: app, pid)
+      try await waitFor("the menu's Snip opens the selection overlay") { self.windowFrames(of: pid, .screenSaverWindow).count == 1 }
+      try await settle("with the overlay opened from the menu", blurAllowed: false)
+      try await probe("with the selection opened from the menu")
+      let overlay = windowFrames(of: pid, .screenSaverWindow)[0]
+      try await click(at: NSPoint(x: overlay.midX, y: overlay.midY))
+      try await waitFor("a click cancels the selection") { self.windowFrames(of: pid, .screenSaverWindow).isEmpty }
+      try await probe("after a click cancels the selection")
+    }
+
+    // The real shortcut and a selection open a conversation, which Close All Conversations closes.
+    try postPointer(.mouseMoved, at: field)
+    try postKey(CGKeyCode(kVK_ANSI_S), flags: [.maskAlternate, .maskShift])
+    try await waitFor("⌥⇧S opens the app shell's selection overlay") { self.windowFrames(of: pid, .screenSaverWindow).count == 1 }
+    let start = NSPoint(x: screen.frame.midX - 140, y: screen.frame.midY - 80)
+    let end = NSPoint(x: start.x + 280, y: start.y + 160)
+    try postPointer(.leftMouseDown, at: start)
+    try await Task.sleep(for: .milliseconds(80))
+    try postPointer(.leftMouseDragged, at: end)
+    try await Task.sleep(for: .milliseconds(80))
+    try postPointer(.leftMouseUp, at: end)
+    try await waitFor("the selection opens a conversation") { self.hasConversation(pid) }
+    try await probe("with the app shell's conversation open")
+    if menuBar {
+      try await chooseMenuItem("Close All Conversations", in: app, pid)
+      try await waitFor("Close All Conversations closes it") { !self.hasConversation(pid) }
+      try await settle("after Close All Conversations", blurAllowed: false)
+      try await probe("after Close All Conversations")
+    }
+
+    // Settings… takes the keyboard on purpose, as does opening the running app again, which shows
+    // Settings. Closing it returns the keyboard each time.
+    if menuBar {
+      front = .settings
+      try await chooseMenuItem("Settings…", in: app, pid)
+      try await waitFor("Settings… gives Settings the keyboard") { self.settingsHasKeyboard(app, pid) }
+      try await closeSettings(app, pid)
+      try await settle("after Settings from the menu closes", blurAllowed: true)
+      try await probe("after Settings from the menu closes")
+    }
+    front = .settings
+    try commands.fileHandleForWriting.write(contentsOf: Data("launch\n".utf8))
+    try await waitFor("opening the running app again gives Settings the keyboard") { self.settingsHasKeyboard(app, pid) }
+    try await closeSettings(app, pid)
+    try await settle("after reopened Settings closes", blurAllowed: true)
+    try await probe("after reopened Settings closes")
+
+    if menuBar {
+      try await chooseMenuItem("Quit SnapScreen", in: app, pid)
+    } else {
+      shell.terminate()
+    }
+    try await waitFor("the app shell quits") { shell.isTerminated }
+    try await settle("after the app shell quits", blurAllowed: false)
+    try await probe("after the app shell quits")
+    try require(nativeFailures == 0, "only Settings, opened on purpose, ever took the target's place in front")
+  }
+
+  /// Clicks the menu bar item, waits for its menu, and chooses `title`.
+  private func chooseMenuItem(_ title: String, in app: AXUIElement, _ pid: pid_t) async throws {
+    guard let item = statusItem(of: app), let point = axCenter(item) else {
+      throw Failure(description: "the app shell has a menu bar item")
+    }
+    try await click(at: point)
+    var choice: NSPoint?
+    try await waitFor("the menu bar item's menu opens with \(title)") {
+      guard !self.windowFrames(of: pid, .popUpMenuWindow).isEmpty else { return false }
+      choice = self.axDescendants(of: item, depth: 3).first { self.axString($0, kAXTitleAttribute) == title }
+        .flatMap { self.axCenter($0) }
+      return choice != nil
+    }
+    try await click(at: choice!)
+    try await waitFor("the menu closes once \(title) is chosen") { self.windowFrames(of: pid, .popUpMenuWindow).isEmpty }
+  }
+
+  private func settingsHasKeyboard(_ app: AXUIElement, _ pid: pid_t) -> Bool {
+    NSWorkspace.shared.frontmostApplication?.processIdentifier == pid &&
+      axElement(app, kAXFocusedWindowAttribute).map { axString($0, kAXTitleAttribute) == "SnapScreen Settings" } == true
+  }
+
+  private func closeSettings(_ app: AXUIElement, _ pid: pid_t) async throws {
+    guard let window = axElement(app, kAXFocusedWindowAttribute), let button = axElement(window, kAXCloseButtonAttribute),
+      let point = axCenter(button) else { throw Failure(description: "Settings has a close button") }
+    try await click(at: point, frontmost: pid)
+    try await waitFor("closing Settings gives the keyboard back to the original app") {
+      NSWorkspace.shared.frontmostApplication?.processIdentifier == self.target.processIdentifier
+    }
+    front = .target
+  }
+
+  /// Once the target is in front, checks that its webpage has the keyboard again, and, unless
+  /// something took it on purpose, that the page never blurred or hid since the last check.
+  private func settle(_ stage: String, blurAllowed: Bool) async throws {
+    try await waitFor("the original app is in front \(stage)") {
+      NSWorkspace.shared.frontmostApplication?.processIdentifier == self.target.processIdentifier
+    }
+    try await Task.sleep(for: .milliseconds(200))
+    messages.removeAll()
+    try commands.fileHandleForWriting.write(contentsOf: Data("reset\n".utf8))
+    try await waitFor("the target reports its focus \(stage)") { self.messages.contains { $0["restored"] != nil } }
+    let report = messages.first { $0["restored"] != nil }!
+    messages.removeAll()
+    try require(report["restored"] as? Bool == true &&
+      (blurAllowed || report["blurCount"] as? Int == 0 && report["hiddenCount"] as? Int == 0),
+      "the webpage has the keyboard \(stage)\(blurAllowed ? "" : ", and never blurred or hid"): \(report)")
+  }
+
+  private func click(at point: NSPoint, frontmost: pid_t? = nil) async throws {
+    try postPointer(.mouseMoved, at: point, frontmost: frontmost)
+    try postPointer(.leftMouseDown, at: point, frontmost: frontmost)
+    try await Task.sleep(for: .milliseconds(60))
+    try postPointer(.leftMouseUp, at: point, frontmost: frontmost)
+    try await Task.sleep(for: .milliseconds(100))
+  }
+
+  /// The frames, in AppKit's screen coordinates, of the app's on-screen windows at a level.
+  private func windowFrames(of pid: pid_t, _ level: CGWindowLevelKey) -> [NSRect] {
+    let height = CGDisplayBounds(CGMainDisplayID()).height
+    return (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? [])
+      .filter { $0[kCGWindowOwnerPID as String] as? Int == Int(pid) &&
+        $0[kCGWindowLayer as String] as? Int == Int(CGWindowLevelForKey(level)) }
+      .compactMap { ($0[kCGWindowBounds as String] as? NSDictionary).flatMap { CGRect(dictionaryRepresentation: $0) } }
+      .map { NSRect(x: $0.minX, y: height - $0.maxY, width: $0.width, height: $0.height) }
+  }
+
+  /// A conversation: a floating window, unlike a notice taller than 250 points, and unlike the
+  /// pointer shield smaller than its display.
+  private func hasConversation(_ pid: pid_t) -> Bool {
+    windowFrames(of: pid, .floatingWindow).contains { frame in
+      frame.height > 250 && !NSScreen.screens.contains { $0.frame.size == frame.size }
+    }
+  }
+
+  private func axValue(_ element: AXUIElement, _ name: String) -> AnyObject? {
+    var value: AnyObject?
+    return AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success ? value : nil
+  }
+
+  private func axElement(_ element: AXUIElement, _ name: String) -> AXUIElement? {
+    guard let value = axValue(element, name), CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+    return (value as! AXUIElement)
+  }
+
+  private func axString(_ element: AXUIElement, _ name: String) -> String? { axValue(element, name) as? String }
+
+  private func axChildren(_ element: AXUIElement) -> [AXUIElement] {
+    axValue(element, kAXChildrenAttribute) as? [AXUIElement] ?? []
+  }
+
+  private func axDescendants(of element: AXUIElement, depth: Int) -> [AXUIElement] {
+    guard depth > 0 else { return [] }
+    return axChildren(element).flatMap { [$0] + axDescendants(of: $0, depth: depth - 1) }
+  }
+
+  /// An element's center in AppKit's screen coordinates.
+  private func axCenter(_ element: AXUIElement) -> NSPoint? {
+    guard let position = axValue(element, kAXPositionAttribute), let size = axValue(element, kAXSizeAttribute),
+      CFGetTypeID(position) == AXValueGetTypeID(), CFGetTypeID(size) == AXValueGetTypeID() else { return nil }
+    var origin = CGPoint.zero
+    var extent = CGSize.zero
+    guard AXValueGetValue(position as! AXValue, .cgPoint, &origin), AXValueGetValue(size as! AXValue, .cgSize, &extent),
+      extent.width > 0, extent.height > 0 else { return nil }
+    return NSPoint(x: origin.x + extent.width / 2, y: CGDisplayBounds(CGMainDisplayID()).height - origin.y - extent.height / 2)
+  }
+
+  private func statusItem(of app: AXUIElement) -> AXUIElement? {
+    axElement(app, "AXExtrasMenuBar").flatMap { axChildren($0).first }
+  }
+
+  private func axButton(_ title: String, in app: AXUIElement) -> AXUIElement? {
+    (axValue(app, kAXWindowsAttribute) as? [AXUIElement] ?? []).lazy.flatMap { self.axDescendants(of: $0, depth: 6) }
+      .first { self.axString($0, kAXRoleAttribute) == kAXButtonRole && self.axString($0, kAXTitleAttribute) == title }
   }
 }
 
@@ -718,10 +1041,25 @@ final class LiveFocusTarget: NSObject, NSApplicationDelegate, NSWindowDelegate, 
   }
 
   func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-    if CommandLine.arguments.contains("--fullscreen") {
-      window.toggleFullScreen(nil)
-    } else {
-      prepare()
+    whenActive { [weak self] in
+      guard let self else { return }
+      if CommandLine.arguments.contains("--fullscreen") {
+        self.window.toggleFullScreen(nil)
+      } else {
+        self.prepare()
+      }
+    }
+  }
+
+  /// macOS refuses this app's own activation when the terminal that launched it isn't in front,
+  /// and the test then activates it, so measuring waits until it's active.
+  private func whenActive(_ action: @escaping () -> Void) {
+    guard !NSApp.isActive else { return action() }
+    var observer: NSObjectProtocol?
+    observer = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil,
+      queue: .main) { _ in
+      if let observer { NotificationCenter.default.removeObserver(observer) }
+      action()
     }
   }
 
@@ -778,29 +1116,60 @@ final class LiveFocusTarget: NSObject, NSApplicationDelegate, NSWindowDelegate, 
   private func receive(_ data: Data) {
     pending.append(data)
     while let newline = pending.firstIndex(of: 10) {
-      let reset = String(decoding: pending.prefix(upTo: newline), as: UTF8.self) == "reset"
+      let command = String(decoding: pending.prefix(upTo: newline), as: UTF8.self).split(separator: " ")
       pending.removeSubrange(...newline)
-      webView.evaluateJavaScript("""
-        ({ focused: document.hasFocus(), activeElement: document.activeElement === document.getElementById('field'),
-          blurCount: window.blurCount, visible: document.visibilityState === 'visible',
-          hiddenCount: window.hiddenCount, text: document.getElementById('field').value })
-        """) { [weak self] value, error in
-        guard let self else { return }
-        var result = value as? [String: Any] ?? ["error": error?.localizedDescription ?? "No webpage result"]
-        if reset {
-          let restored = NSApp.isActive && self.window.isKeyWindow && self.window.firstResponder === self.responder &&
-            result["focused"] as? Bool == true && result["activeElement"] as? Bool == true &&
-            result["visible"] as? Bool == true
-          self.nativeFailures = 0
-          self.webView.evaluateJavaScript("window.blurCount = 0; window.hiddenCount = 0") { [weak self] _, _ in
-            self?.report(["restored": restored])
-          }
-          return
-        }
-        result["nativeFailures"] = self.nativeFailures
-        self.report(result)
+      switch command.first {
+      case "launch": launchAppShell()
+      case "yield": yieldActivation(to: command.dropFirst().first.flatMap { pid_t($0) })
+      default: reportState(reset: command.first == "reset")
       }
     }
+  }
+
+  /// `reset` also reports what the page saw since the last reset, then starts counting again.
+  private func reportState(reset: Bool) {
+    webView.evaluateJavaScript("""
+      ({ focused: document.hasFocus(), activeElement: document.activeElement === document.getElementById('field'),
+        blurCount: window.blurCount, visible: document.visibilityState === 'visible',
+        hiddenCount: window.hiddenCount, text: document.getElementById('field').value })
+      """) { [weak self] value, error in
+      guard let self else { return }
+      var result = value as? [String: Any] ?? ["error": error?.localizedDescription ?? "No webpage result"]
+      result["nativeFailures"] = self.nativeFailures
+      if reset {
+        result["restored"] = NSApp.isActive && self.window.isKeyWindow && self.window.firstResponder === self.responder &&
+          result["focused"] as? Bool == true && result["activeElement"] as? Bool == true &&
+          result["visible"] as? Bool == true
+        self.nativeFailures = 0
+        self.webView.evaluateJavaScript("window.blurCount = 0; window.hiddenCount = 0") { [weak self] _, _ in
+          self?.report(result)
+        }
+        return
+      }
+      self.report(result)
+    }
+  }
+
+  /// Opens the app shell copy through LaunchServices, which activates it as Finder, Spotlight and
+  /// login items do. Once it's running, opening it again reopens it instead.
+  private func launchAppShell() {
+    guard let path = ProcessInfo.processInfo.environment["SNAPSCREEN_FOCUS_APP"] else {
+      return report(["launched": 0])
+    }
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.arguments = ["--focus-app"]
+    configuration.addsToRecentItems = false
+    NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: path), configuration: configuration) { [weak self] app, _ in
+      let pid = Int(app?.processIdentifier ?? 0)
+      Task { @MainActor in self?.report(["launched": pid]) }
+    }
+  }
+
+  /// As the active app, has macOS activate another, as a launcher or a script can.
+  private func yieldActivation(to pid: pid_t?) {
+    guard let pid, let app = NSRunningApplication(processIdentifier: pid) else { return report(["yielded": false]) }
+    NSApp.yieldActivation(to: app)
+    report(["yielded": app.activate(from: .current, options: [])])
   }
 
   private func report(_ value: [String: Any]) {

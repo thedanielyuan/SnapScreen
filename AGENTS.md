@@ -20,7 +20,9 @@ open build/SnapScreen.app                                    # the menu bar app
 
 Before finishing any change, run CI's steps in this order: `swift build`, `swift test`,
 `scripts/build-app.sh`, the app's `--self-test`, then `scripts/test-app-live.sh`, whose windows
-show for a few seconds.
+show for a few seconds. After changing activation, panels, notices, the menu or Settings, also run
+`scripts/test-app-live.sh --focus` and `--focus --fullscreen`: each posts real input for about
+20 seconds, so ask the user first, and quit the running app (`pkill -x SnapScreen`) beforehand.
 
 ## Layout
 
@@ -57,8 +59,9 @@ show for a few seconds.
 ## Security and privacy — do not regress
 
 - The API key lives only in the Keychain (service `com.snapscreen.app`, account
-  `anthropic-api-key`), never in files, `UserDefaults` or logs. It's read for each request, and no
-  window keeps it.
+  `anthropic-api-key`), never in files, `UserDefaults` or logs. It's read for each request, with
+  Keychain prompts turned off (`readWithoutPrompt`), and no window keeps it. Only Settings may let
+  macOS ask for the login password.
 - The app captures only when you press the shortcut or choose Snip, only the display under the
   pointer, and leaves out its own windows. Captures, crops, answers and drafts stay in memory,
   are never written to disk or logged, and are released when their session closes.
@@ -67,6 +70,9 @@ show for a few seconds.
   Selection and dismissal use the pointer; keyboard selection, Escape/Command-W and editable
   follow-ups are unavailable. Keep Stop, Retry, Copy and close buttons usable without focus.
   Settings is a separate foreground flow opened explicitly; a missing key shows a passive notice.
+  Only Settings keeps the app active: `applicationDidBecomeActive` hands any other activation back
+  after `AppDelegate.handbackDelay`, which lets a reopen claim it for Settings, and closing Settings
+  hands focus back too (`ForegroundFocus`).
   Give tracking areas `.activeAlways`. macOS ignores cursor changes from an app that isn't
   frontmost, so the overlay's crosshair needs `BackgroundCursor`, enabled only while it's up.
 - A finished conversation closes on a click in another app, which a global mouse-down monitor

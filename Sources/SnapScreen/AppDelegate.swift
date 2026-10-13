@@ -1,9 +1,24 @@
 import AppKit
 import SnapScreenCore
 
+/// What the app uses beyond its own windows, so the live focus test can run the real app with a key
+/// kept in memory, a made-up capture and scripted answers.
+struct AppServices {
+  var keyStore: APIKeyStore = KeychainStore()
+  var answers: any AnswerClient = AnthropicClient()
+  var screenRecordingGranted: () -> Bool = { ScreenRecordingAccess.isGranted }
+  var capture: @Sendable (CGDirectDisplayID) async throws -> FrozenScreen = {
+    try await ScreenCapturer.capture(displayID: $0)
+  }
+  /// Settings' services, given the key store and the shortcut, nil when another app has it.
+  var settings: (APIKeyStore, Hotkey.Combination?) -> SettingsServices = {
+    SettingsServices(keyStore: $0, shortcut: $1)
+  }
+}
+
 /// The menu bar app: its icon and menu, the global shortcut, snips, Settings and notices.
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
-  private let keyStore = KeychainStore()
+  private let services: AppServices
   private let notices = NoticeCenter()
   private let hotkey = Hotkey(.snip)
   private var shortcutAvailable = false
@@ -11,13 +26,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
   private var settings: SettingsWindowController?
   private var snips: SnipWindows?
 
+  init(services: AppServices = AppServices()) {
+    self.services = services
+  }
+
   func applicationDidFinishLaunching(_ notification: Notification) {
     installEditingMenu(applicationName: "SnapScreen")
     // The key is read for each request, so a key saved in Settings applies to open conversations.
-    let keyStore = keyStore
-    let controller = SessionController(apiKey: {
+    // A request never lets macOS ask for your password; Settings, which you open yourself, may.
+    let keyStore = services.keyStore
+    let controller = SessionController(answers: services.answers, apiKey: {
       do {
-        return try keyStore.read()
+        return try keyStore.readWithoutPrompt()
       } catch let error as KeychainError {
         throw AnthropicError("keychain", error.message)
       }
@@ -41,6 +61,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
   }
 
+  /// How long an activation waits for Settings before SnapScreen hands it back. Opening the
+  /// running app again activates it about a millisecond before the reopen event that opens Settings.
+  static let handbackDelay: DispatchTimeInterval = .milliseconds(150)
+
+  /// Only Settings, which you open yourself, keeps SnapScreen active. Anything else that activates
+  /// it, such as a script, a launcher or another app asking it to, finds no window for the
+  /// keyboard, so it hands activation back to the app you were using.
+  func applicationDidBecomeActive(_ notification: Notification) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + Self.handbackDelay) { [weak self] in
+      guard let self, self.settings == nil else { return }
+      ForegroundFocus.returnToPreviousApp()
+    }
+  }
+
   /// Opening the app again while it runs, from Finder or Spotlight, shows Settings.
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
     showSettings()
@@ -53,14 +87,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
   }
 
   @MainActor @objc func snip() {
-    guard ScreenRecordingAccess.isGranted else {
+    guard services.screenRecordingGranted() else {
       notices.show("SnapScreen needs Screen Recording permission to snip.",
         action: NoticeAction(title: "Open System Settings") { ScreenRecordingAccess.openSystemSettings() })
       return
     }
     // The display under the pointer, as the shortcut or the menu leaves it.
     let displayID = screenUnderPointer()?.displayID ?? CGMainDisplayID()
-    snips?.controller.start { try await ScreenCapturer.capture(displayID: displayID) }
+    let capture = services.capture
+    snips?.controller.start { try await capture(displayID) }
   }
 
   @MainActor @objc func closeAllConversations() {
@@ -74,8 +109,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
   @objc func showSettings() {
     if settings == nil {
-      let controller = SettingsWindowController(services: SettingsServices(keyStore: keyStore,
-        shortcut: shortcutAvailable ? hotkey.combination : nil))
+      let controller = SettingsWindowController(services: services.settings(services.keyStore,
+        shortcutAvailable ? hotkey.combination : nil))
       controller.onClose = { [weak self] in self?.settingsClosed() }
       settings = controller
     }
@@ -89,17 +124,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     closing.window.delegate = nil
     // The window is still closing, so release it afterwards.
     DispatchQueue.main.async {
-      SettingsFocus.returnToPreviousApp(afterClosing: closing.window)
+      ForegroundFocus.returnToPreviousApp(ignoring: closing.window)
     }
   }
 }
 
-/// Only explicit foreground Settings may activate SnapScreen. Passive panels must not keep it
-/// active after Settings closes, and must stay visible when AppKit hands focus back.
-enum SettingsFocus {
-  static func returnToPreviousApp(afterClosing window: NSWindow) {
+/// SnapScreen takes the keyboard only for Settings. Whenever it's active with no other window that
+/// could have the keyboard, as once Settings closes, it hides, and AppKit activates the app you were
+/// using. Passive panels set `canHide` to false, so an open snip stays visible through the handoff.
+/// If another app is already active, this leaves it alone.
+enum ForegroundFocus {
+  /// `closing` is a window that's closing, so it doesn't count.
+  static func returnToPreviousApp(ignoring closing: NSWindow? = nil) {
     guard NSApp.isActive, !NSApp.windows.contains(where: {
-      $0 !== window && $0.isVisible && $0.canBecomeKey
+      $0 !== closing && $0.isVisible && $0.canBecomeKey
     }) else { return }
     NSApp.hide(nil)
   }
