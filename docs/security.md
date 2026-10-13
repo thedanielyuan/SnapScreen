@@ -33,16 +33,15 @@ pointer, with ScreenCaptureKit at full resolution. The capture leaves out the cu
 SnapScreen's own windows, such as open conversations, notices and Settings. The frozen display
 stays in memory while you select a region. It's released once the region is cropped, or when
 the selection is cancelled, replaced by a new snip, or left for two minutes. Only the crop,
-fitted to the limits in Settings, goes to Anthropic. A session's images, answers and drafts stay
-in memory too, and are released when its conversation closes. Nothing is written to disk or
+fitted to the limits in Settings, goes to Anthropic. A session's images and answer stay in memory
+too, and are released when its conversation closes. Nothing is written to disk or
 logged. Copy writes text to the clipboard only when you choose it, and the clipboard can keep it
 after the conversation closes.
 
 Anthropic keeps API inputs and outputs under its own
 [data-retention policy](https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data).
-Answer requests use prompt caching, so Anthropic keeps the conversation, including the crop,
-cached for about 5 minutes after its last use. Provider error text passes through
-`sanitizeProviderMessage` before a window shows it.
+Answer requests don't ask Anthropic to cache them: a snip sends one request, and only Retry sends
+it again. Provider error text passes through `sanitizeProviderMessage` before a window shows it.
 
 ## Permissions
 
@@ -67,8 +66,9 @@ saver level; the other panels use the floating level. They appear through `order
 the resize shield is ordered directly below its conversation.
 The capture and answer flow never activates SnapScreen or requests keyboard focus. Select a
 region by dragging, cancel by clicking, and use panel close buttons or **Close All Conversations**
-to dismiss it. The composer is read-only; Stop, Retry and Copy remain pointer actions. Keyboard
-selection, Escape, Command-W and typed follow-ups are unavailable in these passive panels.
+to dismiss it. A snip gets one answer, with no follow-ups or other text input, and Stop, Retry and
+Copy are pointer actions. Keyboard selection, Escape and Command-W are unavailable in these passive
+panels.
 Keyboard input continues to go to the foreground app.
 
 Settings is a separate foreground setup flow and activates SnapScreen only when explicitly

@@ -10,8 +10,7 @@
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -38,9 +37,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {
@@ -75,8 +71,7 @@
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -103,9 +98,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {
@@ -140,8 +132,7 @@
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -171,9 +162,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {
@@ -208,8 +196,7 @@
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -239,9 +226,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {
@@ -276,8 +260,7 @@
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -307,9 +290,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {
@@ -349,8 +329,7 @@
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -380,9 +359,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {
@@ -422,8 +398,7 @@
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -454,9 +429,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {
@@ -503,8 +475,7 @@
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -534,9 +505,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {
@@ -576,8 +544,7 @@
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -607,9 +574,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {
@@ -644,8 +608,7 @@
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -675,9 +638,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {

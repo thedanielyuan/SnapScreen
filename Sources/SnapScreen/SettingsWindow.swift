@@ -13,6 +13,33 @@ struct SettingsServices {
   var shortcut: Hotkey.Combination?
 }
 
+/// Plain-text input that shows a placeholder while it's empty, laid out as typed text would be.
+final class PromptTextView: NSTextView {
+  var placeholder = "" { didSet { needsDisplay = true } }
+
+  override func didChangeText() {
+    super.didChangeText()
+    needsDisplay = true
+  }
+
+  override func draw(_ dirtyRect: NSRect) {
+    super.draw(dirtyRect)
+    guard string.isEmpty, !hasMarkedText() else { return }
+    // Laid out as the text is, so the placeholder sits exactly where typing starts. String drawing
+    // places a line's extra space differently.
+    var attributes = typingAttributes
+    attributes[.foregroundColor] = NSColor.placeholderTextColor
+    let storage = NSTextStorage(string: placeholder, attributes: attributes)
+    let manager = NSLayoutManager()
+    let container = NSTextContainer(size: NSSize(width: textContainer?.containerSize.width ?? bounds.width,
+      height: .greatestFiniteMagnitude))
+    container.lineFragmentPadding = textContainer?.lineFragmentPadding ?? 0
+    manager.addTextContainer(container)
+    storage.addLayoutManager(manager)
+    manager.drawGlyphs(forGlyphRange: manager.glyphRange(for: container), at: textContainerOrigin)
+  }
+}
+
 /// The Settings window: the key, the Default Prompt and the advanced limits, plus Screen
 /// Recording status and Open at login. Closing it saves what you changed.
 final class SettingsWindowController: NSObject, NSWindowDelegate {
@@ -24,9 +51,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   /// Shows the key in place of `keyField` after Show.
   let visibleKeyField = NSTextField()
   let keyHint = NSTextField(labelWithString: "")
-  let promptView = ComposerTextView(frame: NSRect(x: 0, y: 0, width: contentWidth, height: 64))
+  let promptView = PromptTextView(frame: NSRect(x: 0, y: 0, width: contentWidth, height: 64))
   let inputCharactersField = NSTextField()
-  let conversationTurnsField = NSTextField()
   let screenshotSizeField = NSTextField()
   let screenshotEdgeField = NSTextField()
   let limitsSection = NSStackView()
@@ -128,7 +154,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     // The disclosure triangle already names the section.
     advancedTitle.setAccessibilityElement(false)
     let limitsGrid = NSGridView(views: [
-      [limitColumn(inputCharactersField, "Question characters"), limitColumn(conversationTurnsField, "Conversation turns")],
+      [limitColumn(inputCharactersField, "Prompt characters"), NSGridCell.emptyContentView],
       [limitColumn(screenshotSizeField, "Screenshot size (MB)"), limitColumn(screenshotEdgeField, "Screenshot edge (px)")],
     ])
     limitsGrid.rowSpacing = 10
@@ -140,7 +166,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
       Self.wrappingLabel("Keep requests predictable and within Anthropic's image and request limits.", size: 11,
         color: .secondaryLabelColor, width: Self.contentWidth - 20),
       limitsGrid,
-      Self.wrappingLabel("Defaults: 4,000 characters, 12 turns, 5 MB, and 2,576 px. The API ceilings are 10 MB and " +
+      Self.wrappingLabel("Defaults: 4,000 characters, 5 MB, and 2,576 px. The API ceilings are 10 MB and " +
         "8,000 px.", size: 11, color: .secondaryLabelColor, width: Self.contentWidth - 20),
     ] { limitsSection.addArrangedSubview(view) }
     limitsSection.orientation = .vertical
@@ -290,7 +316,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
   /// The limits as their fields show them, in `limitInputs` order.
   private func limitStrings(_ limits: SnapScreenLimits) -> [String] {
-    [String(limits.maxInputCharacters), String(limits.maxConversationTurns),
+    [String(limits.maxInputCharacters),
       limits.maxScreenshotBytes % megabyte == 0
         ? String(limits.maxScreenshotBytes / megabyte) : String(Double(limits.maxScreenshotBytes) / Double(megabyte)),
       String(limits.maxScreenshotDimension)]
@@ -315,10 +341,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   private var limitInputs: [LimitInput] {
     let bytes = SnapScreenLimits.screenshotBytes
     return [
-      LimitInput(field: inputCharactersField, name: "Question character limit",
+      LimitInput(field: inputCharactersField, name: "Prompt character limit",
         range: SnapScreenLimits.inputCharacters.min...SnapScreenLimits.inputCharacters.max),
-      LimitInput(field: conversationTurnsField, name: "Conversation turn limit",
-        range: SnapScreenLimits.conversationTurns.min...SnapScreenLimits.conversationTurns.max),
       LimitInput(field: screenshotSizeField, name: "Screenshot size limit", range: bytes.min / megabyte...bytes.max / megabyte),
       LimitInput(field: screenshotEdgeField, name: "Screenshot edge limit",
         range: SnapScreenLimits.screenshotDimension.min...SnapScreenLimits.screenshotDimension.max),
@@ -340,8 +364,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
       }
       values.append(Int(number))
     }
-    return SnapScreenLimits(maxInputCharacters: values[0], maxScreenshotBytes: values[2] * megabyte,
-      maxScreenshotDimension: values[3], maxConversationTurns: values[1])
+    return SnapScreenLimits(maxInputCharacters: values[0], maxScreenshotBytes: values[1] * megabyte,
+      maxScreenshotDimension: values[2])
   }
 
   /// Saves the key, Default Prompt and limits, or reports the first that can't be saved and saves

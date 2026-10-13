@@ -6,7 +6,7 @@ import Testing
   #expect(SessionSettings.normalized(storedPrompt: nil, storedLimits: nil) == .defaults)
   #expect(SessionSettings.defaults.defaultPrompt == "Answer the question shown in this screenshot.")
   #expect(SnapScreenLimits.defaults == SnapScreenLimits(maxInputCharacters: 4_000, maxScreenshotBytes: 5_000_000,
-    maxScreenshotDimension: 2_576, maxConversationTurns: 12))
+    maxScreenshotDimension: 2_576))
 }
 
 @Test func trimsTheSavedPromptAndReplacesABlankOne() {
@@ -19,23 +19,26 @@ import Testing
 
 @Test func clampsCorruptedAndOutOfRangeLimits() {
   let limits = normalizeLimits(["maxInputCharacters": -1, "maxScreenshotBytes": Double.infinity,
-    "maxScreenshotDimension": 99_999, "maxConversationTurns": 3.7] as [String: Any])
+    "maxScreenshotDimension": 1_000.6] as [String: Any])
   #expect(limits == SnapScreenLimits(maxInputCharacters: 100, maxScreenshotBytes: 5_000_000,
-    maxScreenshotDimension: 8_000, maxConversationTurns: 4))
+    maxScreenshotDimension: 1_001))
+  #expect(normalizeLimits(["maxScreenshotDimension": 99_999] as [String: Any]).maxScreenshotDimension == 8_000)
+  // A turn limit saved before follow-ups were removed is ignored.
+  #expect(normalizeLimits(["maxConversationTurns": 3] as [String: Any]) == .defaults)
 }
 
 @Test func ignoresLimitsThatAreNotNumbers() {
   #expect(normalizeLimits(["maxInputCharacters": true, "maxScreenshotBytes": "6000000",
-    "maxConversationTurns": NSNull()] as [String: Any]) == .defaults)
+    "maxScreenshotDimension": NSNull()] as [String: Any]) == .defaults)
   #expect(normalizeLimits([1, 2, 3]) == .defaults)
   #expect(normalizeLimits(nil) == .defaults)
 }
 
 @Test func clampsLimitsPassedToTheClient() {
-  let limits = SnapScreenLimits(maxInputCharacters: 1, maxScreenshotBytes: 99_000_000, maxScreenshotDimension: 600,
-    maxConversationTurns: 1).normalized
+  let limits = SnapScreenLimits(maxInputCharacters: 1, maxScreenshotBytes: 99_000_000, maxScreenshotDimension: 600)
+    .normalized
   #expect(limits == SnapScreenLimits(maxInputCharacters: 100, maxScreenshotBytes: 10_000_000,
-    maxScreenshotDimension: 600, maxConversationTurns: 2))
+    maxScreenshotDimension: 600))
 }
 
 @Test func savesAndLoadsSettings() throws {
@@ -46,8 +49,7 @@ import Testing
   #expect(SessionSettings.load(from: store) == .defaults)
   SessionSettings.save(defaultPrompt: "Answer in French.", to: store)
   SessionSettings.save(limits: SnapScreenLimits(maxInputCharacters: 60_000, maxScreenshotBytes: 2_000_000,
-    maxScreenshotDimension: 4_000, maxConversationTurns: 20), to: store)
+    maxScreenshotDimension: 4_000), to: store)
   #expect(SessionSettings.load(from: store) == SessionSettings(defaultPrompt: "Answer in French.",
-    limits: SnapScreenLimits(maxInputCharacters: 50_000, maxScreenshotBytes: 2_000_000, maxScreenshotDimension: 4_000,
-      maxConversationTurns: 20)))
+    limits: SnapScreenLimits(maxInputCharacters: 50_000, maxScreenshotBytes: 2_000_000, maxScreenshotDimension: 4_000)))
 }

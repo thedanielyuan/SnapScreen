@@ -2,8 +2,7 @@ import Foundation
 
 public let megabyte = 1_000_000
 
-/// A request that breaks a limit in Settings or would send an inconsistent conversation. It's
-/// reported before anything is sent.
+/// A request that breaks a limit in Settings. It's reported before anything is sent.
 public struct RequestLimitError: Error, Equatable, Sendable {
   public enum Code: String, Sendable {
     case inputEmpty = "input_empty"
@@ -11,7 +10,6 @@ public struct RequestLimitError: Error, Equatable, Sendable {
     case screenshotInvalid = "screenshot_invalid"
     case screenshotTooLarge = "screenshot_too_large"
     case screenshotDimensionsTooLarge = "screenshot_dimensions_too_large"
-    case conversationIncomplete = "conversation_incomplete"
   }
 
   public let code: Code
@@ -80,14 +78,6 @@ public func assertScreenshotWithinLimits(_ png: Data, limits: SnapScreenLimits) 
   return metadata
 }
 
-public func assertHistoryScreenshotsWithinLimits(_ history: [AnthropicMessage], limits: SnapScreenLimits) throws {
-  for message in history {
-    for case .image(let png) in message.blocks ?? [] {
-      try assertScreenshotWithinLimits(png, limits: limits)
-    }
-  }
-}
-
 /// Megabytes with one decimal unless whole, like JavaScript's `toFixed`, which rounds exact
 /// halves up where C's formatting rounds them to even.
 func formatMegabytes(_ bytes: Int) -> String {
@@ -98,49 +88,4 @@ func formatMegabytes(_ bytes: Int) -> String {
     return "\(tenths / 10).\(tenths % 10)"
   }
   return String(format: "%.1f", Double(bytes) / Double(megabyte))
-}
-
-public struct PrunedTurns<Message> {
-  public let messages: [Message]
-  public let removedTurns: Int
-}
-
-/// Keeps the pinned first turn and the newest complete turns, leaving room for the request about
-/// to be added. It never returns an unmatched message.
-public func pruneApiHistoryForNewestTurn(_ history: [AnthropicMessage], maxConversationTurns: Int) throws
-  -> PrunedTurns<AnthropicMessage> {
-  let turns = try completePairs(history)
-  return keepNewestTurns(turns, original: history, maxConversationTurns: maxConversationTurns)
-}
-
-/// The same policy for the visible conversation, which starts with the first answer alone.
-public func pruneDisplayHistoryForNewestTurn(_ history: [DisplayMessage], maxConversationTurns: Int) throws
-  -> PrunedTurns<DisplayMessage> {
-  guard let first = history.first else { return PrunedTurns(messages: [], removedTurns: 0) }
-  guard first.role == .assistant else { throw incompleteConversationError() }
-  let turns = [[first]] + (try completePairs(Array(history.dropFirst())))
-  return keepNewestTurns(turns, original: history, maxConversationTurns: maxConversationTurns)
-}
-
-private func keepNewestTurns<Message>(_ turns: [[Message]], original: [Message], maxConversationTurns: Int)
-  -> PrunedTurns<Message> {
-  let existingBudget = max(1, maxConversationTurns - 1)
-  if turns.count <= existingBudget { return PrunedTurns(messages: original, removedTurns: 0) }
-  let kept = [turns[0]] + turns.suffix(existingBudget - 1)
-  return PrunedTurns(messages: kept.flatMap { $0 }, removedTurns: turns.count - kept.count)
-}
-
-private func completePairs<Message: ConversationMessage>(_ messages: [Message]) throws -> [[Message]] {
-  guard messages.count.isMultiple(of: 2) else { throw incompleteConversationError() }
-  return try stride(from: 0, to: messages.count, by: 2).map { index in
-    guard messages[index].role == .user, messages[index + 1].role == .assistant else {
-      throw incompleteConversationError()
-    }
-    return [messages[index], messages[index + 1]]
-  }
-}
-
-private func incompleteConversationError() -> RequestLimitError {
-  RequestLimitError(.conversationIncomplete,
-    "The conversation contains an unfinished turn. Retry or remove it before continuing.")
 }

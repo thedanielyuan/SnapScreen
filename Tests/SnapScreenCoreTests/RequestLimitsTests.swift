@@ -3,14 +3,9 @@ import Testing
 @testable import SnapScreenCore
 
 private let limits = SnapScreenLimits(maxInputCharacters: 4_000, maxScreenshotBytes: 5 * megabyte,
-  maxScreenshotDimension: 2_576, maxConversationTurns: 4)
+  maxScreenshotDimension: 2_576)
 
 private func code(_ body: () throws -> Void) -> RequestLimitError.Code? { thrownError(RequestLimitError.self, body)?.code }
-
-private func apiTurn(_ index: Int, image: Bool = false) -> [AnthropicMessage] {
-  [image ? AnthropicMessage(role: .user, content: .blocks([.image(Data([0]))])) : .user("question-\(index)"),
-   .assistant("answer-\(index)")]
-}
 
 @Test func countsCodePointsAndAcceptsTheExactBoundary() throws {
   #expect(countTextCharacters("A🙂B") == 3)
@@ -67,46 +62,4 @@ private func apiTurn(_ index: Int, image: Bool = false) -> [AnthropicMessage] {
   #expect(code { _ = try inspectPNG(Data("ABC".utf8)) } == .screenshotInvalid)
   #expect(code { _ = try inspectPNG(Data()) } == .screenshotInvalid)
   #expect(code { _ = try inspectPNG(pngHeader(width: 0, height: 10)) } == .screenshotInvalid)
-}
-
-@Test func appliesScreenshotLimitsToImagesInHistory() {
-  let history: [AnthropicMessage] = [
-    AnthropicMessage(role: .user, content: .blocks([.image(pngHeader(width: 2_577, height: 100))])),
-    .assistant("Stopped."),
-  ]
-  #expect(code { try assertHistoryScreenshotsWithinLimits(history, limits: limits) } == .screenshotDimensionsTooLarge)
-}
-
-@Test func keepsThePinnedImageTurnAndTheNewestCompleteTurns() throws {
-  let history = apiTurn(0, image: true) + apiTurn(1) + apiTurn(2) + apiTurn(3) + apiTurn(4)
-  let result = try pruneApiHistoryForNewestTurn(history, maxConversationTurns: 4)
-  #expect(result.removedTurns == 2)
-  #expect(result.messages == apiTurn(0, image: true) + apiTurn(3) + apiTurn(4))
-}
-
-@Test func keepsRoomForTheNewestRequestAtTheTwoTurnMinimum() throws {
-  let history = apiTurn(0, image: true) + apiTurn(1) + apiTurn(2)
-  #expect(try pruneApiHistoryForNewestTurn(history, maxConversationTurns: 2).messages == apiTurn(0, image: true))
-}
-
-@Test func trimsTheVisibleConversationTheSameWay() throws {
-  let display = [DisplayMessage(role: .assistant, content: "initial"), DisplayMessage(role: .user, content: "old"),
-    DisplayMessage(role: .assistant, content: "old answer"), DisplayMessage(role: .user, content: "new"),
-    DisplayMessage(role: .assistant, content: "new answer")]
-  let result = try pruneDisplayHistoryForNewestTurn(display, maxConversationTurns: 2)
-  #expect(result.messages == Array(display.prefix(1)))
-  #expect(result.removedTurns == 2)
-}
-
-@Test func rejectsUnfinishedOrSplitTurns() {
-  #expect(code {
-    _ = try pruneDisplayHistoryForNewestTurn([DisplayMessage(role: .assistant, content: "initial"),
-      DisplayMessage(role: .user, content: "unfinished")], maxConversationTurns: 4)
-  } == .conversationIncomplete)
-  #expect(code {
-    _ = try pruneDisplayHistoryForNewestTurn([DisplayMessage(role: .user, content: "first")], maxConversationTurns: 4)
-  } == .conversationIncomplete)
-  #expect(code {
-    _ = try pruneApiHistoryForNewestTurn([.assistant("a"), .user("q")], maxConversationTurns: 4)
-  } == .conversationIncomplete)
 }

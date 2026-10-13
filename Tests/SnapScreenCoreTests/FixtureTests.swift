@@ -3,10 +3,9 @@ import Testing
 @testable import SnapScreenCore
 
 // Replays the golden fixtures recorded from the Chrome extension's TypeScript before it was
-// removed. Every client call must send the same request and reach the same result, and every
-// conversation-state step must produce the same output. Edit them by hand only for an intended
-// change to the client, conversation state, limits or prompt. The session fixtures also replay through
-// SessionController.
+// removed. Every client call must send the same request and reach the same result. Edit them by
+// hand only for an intended change to the client, limits or prompt. The session fixtures also
+// replay through SessionController.
 
 private let fixturesURL = Bundle.module.url(forResource: "Fixtures", withExtension: nil)!
 private let fixtureNames = (try? FileManager.default.contentsOfDirectory(atPath: fixturesURL.path))
@@ -24,11 +23,10 @@ private struct Step: Decodable {
   let note: String?
   let op: String
   let input: JSONValue
-  let response: ScriptedResponse?
+  let response: ScriptedResponse
   let request: RecordedRequest?
   let events: [StreamEvent]?
-  let outcome: Outcome?
-  let output: JSONValue?
+  let outcome: Outcome
 }
 
 private struct RecordedRequest: Decodable {
@@ -46,7 +44,6 @@ private struct StreamEvent: Codable, Equatable, Sendable {
 private struct Outcome: Decodable {
   let type: String
   let text: String?
-  let history: [AnthropicMessage]?
   let code: String?
   let message: String?
 }
@@ -59,23 +56,6 @@ private struct AnalyzeInput: Decodable {
   let limits: SnapScreenLimits
 }
 
-private struct FollowUpInput: Decodable {
-  let apiKey: String
-  let text: String
-  let history: [AnthropicMessage]
-  let sessionInstruction: String?
-  let limits: SnapScreenLimits
-}
-
-private struct StateOutput: Decodable {
-  let displayMessages: [DisplayMessage]
-  let conversationHistory: [AnthropicMessage]
-
-  var state: ConversationState {
-    ConversationState(displayMessages: displayMessages, conversationHistory: conversationHistory)
-  }
-}
-
 @Test func systemPromptMatchesItsFixture() throws {
   let recorded = try String(contentsOf: fixturesURL.appending(path: "system-prompt.txt"), encoding: .utf8)
   #expect(screenshotQASystemPrompt.jsEquals(recorded))
@@ -86,17 +66,12 @@ func replaysFixture(_ name: String) async throws {
   let fixture = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: fixturesURL.appending(path: name)))
   #expect(!fixture.steps.isEmpty)
   for (index, step) in fixture.steps.enumerated() {
-    let location = Comment(rawValue: "\(name) step \(index + 1): \(step.note ?? step.op)")
-    if step.response != nil {
-      try await replayCall(step, location)
-    } else {
-      try replayStateChange(step, location)
-    }
+    try await replayCall(step, Comment(rawValue: "\(name) step \(index + 1): \(step.note ?? step.op)"))
   }
 }
 
 private func replayCall(_ step: Step, _ location: Comment) async throws {
-  let transport = MockTransport(try #require(step.response, location))
+  let transport = MockTransport(step.response)
   let client = AnthropicClient(transport: transport)
   let events = Locked<[StreamEvent]>([])
   let handlers = StreamHandlers(
@@ -105,17 +80,13 @@ private func replayCall(_ step: Step, _ location: Comment) async throws {
   // Its own task, because a scripted Stop cancels the task reading the answer.
   let op = step.op
   let input = step.input
-  let call = Task { () async throws -> Answer? in
+  let call = Task { () async throws -> String? in
     switch op {
     case "analyzeImage":
       let input = try input.decode(AnalyzeInput.self)
       return try await client.analyzeImage(apiKey: input.apiKey, image: dataURLBytes(input.image),
         hiddenInstruction: input.hiddenInstruction, userQuestion: input.userQuestion, limits: input.limits,
         handlers: handlers)
-    case "followUp":
-      let input = try input.decode(FollowUpInput.self)
-      return try await client.followUp(apiKey: input.apiKey, text: input.text, history: input.history,
-        sessionInstruction: input.sessionInstruction, limits: input.limits, handlers: handlers)
     case "verifyApiKey":
       try await client.verifyAPIKey(try input.decode([String: String].self)["apiKey"]!)
       return nil
@@ -124,12 +95,11 @@ private func replayCall(_ step: Step, _ location: Comment) async throws {
     }
   }
 
-  let outcome = try #require(step.outcome, location)
+  let outcome = step.outcome
   switch await call.result {
   case .success(let answer?):
     #expect(outcome.type == "answer", location)
-    #expect(answer.text.jsEquals(outcome.text ?? ""), location)
-    #expect(answer.history == outcome.history, location)
+    #expect(answer.jsEquals(outcome.text ?? ""), location)
   case .success(nil):
     #expect(outcome.type == "verified", location)
   case .failure(let error as AnthropicError):
@@ -169,63 +139,15 @@ private func expectRequest(_ request: URLRequest, matches expected: RecordedRequ
   #expect(body == expected.body, location)
 }
 
-private func replayStateChange(_ step: Step, _ location: Comment) throws {
-  let input = step.input
-  let output = try #require(step.output, location)
-  func value<T: Decodable>(_ key: String, _ type: T.Type = T.self) throws -> T {
-    try (input[key] ?? .null).decode(type)
-  }
-  let image = try dataURLBytes(value("dataUrl", String?.self) ?? "data:,")
-  let kind = try AnswerKind(rawValue: value("kind", String?.self) ?? "")
-
-  switch step.op {
-  case "prepareAlignedConversationForNewestTurn":
-    let aligned = try prepareAlignedConversationForNewestTurn(value("displayMessages"), value("conversationHistory"),
-      maxConversationTurns: value("maxConversationTurns"))
-    #expect(aligned.state == (try output.decode(StateOutput.self)).state, location)
-    #expect(aligned.removedTurns == (try output["removedTurns"]?.decode(Int.self)), location)
-    let notice = aligned.removedTurns > 0 ? describeRemovedTurns(aligned.removedTurns) : nil
-    #expect(notice == (try output["notice"]?.decode(String.self)), location)
-  case "settleSuccessfulConversation":
-    let state = try settleSuccessfulConversation(kind: #require(kind, location),
-      baseDisplayMessages: value("baseDisplayMessages"), baseHistory: value("baseHistory"),
-      assistantText: value("assistantText"), image: image, providerHistory: value("providerHistory"),
-      userText: value("userText"), sessionInstruction: value("sessionInstruction"))
-    #expect(state == (try output.decode(StateOutput.self)).state, location)
-  case "settleStoppedConversation":
-    let state = try settleStoppedConversation(kind: #require(kind, location),
-      baseDisplayMessages: value("baseDisplayMessages"), baseHistory: value("baseHistory"),
-      partialAnswer: value("partialAnswer"), image: image, userText: value("userText"),
-      sessionInstruction: value("sessionInstruction"))
-    #expect(state == (try output.decode(StateOutput.self)).state, location)
-  case "settleFailedFirstAnswer":
-    let state = try settleFailedFirstAnswer(partialAnswer: value("partialAnswer"), errorMessage: value("errorMessage"),
-      image: image, sessionInstruction: value("sessionInstruction"), userText: value("userText"))
-    #expect(state == (try output.decode(StateOutput.self)).state, location)
-  case "settleFailedFollowUp":
-    let failed = try settleFailedFollowUp(baseDisplayMessages: value("baseDisplayMessages"),
-      baseHistory: value("baseHistory"), partialAnswer: value("partialAnswer"), errorMessage: value("errorMessage"),
-      image: image, sessionInstruction: value("sessionInstruction"), userText: value("userText"))
-    #expect(failed.state == (try output.decode(StateOutput.self)).state, location)
-    #expect(failed.baseDisplayMessages == (try output["baseDisplayMessages"]?.decode([DisplayMessage].self)), location)
-    #expect(failed.baseHistory == (try output["baseHistory"]?.decode([AnthropicMessage].self)), location)
-    #expect(failed.userText == (try output["userText"]?.decode(String.self)), location)
-  default:
-    Issue.record("\(location.rawValue): unknown step \(step.op)")
-  }
-}
-
 /// Replays a session fixture through `SessionController` and the real client, as the user would:
-/// select a region, then ask or Retry. Each answer must send the recorded request, report the
-/// recorded notice and result, and leave the recorded conversation.
+/// select a region, then Retry. Each request must be the recorded one and report the recorded
+/// result.
 @Test(arguments: fixtureNames.filter { $0.hasPrefix("session-") }) @MainActor
 func replaysSessionThroughTheController(_ name: String) async throws {
   let fixture = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: fixturesURL.appending(path: name)))
-  // Each answer takes three steps: aligning the conversation, the client call, and settling it.
-  let answers = stride(from: 0, to: fixture.steps.count, by: 3).map { Array(fixture.steps[$0..<$0 + 3]) }
-  let first = try fixture.steps[1].input.decode(AnalyzeInput.self)
+  let first = try fixture.steps[0].input.decode(AnalyzeInput.self)
   let image = dataURLBytes(first.image)
-  let transport = MockTransport(answers.compactMap { $0[1].response })
+  let transport = MockTransport(fixture.steps.map(\.response))
   let log = EventLog()
   let controller = SessionController(answers: AnthropicClient(transport: transport), apiKey: { first.apiKey },
     settings: { SessionSettings(defaultPrompt: first.hiddenInstruction ?? "", limits: first.limits) },
@@ -235,19 +157,12 @@ func replaysSessionThroughTheController(_ name: String) async throws {
   transport.onStop = { Task { @MainActor in session.stop() } }
   try await waitUntil { session.phase == .selecting }
 
-  for (index, steps) in answers.enumerated() {
-    let (aligned, call, settled) = (steps[0], steps[1], steps[2])
+  for (index, call) in fixture.steps.enumerated() {
     let location = Comment(rawValue: "\(name) answer \(index + 1): \(call.note ?? call.op)")
     let reported = log.events.count
     let requests = transport.requests.count
-    // A question asked from the current conversation; otherwise Retry resends an earlier one.
-    let base = try aligned.input.decode(StateOutput.self).state
-    let question = try (call.input["text"] ?? call.input["userQuestion"])?.decode(String.self)
     if index == 0 {
       #expect(session.select(CGRect(x: 0, y: 0, width: 1, height: 1)), location)
-    } else if let question,
-      base == ConversationState(displayMessages: session.display, conversationHistory: session.history) {
-      #expect(session.ask(question), location)
     } else {
       #expect(session.retry(), location)
     }
@@ -260,23 +175,14 @@ func replaysSessionThroughTheController(_ name: String) async throws {
     } else {
       #expect(transport.requests.count == requests, location)
     }
-    let removedTurns = try aligned.output?["removedTurns"]?.decode(Int.self) ?? 0
-    if removedTurns > 0 {
-      let notice = try #require(aligned.output?["notice"], location).decode(String.self)
-      #expect(events.contains(.notice(notice, removedTurns: removedTurns)), location)
-    } else {
-      #expect(!events.contains { if case .notice = $0 { true } else { false } }, location)
-    }
-    let outcome = try #require(call.outcome, location)
-    let result: SessionEvent = switch outcome.type {
-    case "answer": .answer(outcome.text ?? "", .done)
-    case "stopped": .answer(try settled.input["partialAnswer"]?.decode(String.self) ?? "", .stopped)
-    default: .failed(AnthropicError(outcome.code ?? "", outcome.message ?? ""))
+    // A stopped answer reports the text streamed before Stop.
+    let partialAnswer = call.events?.last { $0.type == "delta" }?.text ?? ""
+    let result: SessionEvent = switch call.outcome.type {
+    case "answer": .answer(call.outcome.text ?? "", .done)
+    case "stopped": .answer(partialAnswer, .stopped)
+    default: .failed(AnthropicError(call.outcome.code ?? "", call.outcome.message ?? ""))
     }
     #expect(events.last(where: \.endsAnswer) == result, location)
-    let state = try #require(settled.output, location).decode(StateOutput.self).state
-    #expect(ConversationState(displayMessages: session.display, conversationHistory: session.history) == state,
-      location)
   }
   session.close()
 }

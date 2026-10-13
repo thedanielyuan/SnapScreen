@@ -2,7 +2,7 @@ import AppKit
 
 private enum ConversationTestError: Error { case failed(String) }
 
-/// Thread, composer, panel and window-geometry checks. Windows stay offscreen and the clipboard is
+/// Thread, Stop, panel and window-geometry checks. Windows stay offscreen and the clipboard is
 /// never touched.
 func runConversationViewTests() throws -> Int {
   var count = 0
@@ -17,9 +17,11 @@ func runConversationViewTests() throws -> Int {
   var retries = 0
   thread.onPreview = { previews += 1 }
   thread.onRetry = { retries += 1 }
-  thread.beginTurn(question: nil)
-  let first = thread.latestTurn!
-  try check(first.question == nil && first.isPending && !first.pending.isHidden, "first answer starts pending")
+  thread.beginTurn()
+  let answer = thread.turn!
+  try check(answer.isPending && !answer.pending.isHidden, "the answer starts pending")
+  thread.beginTurn()
+  try check(thread.turn === answer, "a conversation holds one answer")
   try check(thread.thumbnail.isHidden, "no thumbnail before the crop is accepted")
   thread.setScreenshot(NSImage(size: NSSize(width: 960, height: 270)))
   try check(!thread.thumbnail.isHidden && thread.thumbnail.frame.width <= 300 && thread.thumbnail.frame.height <= 150,
@@ -35,126 +37,81 @@ func runConversationViewTests() throws -> Int {
   // or so different, fills it without moving the thread.
   let placeholder = ConversationView(frame: NSRect(x: 0, y: 0, width: 460, height: 300))
   placeholder.reserveScreenshot(size: CGSize(width: 960, height: 270))
-  placeholder.beginTurn(question: nil)
+  placeholder.beginTurn()
   let reserved = placeholder.thumbnail.frame
-  let pendingTop = placeholder.latestTurn!.frame.minY
+  let pendingTop = placeholder.turn!.frame.minY
   try check(!placeholder.thumbnail.isHidden && !placeholder.thumbnail.isEnabled && reserved.width > 0 &&
     placeholder.thumbnail.screenshot == nil, "the thumbnail holds the crop's place, inactive, until it arrives")
   placeholder.setScreenshot(NSImage(size: NSSize(width: 958, height: 269)))
-  try check(placeholder.thumbnail.frame == reserved && placeholder.latestTurn!.frame.minY == pendingTop &&
+  try check(placeholder.thumbnail.frame == reserved && placeholder.turn!.frame.minY == pendingTop &&
     placeholder.thumbnail.isEnabled, "the crop fills its place without moving the thread")
   placeholder.clear()
   try check(placeholder.thumbnail.reservedSize == nil && placeholder.thumbnail.isHidden, "clear releases the place")
   thread.setThinking()
-  try check(first.state == .thinking && first.pending.thinking, "thinking keeps the pending indicator")
-  first.pending.since = Date(timeIntervalSinceNow: -2)
-  first.pending.update()
-  try check(first.pending.label.stringValue.isEmpty, "pending label waits five seconds")
-  first.pending.since = Date(timeIntervalSinceNow: -65)
-  first.pending.update()
-  try check(first.pending.label.stringValue == "Thinking…", "pending label names thinking after the delay")
+  try check(answer.state == .thinking && answer.pending.thinking, "thinking keeps the pending indicator")
+  answer.pending.since = Date(timeIntervalSinceNow: -2)
+  answer.pending.update()
+  try check(answer.pending.label.stringValue.isEmpty, "pending label waits five seconds")
+  answer.pending.since = Date(timeIntervalSinceNow: -65)
+  answer.pending.update()
+  try check(answer.pending.label.stringValue == "Thinking…", "pending label names thinking after the delay")
   thread.updateAnswer("Partial", status: .streaming)
-  try check(!first.isPending && first.pending.isHidden && first.copyButton.isHidden,
+  try check(!answer.isPending && answer.pending.isHidden && answer.copyButton.isHidden,
     "streaming text replaces the indicator without offering Copy")
   thread.updateAnswer("Final answer", status: .done)
-  try check(first.state == .done && !first.copyButton.isHidden && first.retryButton.isHidden,
+  try check(answer.state == .done && !answer.copyButton.isHidden && answer.retryButton.isHidden,
     "a finished answer offers Copy")
-
-  thread.beginTurn(question: "Why?")
-  let second = thread.latestTurn!
-  try check(!first.isLatest && second.isLatest && second.question == "Why?", "a follow-up starts a new exchange")
-  thread.updateAnswer("", status: .stopped)
-  thread.canRetry = true
-  try check(second.state == .stopped && !second.retryButton.isHidden && second.copyButton.isHidden,
-    "a stopped answer without text offers Retry")
-  try check(!second.isHeld(asFirst: false) && first.isHeld(asFirst: true),
-    "an unanswered stopped follow-up is not part of the conversation")
-  thread.removeAbandonedTurn()
-  try check(thread.turns.count == 1 && thread.latestTurn === first && first.isLatest,
-    "the next follow-up drops the abandoned question, as the conversation does")
-
-  thread.beginTurn(question: "Again?")
-  let third = thread.latestTurn!
-  thread.updateAnswer("Half an ans", status: .streaming)
-  thread.canRetry = false
-  thread.fail("The request failed.", clearAnswer: false)
-  try check(third.state == .failed("The request failed.") && !third.failure.isHidden &&
-    third.answer.renderedText == "Half an ans" && third.failure.retryButton.isHidden,
-    "a failure keeps streamed text and hides Retry when the session cannot retry")
-  thread.canRetry = true
-  try check(!third.failure.retryButton.isHidden, "the newest failure offers Retry")
-  thread.beginTurn(question: "Once more?")
-  let fourth = thread.latestTurn!
-  thread.fail("Also failed.", clearAnswer: false)
-  try check(!fourth.failure.retryButton.isHidden && !third.failure.isHidden && third.failure.retryButton.isHidden,
-    "only the newest of several failures offers Retry")
-  fourth.failure.retryButton.performClick(nil)
-  try check(retries == 1, "failure Retry calls the session")
-  thread.restartLatestTurn()
-  try check(fourth.isPending && fourth.answer.renderedText.isEmpty && fourth.failure.isHidden,
-    "Retry restarts the newest exchange")
-  thread.updateAnswer("Refused partial text", status: .streaming)
-  thread.fail("Refused.", clearAnswer: true)
-  try check(fourth.answer.segmentViews.isEmpty && fourth.answer.renderedText.isEmpty,
-    "refused text is cleared")
-  try check(first.isHeld(asFirst: false) && first.isHeld(asFirst: true), "a finished answer is always held")
-  try check(fourth.isHeld(asFirst: false) && !fourth.isHeld(asFirst: true),
-    "a failed follow-up is held, but a first answer that failed without text is cleared")
-
-  // Pruning keeps the first answer and drops the oldest follow-ups.
-  thread.beginTurn(question: "Fifth?")
-  let fifth = thread.latestTurn!
-  try check(thread.heldTurns.map { $0 === first || $0 === third || $0 === fourth } == [true, true, true] &&
-    thread.heldTurns.count == 3, "the request in progress is not yet held")
-  thread.addNotice("2 older conversation turns were removed to keep the screenshot and newest request within the configured limit.",
-    removedTurns: 2)
-  try check(thread.turns.count == 2 && thread.turns[0] === first && thread.turns[1] === fifth,
-    "removed turns leave the thread, keeping the first answer")
-  try check(third.answer.renderedText.isEmpty && third.superview == nil, "removed turns release their text")
-  try check(fifth.noticeView?.label.stringValue.hasPrefix("2 older") == true, "the notice sits on the request it concerns")
-  thread.addNotice("Nothing removed.", removedTurns: 0)
-  try check(thread.turns.count == 2 && fifth.noticeView?.label.stringValue == "Nothing removed.",
-    "a notice without removals only updates the newest request")
-  thread.updateAnswer("Fifth answer", status: .done)
-  thread.beginTurn(question: "Sixth?")
-  thread.addNotice("Removed.", removedTurns: 5)
-  try check(thread.turns.count == 2 && thread.turns[0] === first,
-    "a larger count than the held follow-ups removes only what exists")
-
-  // A first answer that failed without text is not held: the next request becomes the first.
-  let restart = ConversationView(frame: NSRect(x: 0, y: 0, width: 460, height: 300))
-  restart.beginTurn(question: nil)
-  restart.fail("No answer.", clearAnswer: false)
-  restart.beginTurn(question: "Try this instead")
-  restart.updateAnswer("", status: .stopped)
-  let stoppedFirst = restart.latestTurn!
-  restart.removeAbandonedTurn()
-  try check(restart.latestTurn === stoppedFirst, "a stopped request that became the first answer is kept")
-  restart.beginTurn(question: "Then this")
-  try check(restart.heldTurns.count == 1 && restart.heldTurns[0] === stoppedFirst,
-    "held turns skip a first answer that failed without text")
-  restart.clear()
-
   thread.actionsEnabled = false
-  try check(!first.copyButton.isEnabled && !thread.thumbnail.isEnabled, "an ended session disables copy and preview")
+  try check(!answer.copyButton.isEnabled && !thread.thumbnail.isEnabled, "an ended session disables copy and preview")
+
+  // A stopped or failed answer offers Retry when the session can retry, which starts it again.
+  let retrying = ConversationView(frame: NSRect(x: 0, y: 0, width: 460, height: 300))
+  retrying.onRetry = { retries += 1 }
+  retrying.beginTurn()
+  let again = retrying.turn!
+  retrying.updateAnswer("", status: .stopped)
+  retrying.canRetry = true
+  try check(again.state == .stopped && !again.retryButton.isHidden && again.copyButton.isHidden,
+    "a stopped answer without text offers Retry")
+  retrying.restartTurn()
+  try check(again.isPending && again.retryButton.isHidden && again.answer.renderedText.isEmpty,
+    "Retry starts the answer again")
+  retrying.updateAnswer("Half an ans", status: .streaming)
+  retrying.canRetry = false
+  retrying.fail("The request failed.", clearAnswer: false)
+  try check(again.state == .failed("The request failed.") && !again.failure.isHidden &&
+    again.answer.renderedText == "Half an ans" && again.failure.retryButton.isHidden,
+    "a failure keeps streamed text and hides Retry when the session cannot retry")
+  retrying.canRetry = true
+  try check(!again.failure.retryButton.isHidden, "a failure offers Retry")
+  again.failure.retryButton.performClick(nil)
+  try check(retries == 1, "failure Retry calls the session")
+  retrying.restartTurn()
+  try check(again.isPending && again.answer.renderedText.isEmpty && again.failure.isHidden, "Retry clears the failure")
+  retrying.updateAnswer("Refused partial text", status: .streaming)
+  retrying.fail("Refused.", clearAnswer: true)
+  try check(again.answer.segmentViews.isEmpty && again.answer.renderedText.isEmpty, "refused text is cleared")
+  retrying.clear()
+  try check(retrying.turn == nil && again.superview == nil, "clear releases the answer")
 
   // Reading position: a long answer is followed until its start reaches the top, then held there.
-  // The reader's own position is kept, the bottom is followed once the reader goes there, and a new
-  // question shows.
+  // The reader's own position is kept, and the bottom is followed once the reader goes there.
   let reader = ConversationView(frame: NSRect(x: 0, y: 0, width: 460, height: 240))
   reader.setScreenshot(NSImage(size: NSSize(width: 960, height: 270)))
-  reader.beginTurn(question: nil)
+  reader.beginTurn()
   let long = (1...80).map { "Line \($0) of the answer." }.joined(separator: "\n")
   reader.updateAnswer("Line 1 of the answer.", status: .streaming)
   reader.updateAnswer(long, status: .streaming)
   let scroll = reader.scrollView
-  func start(of turn: TurnView) -> CGFloat { turn.frame.minY - ConversationView.verticalPadding }
+  let start = reader.turn!.frame.minY - ConversationView.verticalPadding
   try check(scroll.documentView!.frame.height > scroll.contentSize.height, "long answer scrolls")
-  try check(start(of: reader.turns[0]) > 0 && abs(scroll.contentView.bounds.minY - start(of: reader.turns[0])) < 1,
+  try check(start > 0 && abs(scroll.contentView.bounds.minY - start) < 1,
     "a long answer is followed until its start reaches the top")
+  // A selection left in the answer after focus moves on must not stop following.
+  reader.turn!.answer.segmentViews[0].textView.setSelectedRange(NSRange(location: 0, length: 5))
   reader.updateAnswer(long + "\nMore.", status: .streaming)
-  try check(abs(scroll.contentView.bounds.minY - start(of: reader.turns[0])) < 1,
-    "its start stays in view as the rest streams in")
+  try check(!reader.hasSelection && abs(scroll.contentView.bounds.minY - start) < 1,
+    "its start stays in view as the rest streams in, despite an inactive selection")
   scroll.contentView.scroll(to: NSPoint(x: 0, y: 150))
   reader.updateAnswer(long + "\nMore.\nStill more.", status: .streaming)
   try check(abs(scroll.contentView.bounds.minY - 150) < 1, "streaming preserves the reader's position")
@@ -162,47 +119,34 @@ func runConversationViewTests() throws -> Int {
   reader.updateAnswer(long + "\nMore.\nStill more.\nEven more.", status: .done)
   try check(abs(scroll.contentView.bounds.maxY - scroll.documentView!.frame.height) < 1,
     "streaming follows the bottom once the reader goes there")
-  scroll.contentView.scroll(to: .zero)
-  reader.beginTurn(question: "Next?")
-  try check(abs(scroll.contentView.bounds.maxY - scroll.documentView!.frame.height) < 1,
-    "asking a question brings it into view")
-  // A selection left behind in an earlier answer must not stop following once focus moves on.
-  reader.turns[0].answer.segmentViews[0].textView.setSelectedRange(NSRange(location: 0, length: 5))
-  reader.updateAnswer(long, status: .streaming)
-  try check(!reader.hasSelection && abs(scroll.contentView.bounds.minY - start(of: reader.turns[1])) < 1,
-    "an inactive selection elsewhere does not pause following")
   try check(reader.contentHeight == scroll.documentView!.frame.height, "the thread reports its unscrolled height")
 
-  // ⇧⌘C and ⌥⌘C press the newest Copy buttons. These checks write to a private pasteboard, never
+  // ⇧⌘C and ⌥⌘C press the answer's Copy buttons. These checks write to a private pasteboard, never
   // the clipboard.
   let general = Clipboard.pasteboard
   let pasteboard = NSPasteboard(name: NSPasteboard.Name("com.snapscreen.self-test.\(UUID().uuidString)"))
   Clipboard.pasteboard = pasteboard
   let copier = ConversationView(frame: NSRect(x: 0, y: 0, width: 460, height: 300))
-  copier.beginTurn(question: nil)
+  copier.beginTurn()
   try check(copier.answerToCopy == nil && !copier.copyLatestAnswer() && !copier.copyLatestCode(),
-    "nothing is copied while the first answer is pending")
+    "nothing is copied while the answer is pending")
+  copier.updateAnswer("Streaming", status: .streaming)
+  try check(copier.answerToCopy == nil && !copier.copyLatestAnswer(), "nothing is copied while the answer streams")
   let coded = "First\n```js\none()\n```\nThen\n```py\ntwo()\n```"
   copier.updateAnswer(coded, status: .done)
-  copier.beginTurn(question: "More?")
-  copier.updateAnswer("Streaming", status: .streaming)
-  try check(copier.copyLatestAnswer() && pasteboard.string(forType: .string) == coded,
-    "while a newer answer streams, ⇧⌘C copies the newest finished one")
-  try check(copier.copyLatestCode() && pasteboard.string(forType: .string) == "two()", "⌥⌘C copies the newest code block")
-  let blocks = copier.turns[0].answer.segmentViews
-  try check(copier.turns[0].copyButton.toolTip == "Copy answer (⇧⌘C)" && blocks[3].copyButton?.toolTip == "Copy py code (⌥⌘C)" &&
+  try check(copier.copyLatestAnswer() && pasteboard.string(forType: .string) == coded, "⇧⌘C copies the answer")
+  try check(copier.copyLatestCode() && pasteboard.string(forType: .string) == "two()", "⌥⌘C copies the last code block")
+  let blocks = copier.turn!.answer.segmentViews
+  try check(copier.turn!.copyButton.toolTip == "Copy answer (⇧⌘C)" && blocks[3].copyButton?.toolTip == "Copy py code (⌥⌘C)" &&
     blocks[1].copyButton?.toolTip == "Copy js code", "tooltips name the shortcuts on the buttons they press")
-  copier.updateAnswer("Done now", status: .done)
-  try check(copier.answerToCopy === copier.turns[1] && copier.turns[0].copyButton.toolTip == "Copy answer" &&
-    copier.turns[1].copyButton.toolTip == "Copy answer (⇧⌘C)", "the shortcut moves to the newest answer")
   copier.showsCopyShortcuts = false
-  try check(copier.turns.allSatisfy { $0.copyButton.toolTip == "Copy answer" } &&
-    blocks[3].copyButton?.toolTip == "Copy py code", "passive panels remove existing keyboard shortcut hints")
-  copier.beginTurn(question: "Passive copy")
+  try check(copier.turn!.copyButton.toolTip == "Copy answer" && blocks[3].copyButton?.toolTip == "Copy py code",
+    "passive panels remove existing keyboard shortcut hints")
+  copier.restartTurn()
   copier.updateAnswer("```swift\nlet answer = 42\n```", status: .done)
-  try check(copier.latestTurn?.copyButton.toolTip == "Copy answer" &&
-    copier.latestTurn?.answer.segmentViews.first?.copyButton?.toolTip == "Copy swift code",
-    "new answers and layout keep keyboard shortcut hints hidden in passive panels")
+  try check(copier.turn?.copyButton.toolTip == "Copy answer" &&
+    copier.turn?.answer.segmentViews.first?.copyButton?.toolTip == "Copy swift code",
+    "a retried answer keeps keyboard shortcut hints hidden in passive panels")
   try check(copier.copyLatestAnswer() && pasteboard.string(forType: .string) == "```swift\nlet answer = 42\n```" &&
     copier.copyLatestCode() && pasteboard.string(forType: .string) == "let answer = 42",
     "passive panels retain their answer and code Copy button actions")
@@ -212,177 +156,35 @@ func runConversationViewTests() throws -> Int {
   Clipboard.pasteboard = general
   pasteboard.releaseGlobally()
 
-  // Focus: removing the focused text falls back to the composer.
+  // Focus: text that's removed can't keep it, and a selection in the focused answer pauses following.
   let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 400), styleMask: [.borderless],
     backing: .buffered, defer: false)
-  let root = NSView(frame: window.contentLayoutRect)
-  window.contentView = root
-  let focusThread = ConversationView(frame: NSRect(x: 0, y: 60, width: 460, height: 340))
-  let composer = ComposerView(frame: NSRect(x: 0, y: 0, width: 460, height: 60))
-  root.addSubview(focusThread)
-  root.addSubview(composer)
-  focusThread.focusFallback = { [weak composer] in composer?.textView }
-  focusThread.beginTurn(question: nil)
+  let focusThread = ConversationView(frame: window.contentLayoutRect)
+  window.contentView = focusThread
+  focusThread.beginTurn()
   focusThread.updateAnswer("Prose\n```py\nx = 1\n```", status: .done)
-  let code = focusThread.latestTurn!.answer.segmentViews[1].textView
+  let code = focusThread.turn!.answer.segmentViews[1].textView
   window.makeFirstResponder(code)
-  focusThread.beginTurn(question: "Q")
-  focusThread.restartLatestTurn()
-  focusThread.updateAnswer("Replacement", status: .streaming)
-  try check(window.firstResponder === code, "streaming another answer leaves the reader's focus alone")
-  focusThread.latestTurn!.answer.render("", final: false)
-  window.makeFirstResponder(focusThread.turns[0].answer.segmentViews[1].textView)
-  focusThread.turns[0].answer.render("Only prose", final: true)
+  focusThread.turn!.answer.render("Only prose", final: true)
   try check(window.firstResponder !== code, "removed text cannot keep focus")
-  focusThread.updateAnswer("Next", status: .done)
-  try check(window.firstResponder === composer.textView, "focus falls back to the composer")
-  let selected = focusThread.latestTurn!.answer.segmentViews[0].textView
+  let selected = focusThread.turn!.answer.segmentViews[0].textView
   window.makeFirstResponder(selected)
   selected.setSelectedRange(NSRange(location: 0, length: 2))
   try check(focusThread.hasSelection, "a selection in the focused answer pauses following")
+  focusThread.clear()
+  try check(focusThread.turn == nil && focusThread.thumbnail.screenshot == nil, "clear releases the thread")
+  window.contentView = nil
 
-  // Composer: Return asks, limits are enforced, and the button switches between Send and Stop.
-  var submitted: [String] = []
-  var stops = 0
-  composer.onSubmit = { submitted.append($0) }
-  composer.onStop = { stops += 1 }
-  composer.maximumCharacters = 10
-  composer.canSubmit = true
-  try check(!composer.sendButton.isEnabled && composer.sendButton.mode == .send, "empty draft cannot be sent")
-  composer.setDraft("  Hi  ")
-  try check(composer.sendButton.isEnabled, "a draft can be sent")
-  _ = composer.textView(composer.textView, doCommandBy: #selector(NSResponder.insertNewline(_:)))
-  try check(submitted == ["Hi"], "Return asks the trimmed draft")
-  composer.setDraft(" \u{FEFF}\n")
-  _ = composer.textView(composer.textView, doCommandBy: #selector(NSResponder.insertNewline(_:)))
-  try check(submitted.count == 1 && !composer.sendButton.isEnabled, "blank drafts are never sent")
-  composer.setDraft("123456789")
-  try check(!composer.textView(composer.textView, shouldChangeTextIn: NSRange(location: 9, length: 0),
-    replacementString: "😀😀") && !composer.hintLabel.isHidden && composer.hintLabel.stringValue.contains("too long"),
-    "input beyond the limit is refused with feedback")
-  try check(composer.textView(composer.textView, shouldChangeTextIn: NSRange(location: 9, length: 0),
-    replacementString: "😀"), "input at the limit counts Unicode scalars")
-  composer.setDraft("short")
-  try check(composer.hintLabel.isHidden, "the length hint stays hidden well below the limit")
-  composer.isRunning = true
-  composer.canStop = false
-  try check(composer.sendButton.mode == .stop && !composer.sendButton.isEnabled, "Stop waits for the answer to start")
-  _ = composer.textView(composer.textView, doCommandBy: #selector(NSResponder.insertNewline(_:)))
-  try check(submitted.count == 1, "Return does not ask while an answer is in progress")
-  try check(composer.isQueued && !composer.hintLabel.isHidden && composer.hintLabel.stringValue == ComposerView.queuedMessage,
-    "Return while an answer is in progress queues the draft, and says so")
-  composer.setDraft(" ")
-  try check(!composer.isQueued && composer.hintLabel.isHidden, "emptying a queued draft takes it out of the queue")
-  composer.setDraft("short")
-  _ = composer.textView(composer.textView, doCommandBy: #selector(NSResponder.insertNewline(_:)))
-  composer.cancelQueue()
-  try check(!composer.isQueued && composer.draft == "short", "a cancelled queue leaves the draft in the field")
-  _ = composer.textView(composer.textView, doCommandBy: #selector(NSResponder.insertNewline(_:)))
-  composer.canStop = true
-  composer.sendButton.performClick(nil)
-  try check(stops == 1 && submitted.count == 1, "the button stops a running answer")
-  try check(window.firstResponder === composer.textView, "after Stop, typing continues in the field")
-  composer.isRunning = false
-  composer.canSubmit = true
-  composer.sendQueued()
-  try check(submitted == ["Hi", "short"] && !composer.isQueued && composer.hintLabel.isHidden,
-    "a queued draft goes once the answer finishes")
-  composer.maximumCharacters = 4000
-  composer.setDraft("Sent with the button")
-  window.makeFirstResponder(composer.sendButton)
-  composer.sendButton.performClick(nil)
-  try check(submitted.last == "Sent with the button" && window.firstResponder === composer.textView,
-    "after Send, typing continues in the field")
-  composer.setDraft("hello ")
-  composer.textView.setSelectedRange(NSRange(location: 6, length: 0))
-  composer.textView.setMarkedText("nihon", selectedRange: NSRange(location: 5, length: 0),
-    replacementRange: NSRange(location: NSNotFound, length: 0))
-  try check(composer.textView.hasMarkedText(), "an input method can leave unfinished text")
-  composer.submit()
-  try check(submitted.last == "hello nihon" && !composer.textView.hasMarkedText(),
-    "sending commits unfinished input-method text first")
-
-  // Laid out as the answer window does: narrowing it must grow the field to fit the wrapped text.
-  let layoutWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 400), styleMask: [.borderless],
-    backing: .buffered, defer: false)
-  let layoutRoot = NSView(frame: NSRect(x: 0, y: 0, width: 900, height: 400))
-  layoutWindow.contentView = layoutRoot
-  let pinned = ComposerView()
-  pinned.translatesAutoresizingMaskIntoConstraints = false
-  layoutRoot.addSubview(pinned)
-  NSLayoutConstraint.activate([
-    pinned.leadingAnchor.constraint(equalTo: layoutRoot.leadingAnchor, constant: 14),
-    pinned.trailingAnchor.constraint(equalTo: layoutRoot.trailingAnchor, constant: -14),
-    pinned.bottomAnchor.constraint(equalTo: layoutRoot.bottomAnchor, constant: -14),
-  ])
-  pinned.setDraft("A question long enough to wrap onto several lines when the window becomes narrow")
-  layoutRoot.layoutSubtreeIfNeeded()
-  let wideHeight = pinned.frame.height
-  layoutWindow.setContentSize(NSSize(width: 220, height: 400))
-  layoutRoot.layoutSubtreeIfNeeded()
-  let narrowHeight = pinned.frame.height
-  try check(narrowHeight > wideHeight, "narrowing the window grows the field")
-  layoutWindow.setContentSize(NSSize(width: 900, height: 400))
-  layoutRoot.layoutSubtreeIfNeeded()
-  try check(pinned.frame.height == wideHeight, "widening it again shrinks the field back")
-  // Only a draft past six lines gets a scroller, even where macOS draws scrollers always.
-  let draftScroll = pinned.textView.enclosingScrollView!
-  draftScroll.scrollerStyle = .legacy
-  pinned.setDraft("d")
-  layoutRoot.layoutSubtreeIfNeeded()
-  try check(!draftScroll.hasVerticalScroller, "a short draft has no scroller beside the button")
-  pinned.setDraft((1...9).map { "Line \($0)" }.joined(separator: "\n"))
-  layoutRoot.layoutSubtreeIfNeeded()
-  try check(draftScroll.hasVerticalScroller && draftScroll.verticalScroller?.isHidden == false,
-    "a draft past six lines scrolls")
-  pinned.setDraft("d")
-  layoutRoot.layoutSubtreeIfNeeded()
-  try check(!draftScroll.hasVerticalScroller, "the scroller goes once the draft fits again")
-  func hasDraftAttributes() -> Bool {
-    guard let storage = pinned.textView.textStorage, storage.length > 0 else { return false }
-    var matches = true
-    storage.enumerateAttributes(in: NSRange(location: 0, length: storage.length)) { attributes, _, _ in
-      let paragraph = attributes[.paragraphStyle] as? NSParagraphStyle
-      matches = matches && (attributes[.font] as? NSFont)?.pointSize == 15 &&
-        paragraph?.minimumLineHeight == 20 && paragraph?.maximumLineHeight == 20
-    }
-    return matches
-  }
-  pinned.clearDraft()
-  pinned.textView.insertText("Typed", replacementRange: NSRange(location: 0, length: 0))
-  let typedAttributes = hasDraftAttributes()
-  pinned.setDraft("Set")
-  try check(typedAttributes && hasDraftAttributes(), "a draft is 15-point text on 20-point lines, typed or set")
-  // Send keeps to the bottom-right corner, beside the last line, so it's centred on one line.
-  var heights: [CGFloat] = []
-  var besideLastLine = true
-  for lines in 1...8 {
-    pinned.setDraft((1...lines).map { "Line \($0)" }.joined(separator: "\n"))
-    layoutRoot.layoutSubtreeIfNeeded()
-    heights.append(pinned.frame.height)
-    let manager = pinned.textView.layoutManager!
-    let lastLine = manager.lineFragmentRect(forGlyphAt: manager.numberOfGlyphs - 1, effectiveRange: nil)
-    besideLastLine = besideLastLine &&
-      abs(pinned.sendButton.frame.midY - pinned.textView.convert(lastLine, to: pinned).midY) < 0.5
-  }
-  try check(heights[0] == ComposerView.minimumFieldHeight && zip(heights[0..<5], heights[1...5]).allSatisfy {
-    $1 - $0 == ComposerView.lineHeight } && heights[5...].allSatisfy { $0 == heights[5] },
-    "the field grows a line at a time to six lines, then holds")
-  pinned.setDraft("One line")
-  layoutRoot.layoutSubtreeIfNeeded()
-  try check(besideLastLine && abs(pinned.sendButton.frame.midY - pinned.bounds.midY) < 0.5,
-    "Send sits beside the last line, centred while the draft is one line")
-  // Its arrow, and Stop's square, sit at the circle's centre whether or not it can act. Rendered at
-  // 2x, the icon is whatever differs from the fill, sampled above it; the circle's edge is left out.
-  let sendButton = SendButton(target: nil, action: nil)
-  sendButton.frame.size = pinned.sendButton.frame.size
+  // Stop's square sits at the circle's centre whether or not it can act. Rendered at 2x, the icon is
+  // whatever differs from the fill, sampled above it; the circle's edge is left out.
+  let stopButton = StopButton(target: nil, action: nil)
   func iconBounds() -> NSRect? {
     let scale: CGFloat = 2
-    guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(sendButton.bounds.width * scale),
-      pixelsHigh: Int(sendButton.bounds.height * scale), bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+    guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(stopButton.bounds.width * scale),
+      pixelsHigh: Int(stopButton.bounds.height * scale), bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
       isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
-    bitmap.size = sendButton.bounds.size
-    sendButton.cacheDisplay(in: sendButton.bounds, to: bitmap)
+    bitmap.size = stopButton.bounds.size
+    stopButton.cacheDisplay(in: stopButton.bounds, to: bitmap)
     guard let fill = bitmap.colorAt(x: bitmap.pixelsWide / 2, y: Int(3 * scale)) else { return nil }
     let edge = Int(6 * scale)
     var icon: NSRect?
@@ -398,25 +200,15 @@ func runConversationViewTests() throws -> Int {
     }
     return icon
   }
-  var iconsCentred = sendButton.frame.width == 32 && sendButton.frame.height == 32
-  for mode in [SendButton.Mode.send, .stop] {
-    for enabled in [true, false] {
-      sendButton.mode = mode
-      sendButton.isEnabled = enabled
-      let icon = iconBounds()
-      iconsCentred = iconsCentred && icon?.midX == sendButton.bounds.midX && icon?.midY == sendButton.bounds.midY
-    }
+  var iconsCentred = stopButton.frame.width == 32 && stopButton.frame.height == 32
+  for enabled in [true, false] {
+    stopButton.isEnabled = enabled
+    let icon = iconBounds()
+    iconsCentred = iconsCentred && icon?.midX == stopButton.bounds.midX && icon?.midY == stopButton.bounds.midY
   }
-  try check(iconsCentred, "Send is a 32-point circle with its arrow, or Stop's square, centred, enabled or not")
-  pinned.clear()
-  layoutWindow.contentView = nil
-  composer.canSubmit = false
-  try check(!composer.sendButton.isEnabled, "the button waits for the session to accept follow-ups")
-  composer.clear()
-  try check(composer.draft.isEmpty && composer.textView.delegate == nil && composer.onSubmit == nil, "clear releases the draft")
-  focusThread.clear()
-  try check(focusThread.turns.isEmpty && focusThread.thumbnail.screenshot == nil, "clear releases the thread")
-  window.contentView = nil
+  try check(iconsCentred, "Stop is a 32-point circle with its square centred, enabled or not")
+  try check(stopButton.accessibilityLabel() == "Stop answer" && stopButton.toolTip == "Stop answer",
+    "Stop is named for VoiceOver and the pointer")
 
   // Escape and Command-W close on key release, so the release can't reach the app beneath.
   final class CloseCounter: NSObject, NSWindowDelegate {

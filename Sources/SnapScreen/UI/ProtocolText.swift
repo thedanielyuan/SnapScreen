@@ -1,7 +1,5 @@
 import Foundation
 
-let maxFollowupCharacters = 50_000
-
 // ECMAScript String.trim() whitespace, which the session's checks use too. Foundation differs for
 // U+FEFF, U+0085 and U+200B.
 private let protocolWhitespace = CharacterSet(charactersIn:
@@ -10,9 +8,3 @@ private let protocolWhitespace = CharacterSet(charactersIn:
   "\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}")
 
 func trimProtocolText(_ value: String) -> String { value.trimmingCharacters(in: protocolWhitespace) }
-
-func inputFitsLimits(_ value: String, maximum: Int) -> Bool {
-  // The preference counts Unicode code points. The fixed bound counts UTF-16 code units, the
-  // length the companion's protocol limited.
-  value.unicodeScalars.count <= maximum && value.utf16.count <= maxFollowupCharacters
-}

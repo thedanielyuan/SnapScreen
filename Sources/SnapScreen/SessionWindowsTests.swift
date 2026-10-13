@@ -3,23 +3,20 @@ import SnapScreenCore
 
 private enum SessionWindowsTestError: Error { case failed(String) }
 
-/// Answers each question at once, after a moment, or holds the answer until it's stopped.
+/// Answers each request at once, or holds the answer until it's stopped.
 private final class SelfTestAnswers: AnswerClient, @unchecked Sendable {
+  /// A short answer with a code block, which the first snip copies.
+  static let codeAnswer = "Code:\n```py\nprint(1)\n```"
+
   private let lock = NSLock()
   private var holding = false
-  private var delaying = false
   private var pausing = false
-  private var asked: [String] = []
+  private var answer = SelfTestAnswers.codeAnswer
+  private var count = 0
 
   var holds: Bool {
     get { lock.withLock { holding } }
     set { lock.withLock { holding = newValue } }
-  }
-
-  /// Each answer streams for a moment before it finishes.
-  var delays: Bool {
-    get { lock.withLock { delaying } }
-    set { lock.withLock { delaying = newValue } }
   }
 
   /// Answers stream until this is turned off, then finish.
@@ -28,31 +25,26 @@ private final class SelfTestAnswers: AnswerClient, @unchecked Sendable {
     set { lock.withLock { pausing = newValue } }
   }
 
-  /// "(first)" for each first answer without a question, then each question.
-  var questions: [String] { lock.withLock { asked } }
+  /// What each answer streams, then returns.
+  var text: String {
+    get { lock.withLock { answer } }
+    set { lock.withLock { answer = newValue } }
+  }
+
+  /// How many requests have been made.
+  var requests: Int { lock.withLock { count } }
 
   func analyzeImage(apiKey: String, image: Data, hiddenInstruction: String?, userQuestion: String?,
-    limits: SnapScreenLimits, handlers: StreamHandlers) async throws -> Answer {
-    try await answer(userQuestion ?? "(first)", handlers)
-  }
-
-  func followUp(apiKey: String, text: String, history: [AnthropicMessage], sessionInstruction: String?,
-    limits: SnapScreenLimits, handlers: StreamHandlers) async throws -> Answer {
-    try await answer(text, handlers)
-  }
-
-  private func answer(_ question: String, _ handlers: StreamHandlers) async throws -> Answer {
-    let (holds, delays) = lock.withLock { () -> (Bool, Bool) in
-      asked.append(question)
-      return (holding, delaying)
+    limits: SnapScreenLimits, handlers: StreamHandlers) async throws -> String {
+    let (holds, text) = lock.withLock { () -> (Bool, String) in
+      count += 1
+      return (holding, answer)
     }
-    let text = "Answer to \(question)"
     handlers.onThinking()
     handlers.onDelta(text)
     while pauses { try await Task.sleep(for: .milliseconds(10)) }
     if holds { try await Task.sleep(for: .seconds(60)) }
-    if delays { try await Task.sleep(for: .milliseconds(300)) }
-    return Answer(text: text, history: [])
+    return text
   }
 }
 
@@ -114,10 +106,21 @@ func runSessionWindowsTests() throws -> Int {
     guard waitUntil({ snips.sessions.last?.session === session && snips.sessions.last?.overlay != nil }) else { return nil }
     return snips.sessions.last
   }
-  func select(_ windows: SessionWindows) -> Bool {
+  func confirm(_ windows: SessionWindows) {
     windows.selectionView?.selection = CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
     windows.selectionView?.confirm()
-    return waitUntil { windows.conversation?.latestTurn?.state == .done }
+  }
+  func select(_ windows: SessionWindows) -> Bool {
+    confirm(windows)
+    return waitUntil { windows.conversation?.turn?.state == .done }
+  }
+  func fitsThread(_ thread: ConversationView) -> Bool {
+    thread.scrollView.documentView!.frame.height <= thread.scrollView.contentSize.height + 1
+  }
+  func editableViews(in view: NSView?) -> [NSView] {
+    guard let view = view else { return [] }
+    let editable = (view as? NSTextView)?.isEditable == true || (view as? NSTextField)?.isEditable == true
+    return (editable ? [view] : []) + view.subviews.flatMap { editableViews(in: $0) }
   }
   func pointer(_ type: NSEvent.EventType, in window: NSWindow) -> NSEvent {
     NSEvent.mouseEvent(with: type, location: NSPoint(x: 20, y: 20), modifierFlags: [], timestamp: 0,
@@ -142,39 +145,35 @@ func runSessionWindowsTests() throws -> Int {
   try check(replaced.session.phase == .ended && replaced.overlay == nil && snips.sessions.count == 1,
     "a new snip replaces the unfinished selection and closes its overlay")
 
-  // Selecting opens the conversation beside the selection and asks for the first answer. The
-  // thumbnail holds the crop's place until it arrives.
-  windows.selectionView?.selection = CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
-  windows.selectionView?.confirm()
+  // Selecting opens the conversation beside the selection and asks for the answer. The thumbnail
+  // holds the crop's place until it arrives, and Stop shows until the answer finishes.
+  confirm(windows)
   let reserved = windows.conversation?.thumbnail.frame ?? .zero
   try check(windows.conversation?.thumbnail.isHidden == false && windows.conversation?.thumbnail.screenshot == nil &&
     reserved.width > 0, "the thumbnail holds the crop's place before it arrives")
-  try check(waitUntil { windows.conversation?.latestTurn?.state == .done }, "the first answer arrives")
+  try check(windows.stopButton?.isHidden == false && windows.stopButton?.isEnabled == false,
+    "Stop shows as soon as the region is selected, and waits for the request to start")
+  try check(waitUntil { windows.conversation?.turn?.state == .done }, "the answer arrives")
   try check(windows.conversation?.thumbnail.screenshot != nil && windows.conversation?.thumbnail.frame == reserved,
     "the crop fills its place without moving the thread")
   try check(windows.overlay == nil && windows.selectionView == nil && windows.panel?.title == "SnapScreen",
     "selecting replaces the overlay with the conversation")
   try check(windows.panel.map { panel in NSScreen.screens.contains { $0.visibleFrame.contains(panel.frame) } } == true,
     "the conversation opens within a display")
-  try check(windows.conversation?.latestTurn?.answer.renderedText == "Answer to (first)" &&
+  try check(windows.conversation?.turn?.answer.renderedText == SelfTestAnswers.codeAnswer &&
     windows.conversation?.thumbnail.isHidden == false, "the answer and the screenshot's thumbnail show")
-  try check(windows.composer?.canSubmit == true && windows.composer?.isRunning == false &&
-    windows.composer?.maximumCharacters == SnapScreenLimits.defaults.maxInputCharacters,
-    "the session retains follow-up state within the limit")
-  try check(windows.composer?.isReadOnly == true && windows.composer?.textView.isEditable == false &&
-    windows.composer?.textView.isSelectable == false && windows.composer?.sendButton.isHidden == true,
-    "the capture flow offers no editable or selectable field or idle Send button")
+  try check(windows.stopButton?.isHidden == true && windows.conversation?.canRetry == false && answers.requests == 1,
+    "a finished answer offers neither Stop nor Retry")
 
-  // The conversation opens only as tall as its answer needs, and grows down with its thread.
+  // The conversation opens only as tall as its answer needs.
   guard let panel = windows.panel, let thread = windows.conversation else {
     throw SessionWindowsTestError.failed("the conversation stays open")
   }
   try check(hasPassivePanelConfiguration(panel) && panel.level == .floating,
     "the conversation is a floating panel that cannot take keyboard focus")
-  func fitsThread() -> Bool { thread.scrollView.documentView!.frame.height <= thread.scrollView.contentSize.height + 1 }
+  try check(editableViews(in: panel.contentView).isEmpty, "the conversation has no editable field")
   let largest = panel.frameRect(forContentRect: NSRect(origin: .zero, size: SessionWindows.defaultConversationSize))
-  let top = panel.frame.maxY
-  try check(panel.frame.height < largest.height && fitsThread() && windows.fitsContent,
+  try check(panel.frame.height < largest.height && fitsThread(thread) && windows.fitsContent,
     "the conversation opens only as tall as its answer needs")
   try check(panel.standardWindowButton(.closeButton)?.isHidden == false &&
     panel.standardWindowButton(.miniaturizeButton)?.isHidden == true && panel.standardWindowButton(.zoomButton)?.isHidden == true &&
@@ -187,117 +186,84 @@ func runSessionWindowsTests() throws -> Int {
   windows.previewPanel?.performClose(nil)
   try check(windows.previewPanel == nil && windows.panel === panel, "closing the preview keeps the conversation")
 
-  windows.composer?.setDraft("Why?")
-  windows.composer?.submit()
-  try check(windows.conversation?.turns.count == 2 && windows.composer?.draft.isEmpty == true &&
-    windows.composer?.isRunning == true, "a follow-up starts a new turn")
-  try check(waitUntil { windows.conversation?.latestTurn?.state == .done } && answers.questions == ["(first)", "Why?"],
-    "the follow-up is answered")
-  let longQuestion = (1...30).map { "Line \($0) of a long question" }.joined(separator: "\n")
-  let shorter = panel.frame.height
-  windows.composer?.setDraft(longQuestion)
-  windows.composer?.submit()
-  try check(waitUntil { windows.conversation?.latestTurn?.state == .done } && shorter < largest.height &&
-    abs(panel.frame.height - largest.height) < 1 && abs(panel.frame.maxY - top) < 1 && !fitsThread(),
-    "a longer thread grows it down to its largest, then scrolls")
-
-  // Resizing it yourself stops the fitting, and later conversations take the size you chose.
-  windows.windowWillStartLiveResize(Notification(name: NSWindow.willStartLiveResizeNotification, object: panel))
-  panel.setFrame(NSRect(x: panel.frame.minX, y: panel.frame.maxY - 420, width: 400, height: 420), display: false)
-  windows.windowDidEndLiveResize(Notification(name: NSWindow.didEndLiveResizeNotification, object: panel))
-  let chosen = panel.contentRect(forFrameRect: panel.frame).size
-  try check(!windows.fitsContent && snips.chosenSize.size == chosen, "resizing a conversation keeps its size for the next")
-  let resized = panel.frame
-  windows.composer?.setDraft(longQuestion)
-  windows.composer?.submit()
-  try check(waitUntil { windows.conversation?.latestTurn?.state == .done } && panel.frame == resized,
-    "a conversation you resized keeps its size")
-
-  answers.holds = true
-  windows.composer?.setDraft("Hold on")
-  windows.composer?.submit()
-  try check(waitUntil { windows.conversation?.latestTurn?.state == .streaming } && windows.composer?.canStop == true &&
-    windows.composer?.sendButton.isHidden == false && windows.composer?.sendButton.isEnabled == true,
-    "streaming text shows while the passive composer's Stop button is available")
-  windows.composer?.sendButton.performClick(nil)
-  try check(windows.conversation?.latestTurn?.state == .stopped && windows.conversation?.canRetry == true &&
-    windows.composer?.isRunning == false, "Stop keeps the text so far and offers Retry")
-  answers.holds = false
-  windows.conversation?.onRetry?()
-  try check(waitUntil { windows.conversation?.latestTurn?.state == .done } &&
-    windows.conversation?.latestTurn?.answer.renderedText == "Answer to Hold on", "Retry asks again")
-  try check(answers.questions == ["(first)", "Why?", longQuestion, longQuestion, "Hold on", "Hold on"],
-    "each request asks its own question")
-
-  // Programmatic submissions retain the controller's queue behavior even though the passive
-  // capture UI no longer accepts typed follow-ups. A stopped answer keeps its draft unsent.
-  answers.delays = true
-  windows.composer?.setDraft("Slowly")
-  windows.composer?.submit()
-  try check(waitUntil { windows.conversation?.latestTurn?.state == .streaming }, "a slow answer streams")
-  windows.composer?.setDraft("Queued")
-  windows.composer?.submit()
-  try check(windows.composer?.isQueued == true && windows.composer?.hintLabel.stringValue == ComposerView.queuedMessage &&
-    windows.composer?.draft == "Queued" && windows.conversation?.latestTurn?.question == "Slowly",
-    "submitting while an answer streams queues the draft")
-  answers.delays = false
-  try check(waitUntil { windows.conversation?.latestTurn?.question == "Queued" && windows.conversation?.latestTurn?.state == .done } &&
-    windows.composer?.draft.isEmpty == true && windows.composer?.isQueued == false, "the queued draft goes once the answer finishes")
-  answers.holds = true
-  windows.composer?.setDraft("Held")
-  windows.composer?.submit()
-  try check(waitUntil { windows.conversation?.latestTurn?.state == .streaming }, "a held answer streams")
-  windows.composer?.setDraft("Not sent")
-  windows.composer?.submit()
-  windows.composer?.onStop?()
-  answers.holds = false
-  try check(windows.composer?.isQueued == false && windows.composer?.draft == "Not sent" &&
-    !answers.questions.contains("Not sent"), "stopping the answer leaves its queued draft in the field, unsent")
-
-  // Copy actions still find the newest answer and code block without a key window. These checks
-  // write to a private pasteboard, never the clipboard.
+  // Copy actions find the answer and its code block without a key window. These checks write to a
+  // private pasteboard, never the clipboard.
   let general = Clipboard.pasteboard
   let pasteboard = NSPasteboard(name: NSPasteboard.Name("com.snapscreen.self-test.\(UUID().uuidString)"))
   Clipboard.pasteboard = pasteboard
-  windows.composer?.setDraft("Code:\n```py\nprint(1)\n```")
-  windows.composer?.submit()
-  try check(waitUntil { windows.conversation?.latestTurn?.state == .done }, "an answer with code arrives")
   func enables(_ action: Selector) -> Bool { windows.validateMenuItem(NSMenuItem(title: "", action: action, keyEquivalent: "")) }
   try check(enables(#selector(SessionWindows.copyAnswer(_:))) && enables(#selector(SessionWindows.copyLastCode(_:))),
     "Copy Answer and Copy Code are available")
   windows.copyAnswer(nil)
-  try check(pasteboard.string(forType: .string) == "Answer to Code:\n```py\nprint(1)\n```", "Copy Answer copies the newest answer")
+  try check(pasteboard.string(forType: .string) == SelfTestAnswers.codeAnswer, "Copy Answer copies the answer")
   windows.copyLastCode(nil)
-  try check(pasteboard.string(forType: .string) == "print(1)", "Copy Code copies the newest code block")
+  try check(pasteboard.string(forType: .string) == "print(1)", "Copy Code copies its code block")
   Clipboard.pasteboard = general
   pasteboard.releaseGlobally()
-
-  slot.key = nil
-  windows.composer?.setDraft("No key")
-  windows.composer?.submit()
-  try check(waitUntil {
-    windows.conversation?.latestTurn?.state == .failed("Add your Anthropic API key in SnapScreen Settings, then Retry.")
-  }, "a missing key fails the request with a way forward")
-  slot.key = "sk-ant-self-test"
 
   // A session that ends on its own leaves only a notice, and closing it lets the windows go.
   windows.handle(.ended)
   try check(windows.panel?.title == "SnapScreen — Session ended" && windows.conversation == nil &&
+    windows.stopButton == nil &&
     (windows.panel?.contentView as? SessionEndedView)?.messageLabel.stringValue == SessionWindows.endedMessage,
-    "an ended session keeps no screenshot, answer or draft")
+    "an ended session keeps no screenshot or answer")
   try check(!enables(#selector(SessionWindows.copyAnswer(_:))) && !enables(#selector(SessionWindows.copyLastCode(_:))),
     "an ended session has nothing to copy")
   windows.panel?.performClose(nil)
   try check(windows.session.phase == .ended && windows.panel == nil && snips.sessions.isEmpty,
     "closing the conversation ends the session")
 
+  // A long answer grows the conversation down to its largest, keeping its top edge, then scrolls.
+  answers.text = (1...60).map { "Line \($0) of a long answer." }.joined(separator: "\n")
+  guard let long = snip() else { throw SessionWindowsTestError.failed("a snip with a long answer") }
+  confirm(long)
+  guard let longPanel = long.panel, let longThread = long.conversation else {
+    throw SessionWindowsTestError.failed("the long answer's conversation")
+  }
+  let top = longPanel.frame.maxY
+  let opened = longPanel.frame.height
+  try check(waitUntil { longThread.turn?.state == .done } && opened < largest.height &&
+    abs(longPanel.frame.height - largest.height) < 1 && abs(longPanel.frame.maxY - top) < 1 && !fitsThread(longThread),
+    "a long answer grows it down to its largest, then scrolls")
+  longPanel.performClose(nil)
+
+  // Resizing a conversation yourself stops the fitting, and later conversations take the size you
+  // chose. Stop keeps the text so far and offers Retry, which asks again without resizing it.
+  answers.text = "Held answer"
+  answers.holds = true
+  guard let resizing = snip() else { throw SessionWindowsTestError.failed("a snip to resize") }
+  confirm(resizing)
+  guard let resizingPanel = resizing.panel, let resizingThread = resizing.conversation else {
+    throw SessionWindowsTestError.failed("a conversation to resize")
+  }
+  try check(waitUntil { resizingThread.turn?.state == .streaming } && resizing.stopButton?.isHidden == false &&
+    resizing.stopButton?.isEnabled == true, "streaming text shows while Stop can act")
+  resizing.windowWillStartLiveResize(Notification(name: NSWindow.willStartLiveResizeNotification, object: resizingPanel))
+  resizingPanel.setFrame(NSRect(x: resizingPanel.frame.minX, y: resizingPanel.frame.maxY - 420, width: 400, height: 420),
+    display: false)
+  resizing.windowDidEndLiveResize(Notification(name: NSWindow.didEndLiveResizeNotification, object: resizingPanel))
+  let chosen = resizingPanel.contentRect(forFrameRect: resizingPanel.frame).size
+  try check(!resizing.fitsContent && snips.chosenSize.size == chosen, "resizing a conversation keeps its size for the next")
+  let resized = resizingPanel.frame
+  resizing.stopButton?.performClick(nil)
+  try check(resizingThread.turn?.state == .stopped && resizingThread.canRetry && resizing.stopButton?.isHidden == true &&
+    resizingThread.turn?.answer.renderedText == "Held answer", "Stop keeps the text so far and offers Retry")
+  answers.holds = false
+  let asked = answers.requests
+  resizingThread.onRetry?()
+  try check(resizing.stopButton?.isHidden == false && !resizingThread.canRetry, "Retry shows Stop again")
+  try check(waitUntil { resizingThread.turn?.state == .done } && answers.requests == asked + 1 &&
+    resizingPanel.frame == resized, "Retry asks again, and a conversation you resized keeps its size")
+  resizingPanel.performClose(nil)
+
   // Once its answer has finished, a click in another app closes the conversation and its preview,
   // as the close button does. The global monitor never fires here, so these checks pass each
-  // click's position as it would.
-  answers.pauses = true
+  // click's position as it would. Until then, while the answer or a Retry runs, or after one fails
+  // or stops, the conversation stays open. This one first fails for want of a key.
+  answers.text = "Finished answer"
+  slot.key = nil
   guard let finished = snip() else { throw SessionWindowsTestError.failed("a snip to dismiss") }
-  finished.selectionView?.selection = CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
-  finished.selectionView?.confirm()
+  confirm(finished)
   guard let finishedPanel = finished.panel else { throw SessionWindowsTestError.failed("a conversation to dismiss") }
   // Well clear of the conversation and the preview.
   func elsewhere() -> NSPoint {
@@ -308,12 +274,24 @@ func runSessionWindowsTests() throws -> Int {
     finished.clickedOutside(at: elsewhere())
     return finished.panel === finishedPanel && finished.session.phase == phase && snips.sessions.contains { $0 === finished }
   }
-  try check(finished.composer?.isRunning == true && !finished.dismissesOnOutsideClick && stillOpen(.cropping),
-    "a click in another app doesn't close a conversation waiting for its first answer")
-  try check(waitUntil { finished.conversation?.latestTurn?.state == .streaming } && !finished.dismissesOnOutsideClick &&
-    stillOpen(.running), "a click in another app doesn't close or stop an answer as it streams")
+  try check(finished.stopButton?.isHidden == false && !finished.dismissesOnOutsideClick && stillOpen(.cropping),
+    "a click in another app doesn't close a conversation waiting for its answer")
+  try check(waitUntil {
+    finished.conversation?.turn?.state == .failed("Add your Anthropic API key in SnapScreen Settings, then Retry.")
+  } && finished.stopButton?.isHidden == true && finished.conversation?.canRetry == true,
+    "a missing key fails the request with a way forward")
+  try check(!finished.dismissesOnOutsideClick && stillOpen(.failed), "a failed answer stays open until you close it")
+  slot.key = "sk-ant-self-test"
+  answers.pauses = true
+  finished.conversation?.onRetry?()
+  try check(waitUntil { finished.conversation?.turn?.state == .streaming } && !finished.dismissesOnOutsideClick &&
+    stillOpen(.running), "a click in another app doesn't close or stop a Retry as it streams")
+  finished.stopButton?.performClick(nil)
+  try check(!finished.dismissesOnOutsideClick && stillOpen(.stopped), "a stopped answer stays open until you close it")
+  finished.conversation?.onRetry?()
+  try check(!finished.dismissesOnOutsideClick && stillOpen(.running), "a click in another app doesn't close or stop a Retry")
   answers.pauses = false
-  try check(waitUntil { finished.conversation?.latestTurn?.state == .done } && finished.dismissesOnOutsideClick,
+  try check(waitUntil { finished.conversation?.turn?.state == .done } && finished.dismissesOnOutsideClick,
     "once the answer finishes, a click in another app can close the conversation")
 
   // Clicks in the conversation or the preview go to SnapScreen, so the monitor, which sees only
@@ -349,29 +327,6 @@ func runSessionWindowsTests() throws -> Int {
     "after the resize, the conversation is dismissible again and its size is kept for the next")
   snips.chosenSize.size = keptChosenSize
 
-  // Follow-ups and Retry turn it off while they run, as do a stopped or failed answer.
-  answers.pauses = true
-  finished.composer?.setDraft("And this?")
-  finished.composer?.submit()
-  try check(waitUntil { finished.conversation?.latestTurn?.state == .streaming } && !finished.dismissesOnOutsideClick &&
-    stillOpen(.running), "a click in another app doesn't close or stop a follow-up as it streams")
-  finished.composer?.onStop?()
-  try check(!finished.dismissesOnOutsideClick && stillOpen(.stopped), "a stopped answer stays open until you close it")
-  finished.conversation?.onRetry?()
-  try check(!finished.dismissesOnOutsideClick && stillOpen(.running), "a click in another app doesn't close or stop a Retry")
-  answers.pauses = false
-  try check(waitUntil { finished.conversation?.latestTurn?.state == .done } && finished.dismissesOnOutsideClick,
-    "once the Retry finishes, a click in another app can close the conversation")
-  slot.key = nil
-  finished.composer?.setDraft("No key")
-  finished.composer?.submit()
-  try check(waitUntil { finished.session.phase == .failed } && !finished.dismissesOnOutsideClick && stillOpen(.failed),
-    "a failed answer stays open until you close it")
-  slot.key = "sk-ant-self-test"
-  finished.conversation?.onRetry?()
-  try check(waitUntil { finished.conversation?.latestTurn?.state == .done } && finished.dismissesOnOutsideClick,
-    "a successful Retry makes the conversation dismissible again")
-
   // A new snip leaves it open and dismissible while you select. Selecting happens in SnapScreen's
   // overlay, which the monitor never sees.
   guard let selecting = snip() else { throw SessionWindowsTestError.failed("another snip") }
@@ -382,11 +337,10 @@ func runSessionWindowsTests() throws -> Int {
     "cancelling the new snip leaves it as it was")
 
   // The click closes both windows through the close button's path, which ends the session, releases
-  // the screenshot, answers and draft, and stops watching. Meanwhile no other panel, such as a new
-  // snip's overlay, can take the keyboard, which AppKit would otherwise hand it from the closing
-  // ones.
-  guard let finishedThread = finished.conversation, let finishedComposer = finished.composer,
-    let finishedPreview = finished.previewPanel, let finishedPreviewView = finishedPreview.contentView as? PreviewView else {
+  // the screenshot and answer, and stops watching. Meanwhile no other panel, such as a new snip's
+  // overlay, can take the keyboard, which AppKit would otherwise hand it from the closing ones.
+  guard let finishedThread = finished.conversation, let finishedPreview = finished.previewPanel,
+    let finishedPreviewView = finishedPreview.contentView as? PreviewView else {
     throw SessionWindowsTestError.failed("the conversation and preview stay open")
   }
   try check(finishedPreviewView !== previewView && finishedPreviewView.image != nil, "the preview opens again")
@@ -397,34 +351,32 @@ func runSessionWindowsTests() throws -> Int {
     keyableWhileClosing = nextOverlay.canBecomeKey
     closed?()
   }
-  finishedComposer.setDraft("Not sent")
   finished.clickedOutside(at: elsewhere())
   try check(finished.session.phase == .ended && finished.panel == nil && finished.previewPanel == nil &&
-    finished.conversation == nil && finished.composer == nil && !finished.dismissesOnOutsideClick &&
+    finished.conversation == nil && finished.stopButton == nil && !finished.dismissesOnOutsideClick &&
     !finishedPanel.isVisible && !finishedPreview.isVisible && !snips.shields.isTrackingPanel,
     "a click in another app ends the session and closes the conversation and preview")
-  try check(finishedPreviewView.image == nil && finishedThread.turns.isEmpty && finishedThread.thumbnail.screenshot == nil &&
-    finishedComposer.draft.isEmpty, "closing them releases the screenshot, answers and unsent draft")
+  try check(finishedPreviewView.image == nil && finishedThread.turn == nil && finishedThread.thumbnail.screenshot == nil,
+    "closing them releases the screenshot and answer")
   try check(keyableWhileClosing == false && !nextOverlay.canBecomeKey && snips.sessions.count == 1 && next.overlay === nextOverlay,
     "a new snip's overlay cannot take the keyboard during or after another conversation closes")
   finished.clickedOutside(at: elsewhere())
   try check(finished.session.phase == .ended && snips.sessions.count == 1, "a later click finds nothing more to close")
 
   // Selecting a region in a new snip closes the earlier conversation and preview through the close
-  // button's path, even while it answers, which ends its session and releases its screenshot,
-  // answers and draft. The new conversation is presented before the earlier one closes.
-  guard select(next), let nextPanel = next.panel, let nextThread = next.conversation, let nextComposer = next.composer else {
-    throw SessionWindowsTestError.failed("the new snip's conversation")
+  // button's path, even while it answers, which ends its session and releases its screenshot and
+  // answer. The new conversation is presented before the earlier one closes.
+  answers.pauses = true
+  confirm(next)
+  guard let nextPanel = next.panel, let nextThread = next.conversation,
+    waitUntil({ nextThread.turn?.state == .streaming }) else {
+    throw SessionWindowsTestError.failed("the new snip's conversation streams its answer")
   }
   next.conversation?.onPreview?()
   guard let nextPreview = next.previewPanel, let nextPreviewView = nextPreview.contentView as? PreviewView else {
     throw SessionWindowsTestError.failed("the new snip's preview")
   }
-  answers.pauses = true
-  nextComposer.setDraft("Still answering")
-  nextComposer.submit()
-  try check(waitUntil { nextThread.latestTurn?.state == .streaming }, "the conversation answers a follow-up")
-  nextComposer.setDraft("Not sent")
+  let requested = answers.requests
   guard let latest = snip() else { throw SessionWindowsTestError.failed("a snip while the answer streams") }
   try check(next.panel === nextPanel && next.previewPanel === nextPreview && next.session.phase == .running &&
     snips.sessions.count == 2, "a new snip leaves a streaming conversation open while you select")
@@ -434,23 +386,21 @@ func runSessionWindowsTests() throws -> Int {
     shownFirst = latest.panel != nil && presented === latest.panel
     closedNext?()
   }
-  latest.selectionView?.selection = CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
-  latest.selectionView?.confirm()
+  confirm(latest)
   try check(next.session.phase == .ended && next.panel == nil && next.previewPanel == nil && next.conversation == nil &&
     snips.sessions.count == 1 && snips.sessions.first === latest && latest.panel != nil,
     "selecting a region in a new snip closes the earlier conversation and preview, ending its session")
   try check(shownFirst == true, "the new conversation is presented before the earlier one closes")
-  try check(nextPreviewView.image == nil && nextThread.turns.isEmpty && nextThread.thumbnail.screenshot == nil &&
-    nextComposer.draft.isEmpty, "closing them releases the screenshot, answers and unsent draft")
+  try check(nextPreviewView.image == nil && nextThread.turn == nil && nextThread.thumbnail.screenshot == nil,
+    "closing them releases the screenshot and answer")
   answers.pauses = false
-  try check(waitUntil { latest.conversation?.latestTurn?.state == .done } &&
-    answers.questions.suffix(2) == ["Still answering", "(first)"], "the new snip is answered, and the stopped one isn't")
+  try check(waitUntil { latest.conversation?.turn?.state == .done } && answers.requests == requested + 1,
+    "the new snip is answered with a request of its own")
 
   // A new snip ends a selection that's still being cropped, which leaves a notice in its
   // conversation. Selecting the new snip's region closes that too.
   guard let cropping = snip() else { throw SessionWindowsTestError.failed("a snip to crop") }
-  cropping.selectionView?.selection = CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
-  cropping.selectionView?.confirm()
+  confirm(cropping)
   try check(latest.panel == nil && latest.session.phase == .ended && snips.sessions.count == 1,
     "each snip's conversation replaces the one before")
   guard let replacing = snip() else { throw SessionWindowsTestError.failed("a snip during cropping") }
@@ -467,6 +417,8 @@ func runSessionWindowsTests() throws -> Int {
   // at the default size, whose height holds its whole thread, rather than the size chosen above.
   let keptSize = snips.chosenSize.size
   snips.chosenSize.size = nil
+  answers.text = (1...4).map { "Line \($0) of an answer long enough to wrap at this width, so the thread grows." }
+    .joined(separator: "\n")
   let largeContext = CGContext(data: nil, width: 1800, height: 1000, bitsPerComponent: 8, bytesPerRow: 0,
     space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue)!
   largeContext.setFillColor(CGColor(srgbRed: 0.2, green: 0.5, blue: 0.8, alpha: 1))
@@ -474,17 +426,13 @@ func runSessionWindowsTests() throws -> Int {
   guard let scrolling = snip(FrozenScreen(image: largeContext.makeImage()!, displayID: displayID)) else {
     throw SessionWindowsTestError.failed("a snip of a large display")
   }
-  scrolling.selectionView?.selection = CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
-  scrolling.selectionView?.confirm()
+  confirm(scrolling)
   scrolling.conversation?.scrollView.scrollerStyle = .legacy
-  try check(waitUntil { scrolling.conversation?.latestTurn?.state == .done }, "the large snip is answered")
-  scrolling.composer?.setDraft("Why is that?\nAnd what about this?")
-  scrolling.composer?.submit()
-  try check(waitUntil { scrolling.conversation?.latestTurn?.state == .done } &&
-    scrolling.conversation.map { $0.scrollView.documentView!.frame.height <= $0.scrollView.contentSize.height + 1 } == true,
+  try check(waitUntil { scrolling.conversation?.turn?.state == .done } && scrolling.conversation.map(fitsThread) == true,
     "a conversation whose scroller came and went still fits its thread")
   scrolling.panel?.performClose(nil)
   snips.chosenSize.size = keptSize
+  answers.text = SelfTestAnswers.codeAnswer
 
   // Notices for snips that fail before they have a window.
   controller.start { throw CaptureError("The display was disconnected.") }

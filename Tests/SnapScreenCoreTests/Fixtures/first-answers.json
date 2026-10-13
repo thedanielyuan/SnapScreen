@@ -11,8 +11,7 @@
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -42,9 +41,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {
@@ -82,30 +78,7 @@
       ],
       "outcome": {
         "type": "answer",
-        "text": "The answer is 4.",
-        "history": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              },
-              {
-                "type": "text",
-                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "The answer is 4."
-          }
-        ]
+        "text": "The answer is 4."
       }
     },
     {
@@ -119,8 +92,7 @@
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -150,9 +122,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {
@@ -190,34 +159,7 @@
       ],
       "outcome": {
         "type": "answer",
-        "text": "About 3 m/s.",
-        "history": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              },
-              {
-                "type": "text",
-                "text": "Screenshot task guidance:\nUse SI units."
-              },
-              {
-                "type": "text",
-                "text": "How fast is it?"
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "About 3 m/s."
-          }
-        ]
+        "text": "About 3 m/s."
       }
     },
     {
@@ -230,8 +172,7 @@
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -261,9 +202,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {
@@ -297,30 +235,7 @@
       ],
       "outcome": {
         "type": "answer",
-        "text": "4",
-        "history": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              },
-              {
-                "type": "text",
-                "text": "What is 2 + 2?"
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "4"
-          }
-        ]
+        "text": "4"
       }
     },
     {
@@ -334,8 +249,7 @@
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -365,9 +279,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {
@@ -397,26 +308,7 @@
       ],
       "outcome": {
         "type": "answer",
-        "text": "A cat.",
-        "history": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "A cat."
-          }
-        ]
+        "text": "A cat."
       }
     }
   ]

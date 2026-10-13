@@ -1,12 +1,11 @@
 import AppKit
 
 /// SnapScreen's colours. It has no light mode (main.swift makes the app dark): the conversation is
-/// near-black, code and the follow-up field sit on it a shade lighter, and cyan marks what's live.
+/// near-black, code sits on it a shade lighter, and cyan marks what's live.
 enum Theme {
-  /// The focused field and its caret, Send or Stop when it can act, and Copy under the pointer or
-  /// once it copies.
+  /// Stop when it can act, and Copy under the pointer or once it copies.
   static let accent = NSColor(srgbRed: 34 / 255, green: 211 / 255, blue: 238 / 255, alpha: 1)
-  /// Icons drawn on the accent, such as Send's arrow.
+  /// Stop's square, drawn on the accent.
   static let onAccent = gray(0x0D)
   static let pointerSelection = NSColor(srgbRed: 59 / 255, green: 130 / 255, blue: 246 / 255, alpha: 1)
   static let keyboardSelection = NSColor(srgbRed: 167 / 255, green: 139 / 255, blue: 250 / 255, alpha: 1)
@@ -14,14 +13,12 @@ enum Theme {
   static let backdrop = NSColor(srgbRed: 17 / 255, green: 17 / 255, blue: 17 / 255, alpha: 1)
   /// The conversation window.
   static let background = gray(0x0D)
-  /// Code blocks, the follow-up field and the screenshot's thumbnail, each outlined.
+  /// Code blocks and the screenshot's thumbnail, each outlined.
   static let surface = gray(0x17)
   static let surfaceBorder = gray(0x2A)
-  /// Follow-up questions stay grey, so they don't compete with the accent.
-  static let bubble = gray(0x26)
   static let hover = NSColor.white.withAlphaComponent(0.09)
   static let idleControl = NSColor.white.withAlphaComponent(0.12)
-  /// Send's arrow and Stop's square on `idleControl`, faint until they can act.
+  /// Stop's square on `idleControl`, faint until it can act.
   static let idleIcon = NSColor.white.withAlphaComponent(0.06)
 
   /// An opaque sRGB grey from its 8-bit level, so 0x0D is #0D0D0D.
@@ -262,61 +259,35 @@ final class ActionButton: CompanionButton {
   }
 }
 
-/// The composer's circular Send button, which becomes Stop while an answer is in progress. It fills
-/// with the accent only while it can act: Send needs a draft.
-final class SendButton: CompanionButton {
-  enum Mode { case send, stop }
-  var mode: Mode = .send { didSet { if mode != oldValue { refresh() } } }
-  override var isEnabled: Bool { didSet { refresh() } }
+/// The conversation's circular Stop button, shown while an answer is in progress. It fills with the
+/// accent only while it can act, once the request has started.
+final class StopButton: CompanionButton {
+  static let size: CGFloat = 32
+  override var isEnabled: Bool { didSet { needsDisplay = true } }
 
   init(target: AnyObject?, action: Selector?) {
-    super.init(frame: NSRect(x: 0, y: 0, width: 28, height: 28))
+    super.init(frame: NSRect(x: 0, y: 0, width: Self.size, height: Self.size))
     self.target = target
     self.action = action
     isBordered = false
     title = ""
     setButtonType(.momentaryChange)
-    refresh()
+    setAccessibilityLabel("Stop answer")
+    toolTip = "Stop answer"
   }
 
   required init?(coder: NSCoder) { nil }
-
-  private func refresh() {
-    let label = mode == .send ? "Ask follow-up" : "Stop answer"
-    setAccessibilityLabel(label)
-    toolTip = label
-    needsDisplay = true
-  }
 
   override func draw(_ dirtyRect: NSRect) {
     let circle = NSBezierPath(ovalIn: bounds.insetBy(dx: 0.5, dy: 0.5))
     (isEnabled ? Theme.accent.withAlphaComponent(isHighlighted ? 0.82 : 1) : Theme.idleControl).setFill()
     circle.fill()
     (isEnabled ? Theme.onAccent : Theme.idleIcon).set()
-    // Paths rather than SF Symbols, whose images sit on a text baseline, so their ink is off centre.
-    // Each icon is symmetric about the circle's centre, in points of a 32-point circle with y up: an
-    // arrow 12 wide and 14 tall with 2-point strokes, or a 10-point square.
-    let unit = bounds.height / 32
-    func point(_ x: CGFloat, _ y: CGFloat) -> NSPoint {
-      NSPoint(x: bounds.midX + x * unit, y: bounds.midY + (isFlipped ? -y : y) * unit)
-    }
-    switch mode {
-    case .send:
-      let arrow = NSBezierPath()
-      arrow.move(to: point(0, -6))
-      arrow.line(to: point(0, 6))
-      arrow.move(to: point(-5, 1))
-      arrow.line(to: point(0, 6))
-      arrow.line(to: point(5, 1))
-      arrow.lineWidth = 2 * unit
-      arrow.lineCapStyle = .round
-      arrow.lineJoinStyle = .round
-      arrow.stroke()
-    case .stop:
-      let side = 10 * unit
-      NSBezierPath(roundedRect: NSRect(x: bounds.midX - side / 2, y: bounds.midY - side / 2, width: side, height: side),
-        xRadius: 2 * unit, yRadius: 2 * unit).fill()
-    }
+    // A path rather than an SF Symbol, whose image sits on a text baseline, so its ink is off centre:
+    // a square centred in the circle, 10 points on a side of a 32-point circle.
+    let side = 10 * bounds.height / 32
+    NSBezierPath(roundedRect: NSRect(x: bounds.midX - side / 2, y: bounds.midY - side / 2, width: side, height: side),
+      xRadius: side / 5, yRadius: side / 5).fill()
   }
 
   override func drawFocusRingMask() { NSBezierPath(ovalIn: bounds).fill() }

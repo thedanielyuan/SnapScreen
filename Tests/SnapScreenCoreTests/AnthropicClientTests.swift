@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import SnapScreenCore
 
-// The cases the fixtures can't express: timeouts, Stop, body cleanup, and request reuse across turns.
+// The cases the fixtures can't express: timeouts, Stop, body cleanup, and thinking with a question.
 // Fixture replays cover request bodies, stream parsing, and error mapping.
 
 private let limits = SnapScreenLimits.defaults
@@ -35,56 +35,38 @@ private func events(_ handlers: (StreamHandlers) async throws -> Void) async ret
 
 @Test func keepsMarkdownLookingSyntaxInStreamedAndFinalText() async throws {
   let client = AnthropicClient(transport: MockTransport(.answer("1. `user_", "id` = value_1 # **exact**")))
-  var answer: Answer?
+  var answer: String?
   let seen = try await events { handlers in
     answer = try await client.analyzeImage(apiKey: "key", image: pixelPNG, handlers: handlers)
   }
-  #expect(answer?.text == "1. `user_id` = value_1 # **exact**")
+  #expect(answer == "1. `user_id` = value_1 # **exact**")
   #expect(seen == ["1. `user_", "1. `user_id` = value_1 # **exact**"])
 }
 
-@Test func reportsThinkingForFollowUpsOnlyWhenTheModelThinks() async throws {
-  let history: [AnthropicMessage] = [.user("Earlier question"), .assistant("Earlier answer")]
+@Test func reportsThinkingOnlyWhenTheModelThinks() async throws {
   let withoutThinking = MockTransport(.answer("Answer"))
   let quiet = try await events { handlers in
-    _ = try await AnthropicClient(transport: withoutThinking).followUp(apiKey: "key", text: "And this?",
-      history: history, handlers: handlers)
+    _ = try await AnthropicClient(transport: withoutThinking).analyzeImage(apiKey: "key", image: pixelPNG,
+      userQuestion: "And this?", handlers: handlers)
   }
   #expect(quiet == ["Answer"])
 
   var thinking = ScriptedResponse.answer("Answer")
   thinking.body = "data: \(thinkingStart)\n\n" + thinking.body!
   let seen = try await events { handlers in
-    _ = try await AnthropicClient(transport: MockTransport(thinking)).followUp(apiKey: "key", text: "And this?",
-      history: history, handlers: handlers)
+    _ = try await AnthropicClient(transport: MockTransport(thinking)).analyzeImage(apiKey: "key", image: pixelPNG,
+      userQuestion: "And this?", handlers: handlers)
   }
   #expect(seen == ["(thinking)", "Answer"])
 }
 
-@Test func followUpAppendsTheTurnToTheHistory() async throws {
-  let history: [AnthropicMessage] = [.user("earlier question"), .assistant("earlier answer")]
-  let answer = try await AnthropicClient(transport: MockTransport(.answer("Answer")))
-    .followUp(apiKey: "key", text: "And this?", history: history)
-  #expect(answer.history == history + [.user("And this?"), .assistant("Answer")])
-}
-
-@Test func resendsTheFirstRequestUnchangedSoFollowUpsHitTheCache() async throws {
-  let transport = MockTransport(.answer("First"), .answer("Second"))
-  let client = AnthropicClient(transport: transport)
-  let first = try await client.analyzeImage(apiKey: "key", image: pixelPNG, hiddenInstruction: "Keep it concise.")
-  _ = try await client.followUp(apiKey: "key", text: "And this?", history: first.history,
-    sessionInstruction: "Keep it concise.")
-
-  let firstBody = try requestBody(transport.requests[0])
-  let followUpBody = try requestBody(transport.requests[1])
-  #expect(followUpBody["cache_control"] == .object(["type": .string("ephemeral")]))
-  #expect(followUpBody["system"] == firstBody["system"])
-  guard case .array(let firstMessages)? = firstBody["messages"],
-    case .array(let followUpMessages)? = followUpBody["messages"] else {
-    Issue.record("Requests have no messages")
-    return
-  }
-  #expect(Array(followUpMessages.prefix(firstMessages.count)) == firstMessages)
+@Test func asksWithoutPromptCaching() async throws {
+  let transport = MockTransport(.answer("Answer"))
+  _ = try await AnthropicClient(transport: transport).analyzeImage(apiKey: "key", image: pixelPNG,
+    hiddenInstruction: "Keep it concise.")
+  let body = try requestBody(transport.requests.first)
+  #expect(body["cache_control"] == nil && body["system"] != nil)
+  #expect(!String(decoding: try #require(transport.requests.first?.httpBody), as: UTF8.self).contains("cache_control"))
 }
 
 @Test func encodesScreenshotsAsUnescapedBase64() async throws {

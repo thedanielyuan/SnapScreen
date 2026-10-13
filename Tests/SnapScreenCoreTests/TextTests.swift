@@ -17,19 +17,19 @@ import Testing
     options: [.regularExpression, .caseInsensitive]) == nil)
 }
 
-@Test func sharesFollowUpAndCodingRulesInOnePrompt() throws {
-  for phrase in ["Follow-up rules", "1–3 sentences unless they ask for more detail",
-    "Do not re-summarize or re-describe the screenshot", "fenced code block", "```python", "put only code inside it",
-    "Coding rules", "programming language the task requires", "a language the user names",
-    "a language the screenshot clearly implies", "do not guess and do not write any code yet",
-    "Which language should I use", "Keep the code simple", "Match any given starter code"] {
+@Test func answersAndCodesWithoutAskingTheUserAnything() {
+  for phrase in ["The user can't reply to your answer", "answer its most likely reading", "fenced code block",
+    "```python", "put only code inside it", "Coding rules", "programming language the task requires",
+    "a language the user names in their guidance", "a language the screenshot clearly implies",
+    "use Python and say so in one line", "make the most sensible assumption and state it in one line",
+    "Keep the code simple", "Match any given starter code"] {
     #expect(screenshotQASystemPrompt.contains(phrase), "\(phrase)")
   }
-  let followUpRules = try #require(screenshotQASystemPrompt.range(of: "Follow-up rules"))
-  let rules = screenshotQASystemPrompt[followUpRules.lowerBound...]
-  #expect(rules.contains("Code is the exception"))
-  #expect(rules.contains("which language to use"))
-  #expect(rules.contains("reply with the complete code"))
+  // The user can't answer a question, so the prompt never has the model ask one.
+  for phrase in ["Follow-up", "follow-up", "Ask one short question", "Which language should I use",
+    "do not write any code yet"] {
+    #expect(!screenshotQASystemPrompt.contains(phrase), "\(phrase)")
+  }
 }
 
 @Test func closesACodeBlockLeftOpen() {
@@ -61,7 +61,7 @@ import Testing
   // JavaScript keeps U+0085 and U+200B.
   #expect("\u{85}answer\u{200B}".jsTrimmed == "\u{85}answer\u{200B}")
   #expect(" \u{A0}\t".isBlank && "".isBlank && !" x ".isBlank)
-  #expect("a\r\nb".jsHasPrefix("a\r") && !"caf\u{E9}".jsEquals("cafe\u{301}"))
+  #expect("a\r\nb".jsEquals("a\r\nb") && !"caf\u{E9}".jsEquals("cafe\u{301}"))
   #expect("ab🙂".prefix(utf16Units: 3) == "ab" && "ab🙂".prefix(utf16Units: 4) == "ab🙂")
   #expect(groupedDigits(0) == "0" && groupedDigits(999) == "999" && groupedDigits(1_000) == "1,000"
     && groupedDigits(10_000_000) == "10,000,000")

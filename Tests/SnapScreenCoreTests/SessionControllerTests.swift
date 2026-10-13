@@ -20,28 +20,20 @@ private final class ScriptedAnswers: AnswerClient {
   @MainActor
   final class Call {
     let apiKey: String
-    /// The screenshot, sent with a first answer.
-    let image: Data?
+    let image: Data
     let hiddenInstruction: String?
-    /// The first answer's question, or the follow-up.
     let question: String?
-    /// The conversation, sent with a follow-up.
-    let history: [AnthropicMessage]?
-    let sessionInstruction: String?
     let limits: SnapScreenLimits
     let handlers: StreamHandlers
     fileprivate let cancelled = Locked(false)
-    fileprivate var continuation: CheckedContinuation<Answer, any Error>?
+    fileprivate var continuation: CheckedContinuation<String, any Error>?
 
-    init(apiKey: String, image: Data? = nil, hiddenInstruction: String? = nil, question: String?,
-      history: [AnthropicMessage]? = nil, sessionInstruction: String? = nil, limits: SnapScreenLimits,
+    init(apiKey: String, image: Data, hiddenInstruction: String?, question: String?, limits: SnapScreenLimits,
       handlers: StreamHandlers) {
       self.apiKey = apiKey
       self.image = image
       self.hiddenInstruction = hiddenInstruction
       self.question = question
-      self.history = history
-      self.sessionInstruction = sessionInstruction
       self.limits = limits
       self.handlers = handlers
     }
@@ -49,7 +41,7 @@ private final class ScriptedAnswers: AnswerClient {
     var wasCancelled: Bool { cancelled.current }
 
     func resolve(_ text: String) {
-      continuation?.resume(returning: Answer(text: text, history: []))
+      continuation?.resume(returning: text)
       continuation = nil
     }
 
@@ -61,33 +53,20 @@ private final class ScriptedAnswers: AnswerClient {
 
   private(set) var calls: [Call] = []
   /// Replies for the next calls, in order. A call without one answers.
-  var analyzeReplies: [Reply] = []
-  var followUpReplies: [Reply] = []
-
-  var analyzeCalls: [Call] { calls.filter { $0.image != nil } }
-  var followUpCalls: [Call] { calls.filter { $0.history != nil } }
+  var replies: [Reply] = []
 
   func analyzeImage(apiKey: String, image: Data, hiddenInstruction: String?, userQuestion: String?,
-    limits: SnapScreenLimits, handlers: StreamHandlers) async throws -> Answer {
+    limits: SnapScreenLimits, handlers: StreamHandlers) async throws -> String {
     let call = Call(apiKey: apiKey, image: image, hiddenInstruction: hiddenInstruction, question: userQuestion,
       limits: limits, handlers: handlers)
     calls.append(call)
-    return try await reply(analyzeReplies.isEmpty ? .answer("First answer") : analyzeReplies.removeFirst(), to: call)
+    return try await reply(replies.isEmpty ? .answer("First answer") : replies.removeFirst(), to: call)
   }
 
-  func followUp(apiKey: String, text: String, history: [AnthropicMessage], sessionInstruction: String?,
-    limits: SnapScreenLimits, handlers: StreamHandlers) async throws -> Answer {
-    let call = Call(apiKey: apiKey, question: text, history: history, sessionInstruction: sessionInstruction,
-      limits: limits, handlers: handlers)
-    calls.append(call)
-    return try await reply(followUpReplies.isEmpty ? .answer("Follow-up answer") : followUpReplies.removeFirst(),
-      to: call)
-  }
-
-  private func reply(_ reply: Reply, to call: Call) async throws -> Answer {
+  private func reply(_ reply: Reply, to call: Call) async throws -> String {
     switch reply {
     case .answer(let text):
-      return Answer(text: text, history: [])
+      return text
     case .failure(let error):
       throw error
     case .hold:
@@ -143,7 +122,7 @@ private final class Harness {
     return session
   }
 
-  /// Starts a snip, selects a region, and lets the first answer run.
+  /// Starts a snip, selects a region, and lets the answer run.
   func accepted() async throws -> SnipSession {
     let session = try #require(await start())
     session.select(half)
@@ -187,28 +166,26 @@ private func streamed(_ log: EventLog) -> [SessionEvent] {
   let session = try await harness.accepted()
   #expect(harness.log.events(of: session) == [.captured(frozen), .accepted(cropped), .started, firstAnswer])
   #expect(harness.crops.count == 1 && harness.crops.first?.image === frozen.image && harness.crops.first?.rect == half)
-  let call = try #require(harness.answers.analyzeCalls.first)
+  let call = try #require(harness.answers.calls.first)
   #expect(call.apiKey == "sk-ant-test-secret" && call.image == cropped && call.hiddenInstruction == "Keep guidance."
     && call.question == nil && call.limits == .defaults)
   // The windows never get the key or the Default Prompt.
   let reported = String(describing: harness.log.events)
   #expect(!reported.contains("sk-ant") && !reported.contains("Keep guidance"))
-  #expect(session.phase == .ready && session.canAsk && !session.canRetry && !session.canStop)
+  #expect(session.phase == .ready && !session.canRetry && !session.canStop && !session.retry())
   session.close()
   #expect(session.phase == .ended && harness.controller.sessions.isEmpty)
 }
 
 @Test @MainActor func aNewSnipLeavesAcceptedConversationsOpen() async throws {
   let harness = Harness()
+  harness.answers.replies = [.hold]
   let session = try await harness.accepted()
   let next = try #require(await harness.start())
-  #expect(session.phase == .ready && next.phase == .selecting)
-  #expect(session.ask("Explain it"))
+  #expect(session.phase == .running && next.phase == .selecting)
+  try #require(harness.answers.calls.first).resolve("First answer")
   await flush()
-  let call = try #require(harness.answers.followUpCalls.first)
-  #expect(call.apiKey == "sk-ant-test-secret" && call.question == "Explain it"
-    && call.sessionInstruction == "Keep guidance.")
-  #expect(call.history?.contains(.assistant("First answer")) == true)
+  #expect(session.phase == .ready && harness.log.events(of: session).last == firstAnswer)
   #expect(harness.captures == 2 && !harness.log.events(of: session).contains(.ended))
 }
 
@@ -220,7 +197,7 @@ func aNewSnipEndsAnUnacceptedSelection(whileCropping: Bool) async throws {
   if whileCropping {
     session.select(half)
     await flush()
-    #expect(session.phase == .cropping && !session.canAsk)
+    #expect(session.phase == .cropping && !session.canRetry && !session.canStop)
   }
   await harness.start()
   harness.finishCrop()
@@ -242,9 +219,9 @@ func aNewSnipEndsAnUnacceptedSelection(whileCropping: Bool) async throws {
 
 @Test @MainActor func closingCancelsTheRequestAndIgnoresAnythingLate() async throws {
   let harness = Harness()
-  harness.answers.analyzeReplies = [.hold]
+  harness.answers.replies = [.hold]
   let session = try await harness.accepted()
-  let call = try #require(harness.answers.analyzeCalls.first)
+  let call = try #require(harness.answers.calls.first)
   session.close()
   #expect(call.wasCancelled)
   call.handlers.onDelta("Late secret")
@@ -260,53 +237,51 @@ func aNewSnipEndsAnUnacceptedSelection(whileCropping: Bool) async throws {
 @Test @MainActor func refusesRequestsThePhaseDoesNotAllow() async throws {
   let harness = Harness()
   let selecting = try #require(await harness.start())
-  #expect(!selecting.ask("Too early") && !selecting.retry() && !selecting.stop())
+  #expect(!selecting.retry() && !selecting.stop())
   selecting.close()
 
-  harness.answers.followUpReplies = [.hold]
+  harness.answers.replies = [.hold]
   let session = try await harness.accepted()
   #expect(!session.select(half))
-  #expect(session.ask("One"))
-  #expect(!session.ask("Duplicate") && !session.retry() && session.canStop)
+  #expect(!session.retry() && session.canStop)
   await flush()
-  #expect(harness.answers.followUpCalls.count == 1)
+  #expect(harness.answers.calls.count == 1)
   session.close()
-  #expect(!session.ask("Closed") && !session.retry() && !session.stop() && !session.canAsk)
+  #expect(!session.retry() && !session.stop() && !session.canRetry)
   await flush()
-  #expect(harness.answers.followUpCalls.count == 1)
+  #expect(harness.answers.calls.count == 1)
 }
 
-@Test @MainActor func stopsOnceKeepsTheTextAndRetriesFromTheSameConversation() async throws {
+@Test @MainActor func stopsOnceReportsTheTextAndRetriesTheSameRequest() async throws {
   let harness = Harness()
-  harness.answers.analyzeReplies = [.hold]
+  harness.answers.replies = [.hold]
   let session = try await harness.accepted()
-  let stopped = try #require(harness.answers.analyzeCalls.first)
+  let stopped = try #require(harness.answers.calls.first)
   stopped.handlers.onDelta("Partial answer")
   #expect(session.stop())
   #expect(stopped.wasCancelled && harness.latest == .answer("Partial answer", .stopped))
-  #expect(session.display == [DisplayMessage(role: .assistant, content: "Partial answer")])
-  #expect(!session.stop() && session.canRetry && session.canAsk)
+  #expect(!session.stop() && session.canRetry)
   #expect(session.retry())
   await flush()
-  #expect(harness.answers.analyzeCalls.count == 2 && harness.answers.analyzeCalls[1].question == nil)
+  let retried = try #require(harness.answers.calls.last)
+  #expect(harness.answers.calls.count == 2 && retried.image == stopped.image && retried.question == nil
+    && retried.hiddenInstruction == stopped.hiddenInstruction && retried.limits == stopped.limits)
   stopped.resolve("Late result")
   await flush()
   #expect(!session.stop() && harness.latest == firstAnswer)
-  #expect(session.display == [DisplayMessage(role: .assistant, content: "First answer")])
 }
 
-@Test @MainActor func retryingAFailedFollowUpResendsTheSameRequest() async throws {
+@Test @MainActor func retryingAFailedAnswerResendsTheSameRequest() async throws {
   let harness = Harness()
+  harness.answers.replies = [.failure(AnthropicError("network", "Connection interrupted."))]
   let session = try await harness.accepted()
-  harness.answers.followUpReplies = [.failure(AnthropicError("network", "Connection interrupted."))]
-  session.ask("Retry this")
-  await flush()
   #expect(harness.latest == .failed(AnthropicError("network", "Connection interrupted.")) && session.canRetry)
   #expect(session.retry())
   await flush()
-  let calls = harness.answers.followUpCalls
-  #expect(calls.count == 2 && calls[0].question == calls[1].question && calls[0].history == calls[1].history)
-  #expect(harness.latest == .answer("Follow-up answer", .done))
+  let calls = harness.answers.calls
+  #expect(calls.count == 2 && calls[0].image == calls[1].image && calls[0].question == calls[1].question
+    && calls[0].hiddenInstruction == calls[1].hiddenInstruction && calls[0].limits == calls[1].limits)
+  #expect(harness.latest == firstAnswer && !session.canRetry)
 }
 
 @Test @MainActor func reportsAGenericErrorForUnexpectedFailures() async throws {
@@ -314,25 +289,25 @@ func aNewSnipEndsAnUnacceptedSelection(whileCropping: Bool) async throws {
     var description: String { "sk-ant-private provider\u{0}details" }
   }
   let harness = Harness()
-  harness.answers.analyzeReplies = [.failure(Unexpected())]
+  harness.answers.replies = [.failure(Unexpected())]
   _ = try await harness.accepted()
   #expect(harness.latest == .failed(AnthropicError("request_failed",
     "SnapScreen could not complete this request. Try again.")))
   #expect(!String(describing: harness.log.events).contains("private"))
 }
 
-@Test @MainActor func followUpsUseTheSnapshottedSettingsWithTheCurrentKey() async throws {
+@Test @MainActor func retriesUseTheSnapshottedSettingsWithTheCurrentKey() async throws {
   let harness = Harness()
+  harness.answers.replies = [.failure(AnthropicError("network", "Try again."))]
   let session = try await harness.accepted()
   harness.apiKey = "replacement-key"
   harness.settings = SessionSettings(defaultPrompt: "Changed preference",
-    limits: SnapScreenLimits(maxInputCharacters: 100, maxScreenshotBytes: 5_000_000, maxScreenshotDimension: 2_576,
-      maxConversationTurns: 12))
-  session.ask("Follow up")
+    limits: SnapScreenLimits(maxInputCharacters: 100, maxScreenshotBytes: 5_000_000, maxScreenshotDimension: 2_576))
+  #expect(session.retry())
   await flush()
-  let call = try #require(harness.answers.followUpCalls.first)
-  #expect(call.apiKey == "replacement-key" && call.sessionInstruction == "Keep guidance." && call.limits == .defaults)
-  #expect(session.maxInputCharacters == SnapScreenLimits.defaults.maxInputCharacters)
+  let call = try #require(harness.answers.calls.last)
+  #expect(harness.answers.calls.count == 2 && call.apiKey == "replacement-key"
+    && call.hiddenInstruction == "Keep guidance." && call.limits == .defaults)
 }
 
 @Test @MainActor func endsAnIdleSelectionAfterTwoMinutes() async throws {
@@ -351,25 +326,26 @@ func aNewSnipEndsAnUnacceptedSelection(whileCropping: Bool) async throws {
 
 @Test @MainActor func keepsSessionsApartAndHoldsAtMostFour() async throws {
   let harness = Harness()
+  harness.answers.replies = [.failure(AnthropicError("network", "Try again."))]
   var sessions: [SnipSession] = []
   for _ in 0..<SessionController.maxSessions { sessions.append(try await harness.accepted()) }
   #expect(await harness.start() == nil)
   #expect(harness.log.notices == ["Close a SnapScreen window before starting another snip."])
   #expect(harness.captures == 4)
-  sessions[0].ask("Only the first")
+  #expect(sessions[0].phase == .failed && sessions.dropFirst().allSatisfy { $0.phase == .ready })
+  sessions[0].retry()
   await flush()
-  #expect(harness.answers.followUpCalls.count == 1)
-  #expect(sessions.dropFirst().allSatisfy { $0.phase == .ready && $0.history.count == 2 })
+  #expect(harness.answers.calls.count == 5 && sessions.allSatisfy { $0.phase == .ready })
   sessions[0].close()
   #expect(await harness.start() != nil)
 }
 
-@Test @MainActor func refusesAQuestionWhileTheFirstAnswerStarts() async throws {
+@Test @MainActor func refusesARetryWhileTheAnswerStarts() async throws {
   let harness = Harness()
-  var asked: Bool?
-  harness.log.onEvent = { session, event in if event == .accepted(cropped) { asked = session.ask("Too soon") } }
+  var retried: Bool?
+  harness.log.onEvent = { session, event in if event == .accepted(cropped) { retried = session.retry() } }
   let session = try await harness.accepted()
-  #expect(asked == false && harness.answers.calls.count == 1 && harness.answers.calls[0].question == nil)
+  #expect(retried == false && harness.answers.calls.count == 1 && harness.answers.calls[0].question == nil)
   #expect(harness.log.events(of: session).suffix(2) == [.started, firstAnswer])
 }
 
@@ -388,11 +364,11 @@ func makesNoRequestForASessionClosedBeforeItsRequest(closedAt: SessionEvent) asy
   let session = try await harness.accepted()
   #expect(harness.latest == .failed(AnthropicError("no_api_key",
     "Add your Anthropic API key in SnapScreen Settings, then Retry.")))
-  #expect(harness.answers.calls.isEmpty && session.display.isEmpty && session.canRetry)
+  #expect(harness.answers.calls.isEmpty && session.canRetry)
   harness.apiKey = "sk-ant-test-secret"
   #expect(session.retry())
   await flush()
-  #expect(harness.answers.analyzeCalls.count == 1 && harness.latest == firstAnswer)
+  #expect(harness.answers.calls.count == 1 && harness.latest == firstAnswer)
 }
 
 @Test @MainActor func reportsAKeyThatCannotBeReadInItsOwnWords() async throws {
@@ -401,28 +377,6 @@ func makesNoRequestForASessionClosedBeforeItsRequest(closedAt: SessionEvent) asy
   harness.keyError = keychain
   let session = try await harness.accepted()
   #expect(harness.latest == .failed(keychain) && harness.answers.calls.isEmpty && session.canRetry)
-}
-
-@Test(arguments: [true, false]) @MainActor
-func keepsHistoryAlignedAfterAFirstQuestionEnds(stopped: Bool) async throws {
-  let harness = Harness()
-  harness.answers.analyzeReplies = [.failure(AnthropicError("network", "Try again.")), .hold]
-  let session = try await harness.accepted()
-  #expect(session.display.isEmpty && session.history.isEmpty)
-  session.ask("Initial question after failure")
-  await flush()
-  let call = try #require(harness.answers.analyzeCalls.last)
-  #expect(harness.answers.analyzeCalls.count == 2 && call.question == "Initial question after failure")
-  call.handlers.onDelta("Partial")
-  if stopped { session.stop() } else { call.reject(AnthropicError("network", "Interrupted.")) }
-  await flush()
-  session.ask("Continue")
-  await flush()
-  let followUp = try #require(harness.answers.followUpCalls.first)
-  let imageTurn = createScreenshotUserContent(cropped, instruction: "Keep guidance.",
-    question: "Initial question after failure")
-  #expect(followUp.history?.first == AnthropicMessage(role: .user, content: .blocks(imageTurn)))
-  #expect(harness.latest == .answer("Follow-up answer", .done))
 }
 
 @Test @MainActor func reportsCaptureFailuresInTheirOwnWordsOrAGenericOne() async throws {
@@ -445,55 +399,16 @@ func keepsHistoryAlignedAfterAFirstQuestionEnds(stopped: Bool) async throws {
 
 @Test @MainActor func reportsRequestLimitErrorsInTheirOwnWords() async throws {
   let harness = Harness()
-  let session = try await harness.accepted()
-  harness.answers.followUpReplies = [.failure(RequestLimitError(.inputTooLong, "Questions are limited."))]
-  session.ask("Too long")
-  await flush()
-  #expect(harness.latest == .failed(AnthropicError("input_too_long", "Questions are limited.")))
-}
-
-@Test @MainActor func reportsRemovedTurnsRightAfterTheRequestStarts() async throws {
-  let harness = Harness()
-  harness.settings.limits.maxConversationTurns = 2
-  let session = try await harness.accepted()
-  for text in ["Second", "Third"] {
-    session.ask(text)
-    await flush()
-  }
-  let events = harness.log.events(of: session)
-  let notice = SessionEvent.notice("1 older conversation turn was removed to keep the screenshot and newest "
-    + "request within the configured limit.", removedTurns: 1)
-  #expect(events.filter { if case .notice = $0 { true } else { false } } == [notice])
-  #expect(events.lastIndex(of: notice) == events.lastIndex(of: .started).map { $0 + 1 })
-}
-
-@Test(arguments: [AnswerKind.initial, .followUp]) @MainActor
-func neverKeepsRefusedText(_ kind: AnswerKind) async throws {
-  let harness = Harness()
-  if kind == .initial { harness.answers.analyzeReplies = [.hold] } else { harness.answers.followUpReplies = [.hold] }
-  let session = try await harness.accepted()
-  if kind == .followUp {
-    session.ask("Refused question")
-    await flush()
-  }
-  let call = try #require(harness.answers.calls.last)
-  call.handlers.onDelta("Refused partial")
-  call.reject(AnthropicError("refusal", "Claude declined to answer this question."))
-  await flush()
-  #expect(harness.latest == .failed(AnthropicError("refusal", "Claude declined to answer this question.")))
-  session.ask("Next question")
-  await flush()
-  let next = try #require(harness.answers.calls.last)
-  let request = String(describing: (next.question, next.history))
-  #expect(request.contains("Next question") && !request.contains("Refused partial"))
-  #expect(!String(describing: session.display).contains("Refused partial"))
+  harness.answers.replies = [.failure(RequestLimitError(.inputTooLong, "The Default Prompt is limited."))]
+  _ = try await harness.accepted()
+  #expect(harness.latest == .failed(AnthropicError("input_too_long", "The Default Prompt is limited.")))
 }
 
 @Test @MainActor func sendsStreamingTextAtMostEveryHundredMillisecondsAndNothingAfterClose() async throws {
   let harness = Harness()
-  harness.answers.analyzeReplies = [.hold]
+  harness.answers.replies = [.hold]
   let session = try await harness.accepted()
-  let call = try #require(harness.answers.analyzeCalls.first)
+  let call = try #require(harness.answers.calls.first)
   for index in 0..<100 { call.handlers.onDelta("Text \(index)") }
   #expect(streamed(harness.log).isEmpty)
   harness.timers.advance(by: .milliseconds(100))
@@ -511,9 +426,9 @@ func neverKeepsRefusedText(_ kind: AnswerKind) async throws {
 
 @Test @MainActor func reportsThinkingOnlyWhileTheRequestRuns() async throws {
   let harness = Harness()
-  harness.answers.analyzeReplies = [.hold]
+  harness.answers.replies = [.hold]
   let session = try await harness.accepted()
-  let call = try #require(harness.answers.analyzeCalls.first)
+  let call = try #require(harness.answers.calls.first)
   call.handlers.onThinking()
   await flush()
   #expect(harness.latest == .thinking)
@@ -525,17 +440,14 @@ func neverKeepsRefusedText(_ kind: AnswerKind) async throws {
 
 @Test @MainActor func releasesItsImagesAndTextWhenItEnds() async throws {
   let harness = Harness()
-  harness.answers.followUpReplies = [.hold]
+  harness.answers.replies = [.hold]
   let session = try await harness.accepted()
-  #expect(session.frozen == nil && session.crop == cropped)
-  session.ask("Why?")
-  await flush()
-  let call = try #require(harness.answers.followUpCalls.first)
-  #expect(!session.history.isEmpty && !session.display.isEmpty && session.generation != nil)
+  #expect(session.frozen == nil && session.crop == cropped && session.generation != nil)
+  let call = try #require(harness.answers.calls.first)
+  call.handlers.onDelta("Partial answer")
   session.close()
   #expect(call.wasCancelled && session.phase == .ended)
-  #expect(session.frozen == nil && session.crop == nil && session.settings == nil && session.history.isEmpty
-    && session.display.isEmpty && session.generation == nil && session.retryGeneration == nil)
+  #expect(session.frozen == nil && session.crop == nil && session.settings == nil && session.generation == nil)
 }
 
 @Test @MainActor func cropsAndFitsTheSelectionOffTheMainActorByDefault() async throws {

@@ -9,12 +9,9 @@ import WebKit
 // Recording, and a scripted event stream replaces the API. Everything else is the real app: the
 // session controller, the client reading the stream, and the overlay and conversation windows.
 
-/// Answers the first request, the follow-up and the second snip as the API streams them, and keeps
-/// the requests.
+/// Answers the first snip and the second as the API streams them, and keeps the requests.
 final class ScriptedAPI: HTTPTransport, @unchecked Sendable {
   static let firstAnswer = "SNAPSCREEN_LIVE_FIRST_ANSWER\n\n```python\nprint(2 + 2)\n```\n\nThe result is 4."
-  static let followUp = "SNAPSCREEN_LIVE_FOLLOW_UP"
-  static let followUpAnswer = "SNAPSCREEN_LIVE_FOLLOW_UP_ANSWER"
   static let secondSnipAnswer = "SNAPSCREEN_LIVE_SECOND_SNIP_ANSWER"
 
   private let lock = NSLock()
@@ -30,7 +27,7 @@ final class ScriptedAPI: HTTPTransport, @unchecked Sendable {
       bodies.append(request.httpBody ?? Data())
       return bodies.count - 1
     }
-    let text = [Self.firstAnswer, Self.followUpAnswer, Self.secondSnipAnswer][min(index, 2)]
+    let text = [Self.firstAnswer, Self.secondSnipAnswer][min(index, 1)]
     let half = text.index(text.startIndex, offsetBy: text.count / 2)
     let events: [[String: Any]] = [
       ["type": "message_start", "message": ["id": "msg_snapscreen_live", "type": "message", "role": "assistant",
@@ -105,9 +102,9 @@ extension AppServices {
 }
 
 /// Snips twice through real windows. Pointer events select the regions without taking keyboard
-/// focus. The first snip reads the answer, submits a follow-up programmatically and opens the
-/// preview. The second replaces that conversation and preview, then closes its own as a click in
-/// another app does. It exits 0 once every check passes, and 1 at the first that fails.
+/// focus. The first snip reads the answer, copies its code and opens the preview. The second
+/// replaces that conversation and preview, then closes its own as a click in another app does. It
+/// exits 0 once every check passes, and 1 at the first that fails.
 @MainActor
 final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate {
   static let timeout: TimeInterval = 45
@@ -244,7 +241,7 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
     expectedCrop = (Int(((selection.maxX) * image.size.width).rounded()) - Int((selection.minX * image.size.width).rounded()),
       Int(((selection.maxY) * image.size.height).rounded()) - Int((selection.minY * image.size.height).rounded()))
     overlay.sendEvent(pointer(.leftMouseUp, at: view.convert(end, to: nil), in: overlay))
-    check(windows.overlay == nil && windows.panel?.isVisible == true && windows.composer?.isRunning == true,
+    check(windows.overlay == nil && windows.panel?.isVisible == true && windows.stopButton?.isHidden == false,
       "releasing the drag replaces the overlay with the conversation, waiting for its answer")
     if let panel = windows.panel { checkPassive(panel, "waiting conversation") }
     if let earlier = replaced {
@@ -271,13 +268,13 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
   private func answered() {
     answers += 1
     guard let windows = snips?.sessions.first(where: { $0.session === session }), let panel = windows.panel,
-      let thread = windows.conversation, let composer = windows.composer, let turn = thread.latestTurn else {
+      let thread = windows.conversation, let turn = thread.turn else {
       fail("the conversation stays open while it's answered")
       return
     }
     checkPassive(panel, "answered conversation")
-    check(composer.isReadOnly && !composer.textView.isEditable && !composer.textView.isSelectable &&
-      composer.sendButton.isHidden, "the finished conversation offers no editable field or Send button")
+    check(windows.stopButton?.isHidden == true && !hasEditableView(panel.contentView),
+      "the finished conversation offers no editable field, and Stop goes")
     if answers == 1 {
       check(turn.answer.renderedText == ScriptedAPI.firstAnswer && !thread.thumbnail.isHidden,
         "the first answer and the screenshot's thumbnail show")
@@ -294,17 +291,6 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
       check(pasteboard.string(forType: .string) == "print(2 + 2)", "the Copy button copies its code block")
       checkPassive(panel, "conversation after Copy")
       check(windows.dismissesOnOutsideClick, "once the answer finishes, a click in another app can close it")
-      // Retain the client/history replay check through a direct submission. The passive UI never
-      // asks the user to type or takes keyboard focus for this synthetic follow-up.
-      composer.setDraft(ScriptedAPI.followUp)
-      composer.submit()
-      check(thread.turns.count == 2 && composer.isRunning, "the follow-up starts a new turn")
-      check(!windows.dismissesOnOutsideClick, "a click in another app can't close the follow-up as it's answered")
-      return
-    }
-    if answers == 2 {
-      check(turn.question == ScriptedAPI.followUp && turn.answer.renderedText == ScriptedAPI.followUpAnswer,
-        "the follow-up and its answer show")
       checkRequests()
       thread.onPreview?()
       guard let preview = windows.previewPanel, let capture = capture else {
@@ -318,9 +304,8 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
       controller?.start { capture }
       return
     }
-    check(turn.question == nil && thread.turns.count == 1 && turn.answer.renderedText == ScriptedAPI.secondSnipAnswer,
-      "the new snip's answer shows in a conversation of its own")
-    check(api.requests.count == 3 && (api.requests[2]["messages"] as? [[String: Any]])?.count == 1,
+    check(turn.answer.renderedText == ScriptedAPI.secondSnipAnswer, "the new snip's answer shows in a conversation of its own")
+    check(api.requests.count == 2 && (api.requests[1]["messages"] as? [[String: Any]])?.count == 1,
       "the new snip's request carries none of the earlier conversation")
     thread.onPreview?()
     guard let preview = windows.previewPanel, let screen = screen else {
@@ -365,16 +350,21 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
     checkBackground("after all windows close")
     focusMonitor?.invalidate()
     print("SnapScreen live test passed (test hooks build): \(checks) checks, pointer selection, streamed answer, " +
-      "programmatic follow-up, preview, replacement and dismissal through real windows without keyboard focus")
+      "Copy, preview, replacement and dismissal through real windows without keyboard focus")
     pasteboard.releaseGlobally()
     exit(0)
   }
 
+  private func hasEditableView(_ view: NSView?) -> Bool {
+    guard let view = view else { return false }
+    if (view as? NSTextView)?.isEditable == true || (view as? NSTextField)?.isEditable == true { return true }
+    return view.subviews.contains { hasEditableView($0) }
+  }
+
   private func checkRequests() {
     let requests = api.requests
-    guard requests.count == 2, let first = requests[0]["messages"] as? [[String: Any]],
-      let followUp = requests[1]["messages"] as? [[String: Any]] else {
-      fail("the client sends one request for the answer and one for the follow-up")
+    guard requests.count == 1, let first = requests[0]["messages"] as? [[String: Any]] else {
+      fail("the client sends one request for the answer")
       return
     }
     let blocks = first.first?["content"] as? [[String: Any]] ?? []
@@ -385,11 +375,8 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
       "the first request sends the screenshot with the Default Prompt")
     check(crop.map { $0.width == expectedCrop?.width && $0.height == expectedCrop?.height } == true,
       "the screenshot is the selected region of the capture, in its pixels")
-    check(followUp.count == 3 && followUp[1]["content"] as? String == ScriptedAPI.firstAnswer &&
-      followUp[2]["content"] as? String == ScriptedAPI.followUp,
-      "the follow-up resends the conversation with the new question")
-    check(requests.allSatisfy { $0["model"] as? String == AnthropicClient.model && $0["stream"] as? Bool == true },
-      "both requests stream from the app's model")
+    check(requests[0]["model"] as? String == AnthropicClient.model && requests[0]["stream"] as? Bool == true &&
+      requests[0]["cache_control"] == nil, "the request streams from the app's model, without prompt caching")
   }
 
   private static func pixelSize(_ png: Data) -> (width: Int, height: Int)? {

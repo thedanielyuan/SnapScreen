@@ -1,19 +1,6 @@
 {
-  "description": "An interrupted first answer keeps its text, marked; Retry resends the first request.",
+  "description": "An interrupted answer reports its error; Retry resends the same request.",
   "steps": [
-    {
-      "op": "prepareAlignedConversationForNewestTurn",
-      "input": {
-        "displayMessages": [],
-        "conversationHistory": [],
-        "maxConversationTurns": 12
-      },
-      "output": {
-        "displayMessages": [],
-        "conversationHistory": [],
-        "removedTurns": 0
-      }
-    },
     {
       "note": "Interrupted",
       "op": "analyzeImage",
@@ -24,8 +11,7 @@
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -56,9 +42,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {
@@ -97,60 +80,6 @@
       }
     },
     {
-      "op": "settleFailedFirstAnswer",
-      "input": {
-        "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-        "sessionInstruction": "Answer the question shown in this screenshot.",
-        "partialAnswer": "Partial",
-        "errorMessage": "The API response stream was interrupted. Please try again."
-      },
-      "output": {
-        "displayMessages": [
-          {
-            "role": "assistant",
-            "content": "Partial\n\nResponse interrupted: The API response stream was interrupted. Please try again.",
-            "status": "failed"
-          }
-        ],
-        "conversationHistory": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              },
-              {
-                "type": "text",
-                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "Partial\n\nResponse interrupted: The API response stream was interrupted. Please try again."
-          }
-        ]
-      }
-    },
-    {
-      "op": "prepareAlignedConversationForNewestTurn",
-      "input": {
-        "displayMessages": [],
-        "conversationHistory": [],
-        "maxConversationTurns": 12
-      },
-      "output": {
-        "displayMessages": [],
-        "conversationHistory": [],
-        "removedTurns": 0
-      }
-    },
-    {
       "note": "Retry",
       "op": "analyzeImage",
       "input": {
@@ -160,8 +89,7 @@
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -191,9 +119,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {
@@ -227,95 +152,7 @@
       ],
       "outcome": {
         "type": "answer",
-        "text": "Complete.",
-        "history": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              },
-              {
-                "type": "text",
-                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "Complete."
-          }
-        ]
-      }
-    },
-    {
-      "op": "settleSuccessfulConversation",
-      "input": {
-        "kind": "initial",
-        "baseDisplayMessages": [],
-        "baseHistory": [],
-        "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-        "sessionInstruction": "Answer the question shown in this screenshot.",
-        "assistantText": "Complete.",
-        "providerHistory": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              },
-              {
-                "type": "text",
-                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "Complete."
-          }
-        ]
-      },
-      "output": {
-        "displayMessages": [
-          {
-            "role": "assistant",
-            "content": "Complete."
-          }
-        ],
-        "conversationHistory": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              },
-              {
-                "type": "text",
-                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "Complete."
-          }
-        ]
+        "text": "Complete."
       }
     }
   ]

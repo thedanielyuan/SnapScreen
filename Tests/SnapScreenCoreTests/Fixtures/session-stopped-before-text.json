@@ -1,19 +1,6 @@
 {
-  "description": "A first answer stopped before any text leaves a stopped marker.",
+  "description": "An answer stopped before any text; Retry resends the same request.",
   "steps": [
-    {
-      "op": "prepareAlignedConversationForNewestTurn",
-      "input": {
-        "displayMessages": [],
-        "conversationHistory": [],
-        "maxConversationTurns": 12
-      },
-      "output": {
-        "displayMessages": [],
-        "conversationHistory": [],
-        "removedTurns": 0
-      }
-    },
     {
       "note": "Stopped while thinking",
       "op": "analyzeImage",
@@ -24,8 +11,7 @@
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -56,9 +42,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {
@@ -91,149 +74,16 @@
       }
     },
     {
-      "op": "settleStoppedConversation",
-      "input": {
-        "kind": "initial",
-        "baseDisplayMessages": [],
-        "baseHistory": [],
-        "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-        "sessionInstruction": "Answer the question shown in this screenshot.",
-        "partialAnswer": ""
-      },
-      "output": {
-        "displayMessages": [
-          {
-            "role": "assistant",
-            "content": "Generation stopped."
-          }
-        ],
-        "conversationHistory": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              },
-              {
-                "type": "text",
-                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "Generation stopped."
-          }
-        ]
-      }
-    },
-    {
-      "op": "prepareAlignedConversationForNewestTurn",
-      "input": {
-        "displayMessages": [
-          {
-            "role": "assistant",
-            "content": "Generation stopped."
-          }
-        ],
-        "conversationHistory": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              },
-              {
-                "type": "text",
-                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "Generation stopped."
-          }
-        ],
-        "maxConversationTurns": 12
-      },
-      "output": {
-        "displayMessages": [
-          {
-            "role": "assistant",
-            "content": "Generation stopped."
-          }
-        ],
-        "conversationHistory": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              },
-              {
-                "type": "text",
-                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "Generation stopped."
-          }
-        ],
-        "removedTurns": 0
-      }
-    },
-    {
-      "note": "Follow-up",
-      "op": "followUp",
+      "note": "Retry",
+      "op": "analyzeImage",
       "input": {
         "apiKey": "test-key",
-        "text": "Answer it now",
-        "history": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              },
-              {
-                "type": "text",
-                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "Generation stopped."
-          }
-        ],
-        "sessionInstruction": "Answer the question shown in this screenshot.",
+        "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        "hiddenInstruction": "Answer the question shown in this screenshot.",
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -263,9 +113,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {
@@ -284,14 +131,6 @@
                   "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
                 }
               ]
-            },
-            {
-              "role": "assistant",
-              "content": "Generation stopped."
-            },
-            {
-              "role": "user",
-              "content": "Answer it now"
             }
           ]
         }
@@ -307,155 +146,7 @@
       ],
       "outcome": {
         "type": "answer",
-        "text": "Done.",
-        "history": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              },
-              {
-                "type": "text",
-                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "Generation stopped."
-          },
-          {
-            "role": "user",
-            "content": "Answer it now"
-          },
-          {
-            "role": "assistant",
-            "content": "Done."
-          }
-        ]
-      }
-    },
-    {
-      "op": "settleSuccessfulConversation",
-      "input": {
-        "kind": "follow-up",
-        "userText": "Answer it now",
-        "baseDisplayMessages": [
-          {
-            "role": "assistant",
-            "content": "Generation stopped."
-          }
-        ],
-        "baseHistory": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              },
-              {
-                "type": "text",
-                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "Generation stopped."
-          }
-        ],
-        "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-        "sessionInstruction": "Answer the question shown in this screenshot.",
-        "assistantText": "Done.",
-        "providerHistory": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              },
-              {
-                "type": "text",
-                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "Generation stopped."
-          },
-          {
-            "role": "user",
-            "content": "Answer it now"
-          },
-          {
-            "role": "assistant",
-            "content": "Done."
-          }
-        ]
-      },
-      "output": {
-        "displayMessages": [
-          {
-            "role": "assistant",
-            "content": "Generation stopped."
-          },
-          {
-            "role": "user",
-            "content": "Answer it now"
-          },
-          {
-            "role": "assistant",
-            "content": "Done."
-          }
-        ],
-        "conversationHistory": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              },
-              {
-                "type": "text",
-                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "Generation stopped."
-          },
-          {
-            "role": "user",
-            "content": "Answer it now"
-          },
-          {
-            "role": "assistant",
-            "content": "Done."
-          }
-        ]
+        "text": "Done."
       }
     }
   ]
