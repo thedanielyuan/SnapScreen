@@ -86,8 +86,7 @@ func splitNativeAnswerSegments(_ text: String) -> [NativeAnswerSegment] {
 }
 
 
-/// Selectable, read-only text. Tab moves focus instead of being swallowed by the text view, and
-/// typing while reading continues in the conversation's composer.
+/// Selectable, read-only text. Tab moves focus instead of being swallowed by the text view.
 class ReadOnlyTextView: NSTextView {
   override func keyDown(with event: NSEvent) {
     if event.keyCode == 48 && event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
@@ -95,30 +94,7 @@ class ReadOnlyTextView: NSTextView {
       else { window?.selectNextKeyView(self) }
       return
     }
-    if Self.isTyping(event), let target = typingTarget, window?.makeFirstResponder(target) == true {
-      // Redeliver through normal dispatch so the composer's input method sees the key.
-      NSApp.postEvent(event, atStart: true)
-      return
-    }
     super.keyDown(with: event)
-  }
-
-  /// Printable input without Command or Control; arrows and other function keys keep their meaning.
-  static func isTyping(_ event: NSEvent) -> Bool {
-    guard event.type == .keyDown, event.modifierFlags.intersection([.command, .control]).isEmpty,
-      let characters = event.characters, !characters.isEmpty else { return false }
-    return characters.unicodeScalars.allSatisfy {
-      !CharacterSet.controlCharacters.contains($0) && !(0xF700...0xF8FF).contains($0.value)
-    }
-  }
-
-  private var typingTarget: NSView? {
-    var view = superview
-    while let current = view {
-      if let conversation = current as? ConversationView { return conversation.focusFallback?() }
-      view = current.superview
-    }
-    return nil
   }
 
   func configureReadOnly(font: NSFont) {

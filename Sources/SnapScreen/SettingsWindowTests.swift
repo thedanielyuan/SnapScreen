@@ -75,8 +75,8 @@ func runSettingsWindowTests() throws -> Int {
   try check(settings.enteredKey.isEmpty && settings.keyField.placeholderString == "sk-ant-…" &&
     !settings.removeKeyButton.isEnabled, "with no key saved, the field is empty and Remove key is off")
   try check(settings.promptView.string == "Answer the question shown in this screenshot." &&
-    settings.inputCharactersField.stringValue == "4000" && settings.conversationTurnsField.stringValue == "12" &&
-    settings.screenshotSizeField.stringValue == "5" && settings.screenshotEdgeField.stringValue == "2576",
+    settings.inputCharactersField.stringValue == "4000" && settings.screenshotSizeField.stringValue == "5" &&
+    settings.screenshotEdgeField.stringValue == "2576",
     "new settings show the defaults")
   try check(settings.limitsSection.isHidden && settings.advancedButton.state == .off, "Advanced starts collapsed")
   try check(settings.saveButton.keyEquivalent == "\r", "Return saves")
@@ -95,39 +95,38 @@ func runSettingsWindowTests() throws -> Int {
 
   settings.promptView.string = "  Answer in French.  "
   settings.inputCharactersField.stringValue = "6000"
-  settings.conversationTurnsField.stringValue = "20"
   settings.screenshotSizeField.stringValue = "8"
   settings.screenshotEdgeField.stringValue = "4000"
   settings.save()
   try check(SessionSettings.load(from: defaults) == SessionSettings(defaultPrompt: "Answer in French.",
-    limits: SnapScreenLimits(maxInputCharacters: 6_000, maxScreenshotBytes: 8_000_000, maxScreenshotDimension: 4_000,
-      maxConversationTurns: 20)), "Save stores the trimmed prompt and the limits")
+    limits: SnapScreenLimits(maxInputCharacters: 6_000, maxScreenshotBytes: 8_000_000, maxScreenshotDimension: 4_000)),
+    "Save stores the trimmed prompt and the limits")
   settings.promptView.string = " "
   settings.save()
   try check(SessionSettings.load(from: defaults).defaultPrompt == "Answer the question shown in this screenshot.",
     "a blank prompt saves the default one")
 
-  settings.conversationTurnsField.stringValue = "1"
+  settings.screenshotEdgeField.stringValue = "100"
   settings.save()
-  try check(settings.statusLabel.stringValue == "Conversation turn limit must be a whole number from 2 to 50." &&
+  try check(settings.statusLabel.stringValue == "Screenshot edge limit must be a whole number from 512 to 8,000." &&
     settings.statusLabel.textColor == .systemRed && !settings.limitsSection.isHidden &&
     settings.advancedButton.state == .on, "a limit out of range is reported and opens Advanced")
-  try check(SessionSettings.load(from: defaults).limits.maxConversationTurns == 20, "nothing saves with a bad limit")
+  try check(SessionSettings.load(from: defaults).limits.maxScreenshotDimension == 4_000, "nothing saves with a bad limit")
   for value in ["", "2.5", "abc"] {
-    settings.conversationTurnsField.stringValue = value
+    settings.screenshotEdgeField.stringValue = value
     settings.save()
-    try check(settings.statusLabel.stringValue.hasPrefix("Conversation turn limit must"), "\"\(value)\" isn't a limit")
+    try check(settings.statusLabel.stringValue.hasPrefix("Screenshot edge limit must"), "\"\(value)\" isn't a limit")
   }
-  settings.conversationTurnsField.stringValue = "20"
+  settings.screenshotEdgeField.stringValue = "4000"
   settings.inputCharactersField.stringValue = "60000"
   settings.save()
-  try check(settings.statusLabel.stringValue == "Question character limit must be a whole number from 100 to 50,000.",
+  try check(settings.statusLabel.stringValue == "Prompt character limit must be a whole number from 100 to 50,000.",
     "limit messages group digits")
   settings.inputCharactersField.stringValue = "100"
   settings.promptView.string = String(repeating: "a", count: 101)
   settings.save()
   try check(settings.statusLabel.stringValue == "Default Prompt exceeds the 100 character limit.",
-    "a prompt longer than the question limit isn't saved")
+    "a prompt longer than its limit isn't saved")
   settings.promptView.string = String(repeating: "😀", count: 100)
   settings.save()
   try check(settings.statusLabel.stringValue == "Settings saved. Existing API key unchanged.",
@@ -198,7 +197,7 @@ func runSettingsWindowTests() throws -> Int {
   try check(closing.hasUnsavedChanges && closing.windowShouldClose(closing.window) &&
     stored() == SessionSettings(defaultPrompt: "Answer briefly.",
       limits: SnapScreenLimits(maxInputCharacters: 500, maxScreenshotBytes: before.limits.maxScreenshotBytes,
-        maxScreenshotDimension: before.limits.maxScreenshotDimension, maxConversationTurns: before.limits.maxConversationTurns)),
+        maxScreenshotDimension: before.limits.maxScreenshotDimension)),
     "closing saves an edited prompt and limit")
   let saved = stored()
   closing.screenshotEdgeField.stringValue = "9999"

@@ -14,14 +14,11 @@ public struct SnapScreenLimits: Codable, Equatable, Sendable {
   public var maxInputCharacters: Int
   public var maxScreenshotBytes: Int
   public var maxScreenshotDimension: Int
-  public var maxConversationTurns: Int
 
-  public init(maxInputCharacters: Int, maxScreenshotBytes: Int, maxScreenshotDimension: Int,
-    maxConversationTurns: Int) {
+  public init(maxInputCharacters: Int, maxScreenshotBytes: Int, maxScreenshotDimension: Int) {
     self.maxInputCharacters = maxInputCharacters
     self.maxScreenshotBytes = maxScreenshotBytes
     self.maxScreenshotDimension = maxScreenshotDimension
-    self.maxConversationTurns = maxConversationTurns
   }
 
   public static let inputCharacters = LimitConstraint(min: 100, max: 50_000, defaultValue: 4_000)
@@ -29,26 +26,23 @@ public struct SnapScreenLimits: Codable, Equatable, Sendable {
   public static let screenshotBytes = LimitConstraint(min: 1_000_000, max: 10_000_000, defaultValue: 5_000_000)
   /// 2,576 px is Opus 5.5's native long edge; 8,000 px is the API ceiling.
   public static let screenshotDimension = LimitConstraint(min: 512, max: 8_000, defaultValue: 2_576)
-  public static let conversationTurns = LimitConstraint(min: 2, max: 50, defaultValue: 12)
 
   public static let defaults = SnapScreenLimits(
     maxInputCharacters: inputCharacters.defaultValue,
     maxScreenshotBytes: screenshotBytes.defaultValue,
-    maxScreenshotDimension: screenshotDimension.defaultValue,
-    maxConversationTurns: conversationTurns.defaultValue)
+    maxScreenshotDimension: screenshotDimension.defaultValue)
 
   /// Each limit clamped to its allowed range.
   public var normalized: SnapScreenLimits {
     SnapScreenLimits(
       maxInputCharacters: Self.inputCharacters.clamped(maxInputCharacters),
       maxScreenshotBytes: Self.screenshotBytes.clamped(maxScreenshotBytes),
-      maxScreenshotDimension: Self.screenshotDimension.clamped(maxScreenshotDimension),
-      maxConversationTurns: Self.conversationTurns.clamped(maxConversationTurns))
+      maxScreenshotDimension: Self.screenshotDimension.clamped(maxScreenshotDimension))
   }
 
   var dictionary: [String: Int] {
     ["maxInputCharacters": maxInputCharacters, "maxScreenshotBytes": maxScreenshotBytes,
-     "maxScreenshotDimension": maxScreenshotDimension, "maxConversationTurns": maxConversationTurns]
+     "maxScreenshotDimension": maxScreenshotDimension]
   }
 }
 
@@ -59,8 +53,7 @@ public func normalizeLimits(_ value: Any?) -> SnapScreenLimits {
   return SnapScreenLimits(
     maxInputCharacters: normalizeInteger(stored["maxInputCharacters"], SnapScreenLimits.inputCharacters),
     maxScreenshotBytes: normalizeInteger(stored["maxScreenshotBytes"], SnapScreenLimits.screenshotBytes),
-    maxScreenshotDimension: normalizeInteger(stored["maxScreenshotDimension"], SnapScreenLimits.screenshotDimension),
-    maxConversationTurns: normalizeInteger(stored["maxConversationTurns"], SnapScreenLimits.conversationTurns))
+    maxScreenshotDimension: normalizeInteger(stored["maxScreenshotDimension"], SnapScreenLimits.screenshotDimension))
 }
 
 private func normalizeInteger(_ value: Any?, _ constraint: LimitConstraint) -> Int {
@@ -70,7 +63,7 @@ private func normalizeInteger(_ value: Any?, _ constraint: LimitConstraint) -> I
   return Int(min(Double(constraint.max), max(Double(constraint.min), number.doubleValue.rounded())))
 }
 
-/// The settings a capture keeps for its whole conversation. The API key is stored separately, in
+/// The settings a snip keeps for its answer and any Retry. The API key is stored separately, in
 /// the Keychain.
 public struct SessionSettings: Equatable, Sendable {
   public var defaultPrompt: String

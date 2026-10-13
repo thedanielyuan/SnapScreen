@@ -10,8 +10,7 @@
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -41,9 +40,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {
@@ -83,8 +79,7 @@
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -114,9 +109,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {
@@ -143,26 +135,7 @@
       ],
       "outcome": {
         "type": "answer",
-        "text": "Here:\n```python\ndef add(a, b):\n    return a\n```\n\n(Answer was cut off — ask a follow-up to continue.)",
-        "history": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "Here:\n```python\ndef add(a, b):\n    return a\n```\n\n(Answer was cut off — ask a follow-up to continue.)"
-          }
-        ]
+        "text": "Here:\n```python\ndef add(a, b):\n    return a\n```\n\n(Answer was cut off — snip a smaller region for a complete answer.)"
       }
     },
     {
@@ -174,8 +147,7 @@
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -205,9 +177,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {
@@ -234,26 +203,7 @@
       ],
       "outcome": {
         "type": "answer",
-        "text": "The first part\n\n(Answer was cut off — ask a follow-up to continue.)",
-        "history": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "The first part\n\n(Answer was cut off — ask a follow-up to continue.)"
-          }
-        ]
+        "text": "The first part\n\n(Answer was cut off — snip a smaller region for a complete answer.)"
       }
     },
     {
@@ -265,8 +215,7 @@
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -296,9 +245,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {
@@ -338,8 +284,7 @@
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -369,9 +314,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {
@@ -398,26 +340,7 @@
       ],
       "outcome": {
         "type": "answer",
-        "text": "  first\nsecond\nthird  \n",
-        "history": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "  first\nsecond\nthird  \n"
-          }
-        ]
+        "text": "  first\nsecond\nthird  \n"
       }
     }
   ]

@@ -1,8 +1,8 @@
 import CoreGraphics
 import Foundation
 
-// Snips and their conversations. The app calls a session's methods as you select, ask, stop,
-// retry and close, and its delegate receives the session's events.
+// Snips and their answers. The app calls a session's methods as you select, stop, retry and
+// close, and its delegate receives the session's events.
 
 /// A display's contents, frozen when the shortcut was pressed.
 public struct FrozenScreen: Equatable, Sendable {
@@ -33,13 +33,11 @@ public enum SessionEvent: Equatable, Sendable {
 
   /// Show the frozen screen over its display, for the user to select a region.
   case captured(FrozenScreen)
-  /// The selection, cropped and fitted to the limits. Every request in the session sends this PNG.
+  /// The selection, cropped and fitted to the limits. The answer and each Retry send this PNG.
   case accepted(Data)
-  /// A request started: the first answer, a follow-up or a Retry.
+  /// A request started: the answer or a Retry.
   case started
   case thinking
-  /// Older turns were removed to keep the screenshot and the new request within the turn limit.
-  case notice(String, removedTurns: Int)
   /// The answer so far, at most ten times a second while it streams, then once when it's done or
   /// stopped.
   case answer(String, AnswerStatus)
@@ -50,8 +48,8 @@ public enum SessionEvent: Equatable, Sendable {
   case ended
 }
 
-/// The app's windows. Calls arrive on the main actor. `select`, `ask` and `retry` report nothing
-/// before they return, so the app can update its windows after calling them.
+/// The app's windows. Calls arrive on the main actor. `select` and `retry` report nothing before
+/// they return, so the app can update its windows after calling them.
 @MainActor
 public protocol SessionControllerDelegate: AnyObject {
   func session(_ session: SnipSession, didReport event: SessionEvent)
@@ -71,9 +69,7 @@ extension SessionControllerDelegate {
 /// What a session needs from `AnthropicClient`, so tests can script answers.
 public protocol AnswerClient: Sendable {
   func analyzeImage(apiKey: String, image: Data, hiddenInstruction: String?, userQuestion: String?,
-    limits: SnapScreenLimits, handlers: StreamHandlers) async throws -> Answer
-  func followUp(apiKey: String, text: String, history: [AnthropicMessage], sessionInstruction: String?,
-    limits: SnapScreenLimits, handlers: StreamHandlers) async throws -> Answer
+    limits: SnapScreenLimits, handlers: StreamHandlers) async throws -> String
 }
 
 extension AnthropicClient: AnswerClient {}
@@ -110,9 +106,9 @@ public final class SessionController {
   let scheduler: SessionScheduler
   let cropSelection: @Sendable (CGImage, CGRect, SnapScreenLimits) async throws -> Data
 
-  /// `apiKey` is read for each request, so a key saved in Settings applies to open conversations.
-  /// An `AnthropicError` it throws, such as for a Keychain that denied access, fails that request
-  /// with its message. `settings` is read once per snip and kept for its whole conversation.
+  /// `apiKey` is read for each request, so a key saved in Settings applies to a Retry in an open
+  /// conversation. An `AnthropicError` it throws, such as for a Keychain that denied access, fails
+  /// that request with its message. `settings` is read once per snip and kept for its Retries.
   public convenience init(answers: any AnswerClient = AnthropicClient(),
     apiKey: @escaping @MainActor () throws -> String?,
     settings: @escaping @MainActor () -> SessionSettings = { SessionSettings.load() }) {
@@ -159,16 +155,16 @@ private func cropAndFit(_ image: CGImage, _ rect: CGRect, _ limits: SnapScreenLi
   }.value
 }
 
-/// One snip: its frozen screen, then its screenshot and conversation. The app calls these methods
-/// from its windows, and the session reports through the controller's delegate. When it ends, it
-/// stops any request and releases every image and all text.
+/// One snip: its frozen screen, then its screenshot and answer. The app calls these methods from
+/// its windows, and the session reports through the controller's delegate. When it ends, it stops
+/// any request and releases every image and all text.
 @MainActor
 public final class SnipSession {
   public enum Phase: Sendable {
     case capturing
     case selecting
     case cropping
-    /// Answered, so the user can ask a follow-up.
+    /// Answered.
     case ready
     case running
     case failed
@@ -181,13 +177,10 @@ public final class SnipSession {
   /// The Default Prompt and limits when the snip started.
   private(set) var settings: SessionSettings?
   private(set) var frozen: FrozenScreen?
-  /// The accepted selection, which every request sends.
+  /// The accepted selection, which the answer and each Retry send.
   private(set) var crop: Data?
-  private(set) var history: [AnthropicMessage] = []
-  private(set) var display: [DisplayMessage] = []
+  /// The request in progress.
   private(set) var generation: Generation?
-  /// The failed or stopped request that Retry sends again.
-  private(set) var retryGeneration: Generation?
   /// The capture, then the crop.
   private var setup: Task<Void, Never>?
 
@@ -196,19 +189,13 @@ public final class SnipSession {
     self.settings = settings
   }
 
-  public var canAsk: Bool { phase == .ready || phase == .failed || phase == .stopped }
-  public var canRetry: Bool { (phase == .failed || phase == .stopped) && retryGeneration != nil }
+  public var canRetry: Bool { phase == .failed || phase == .stopped }
   public var canStop: Bool { phase == .running }
-  /// The longest question the composer accepts.
-  public var maxInputCharacters: Int {
-    (settings?.limits ?? .defaults).normalized.maxInputCharacters
-  }
 
   var isAccepted: Bool { crop != nil }
 
   /// Crops the frozen screen to `rect`, given as fractions of its width and height from its
-  /// top-left corner, then asks for the first answer. Returns false unless the session is
-  /// selecting.
+  /// top-left corner, then asks for the answer. Returns false unless the session is selecting.
   @discardableResult
   public func select(_ rect: CGRect) -> Bool {
     guard phase == .selecting, let frozen, let settings, let controller else { return false }
@@ -223,46 +210,32 @@ public final class SnipSession {
         return
       }
       guard phase == .cropping else { return }
-      // Accept, and start the first answer, before reporting it. From here, a new snip leaves this
+      // Accept, and start the answer, before reporting it. From here, a new snip leaves this
       // conversation alone.
       crop = fitted
       self.frozen = nil
-      generate(userText: nil, retry: nil)
+      generate()
       report(.accepted(fitted))
     }
     return true
   }
 
-  /// Asks a question in the conversation. Returns false while a request runs or before the
-  /// selection is accepted.
-  @discardableResult
-  public func ask(_ text: String) -> Bool {
-    guard canAsk else { return false }
-    generate(userText: text, retry: nil)
-    return true
-  }
-
-  /// Sends the failed or stopped request again, building on the conversation before it.
+  /// Sends the failed or stopped request again, unchanged.
   @discardableResult
   public func retry() -> Bool {
-    guard canRetry, let retry = retryGeneration else { return false }
-    generate(userText: retry.userText, retry: retry)
+    guard canRetry else { return false }
+    generate()
     return true
   }
 
-  /// Stops the request and keeps the answer so far, which it reports before returning.
+  /// Stops the request and reports the answer so far before returning.
   @discardableResult
   public func stop() -> Bool {
-    guard phase == .running, let generation, let crop, let settings else { return false }
+    guard phase == .running, let generation else { return false }
     self.generation = nil
     generation.task?.cancel()
-    let partialAnswer = generation.relay.text
-    apply(settleStoppedConversation(kind: generation.kind, baseDisplayMessages: generation.baseDisplayMessages,
-      baseHistory: generation.baseHistory, partialAnswer: partialAnswer, image: crop, userText: generation.userText,
-      sessionInstruction: settings.defaultPrompt))
-    retryGeneration = generation
     phase = .stopped
-    report(.answer(partialAnswer, .stopped))
+    report(.answer(generation.relay.text, .stopped))
     return true
   }
 
@@ -305,10 +278,7 @@ public final class SnipSession {
     settings = nil
     frozen = nil
     crop = nil
-    history = []
-    display = []
     generation = nil
-    retryGeneration = nil
   }
 
   private func report(_ event: SessionEvent) {
@@ -320,18 +290,10 @@ public final class SnipSession {
     phase != .ended && self.generation === generation
   }
 
-  private func apply(_ state: ConversationState) {
-    history = state.conversationHistory
-    display = state.displayMessages
-  }
-
-  private func generate(userText: String?, retry: Generation?) {
+  private func generate() {
     guard phase != .ended, crop != nil else { return }
-    let baseHistory = retry?.baseHistory ?? history
-    let generation = Generation(kind: baseHistory.isEmpty ? .initial : .followUp, userText: userText,
-      baseHistory: baseHistory, baseDisplayMessages: retry?.baseDisplayMessages ?? display)
+    let generation = Generation()
     self.generation = generation
-    retryGeneration = nil
     phase = .running
     generation.task = Task { await run(generation) }
   }
@@ -344,51 +306,18 @@ public final class SnipSession {
       guard let apiKey = try controller.apiKey(), !apiKey.isEmpty else {
         throw AnthropicError("no_api_key", "Add your Anthropic API key in SnapScreen Settings, then Retry.")
       }
-      let aligned = try prepareAlignedConversationForNewestTurn(generation.baseDisplayMessages,
-        generation.baseHistory, maxConversationTurns: settings.limits.maxConversationTurns)
-      generation.baseHistory = aligned.state.conversationHistory
-      generation.baseDisplayMessages = aligned.state.displayMessages
-      if aligned.removedTurns > 0 {
-        report(.notice(describeRemovedTurns(aligned.removedTurns), removedTurns: aligned.removedTurns))
-        guard owns(generation) else { return }
-      }
-      let handlers = streamHandlers(for: generation, scheduler: controller.scheduler)
-      let answer: Answer
-      if generation.kind == .initial {
-        answer = try await controller.answers.analyzeImage(apiKey: apiKey, image: crop,
-          hiddenInstruction: settings.defaultPrompt, userQuestion: generation.userText, limits: settings.limits,
-          handlers: handlers)
-      } else {
-        answer = try await controller.answers.followUp(apiKey: apiKey, text: generation.userText ?? "",
-          history: generation.baseHistory, sessionInstruction: settings.defaultPrompt, limits: settings.limits,
-          handlers: handlers)
-      }
+      let answer = try await controller.answers.analyzeImage(apiKey: apiKey, image: crop,
+        hiddenInstruction: settings.defaultPrompt, userQuestion: nil, limits: settings.limits,
+        handlers: streamHandlers(for: generation, scheduler: controller.scheduler))
       guard owns(generation) else { return }
-      apply(settleSuccessfulConversation(kind: generation.kind, baseDisplayMessages: generation.baseDisplayMessages,
-        baseHistory: generation.baseHistory, assistantText: answer.text, image: crop, providerHistory: answer.history,
-        userText: generation.userText, sessionInstruction: settings.defaultPrompt))
       self.generation = nil
       phase = .ready
-      report(.answer(answer.text, .done))
+      report(.answer(answer, .done))
     } catch {
       guard owns(generation) else { return }
       let failure = error as? AnthropicError ?? (error as? RequestLimitError).map(AnthropicError.init)
         ?? AnthropicError("request_failed", "SnapScreen could not complete this request. Try again.")
-      // Refused text is never kept as an answer or sent back with a follow-up.
-      let partialAnswer = failure.code == "refusal" ? "" : generation.relay.text
-      if generation.kind == .initial {
-        apply(settleFailedFirstAnswer(partialAnswer: partialAnswer, errorMessage: failure.message, image: crop,
-          sessionInstruction: settings.defaultPrompt, userText: generation.userText))
-      } else {
-        // A follow-up builds on an answered history, which can't fail this check.
-        apply((try? settleFailedFollowUp(baseDisplayMessages: generation.baseDisplayMessages,
-          baseHistory: generation.baseHistory, partialAnswer: partialAnswer, errorMessage: failure.message,
-          image: crop, sessionInstruction: settings.defaultPrompt, userText: generation.userText ?? ""))?.state
-          ?? ConversationState(displayMessages: generation.baseDisplayMessages,
-            conversationHistory: generation.baseHistory))
-      }
       self.generation = nil
-      retryGeneration = generation
       phase = .failed
       report(.failed(failure))
     }
@@ -416,22 +345,11 @@ public final class SnipSession {
   }
 }
 
-/// One request, and the conversation it builds on. A failed or stopped one is kept for Retry.
+/// One request: the answer or a Retry.
 @MainActor
 final class Generation {
-  let kind: AnswerKind
-  let userText: String?
-  var baseHistory: [AnthropicMessage]
-  var baseDisplayMessages: [DisplayMessage]
   let relay = AnswerRelay()
   var task: Task<Void, Never>?
-
-  init(kind: AnswerKind, userText: String?, baseHistory: [AnthropicMessage], baseDisplayMessages: [DisplayMessage]) {
-    self.kind = kind
-    self.userText = userText
-    self.baseHistory = baseHistory
-    self.baseDisplayMessages = baseDisplayMessages
-  }
 }
 
 /// The answer text so far. The task reading the answer writes it, and the main actor reads it.

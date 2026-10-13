@@ -61,45 +61,6 @@ final class ThumbnailButton: CompanionButton {
   override var focusRingMaskBounds: NSRect { bounds }
 }
 
-/// A follow-up question, right-aligned.
-final class QuestionBubbleView: NSView {
-  let textView = ReadOnlyTextView(frame: .zero)
-  private static let padding = NSSize(width: 12, height: 8)
-  override var isFlipped: Bool { true }
-
-  init(text: String) {
-    super.init(frame: .zero)
-    textView.configureReadOnly(font: AnswerStyle.proseFont)
-    textView.textStorage?.setAttributedString(NSAttributedString(string: text, attributes: [
-      .font: AnswerStyle.proseFont, .foregroundColor: NSColor.labelColor, .paragraphStyle: AnswerStyle.proseParagraph]))
-    textView.setAccessibilityLabel("Your follow-up")
-    addSubview(textView)
-  }
-
-  required init?(coder: NSCoder) { nil }
-
-  /// Lays out the bubble for the widest allowed size and returns its frame size.
-  func size(maximumWidth: CGFloat) -> NSSize {
-    let available = max(40, maximumWidth - Self.padding.width * 2)
-    let natural = textView.textStorage?.boundingRect(with: NSSize(width: available, height: .greatestFiniteMagnitude),
-      options: [.usesLineFragmentOrigin, .usesFontLeading]).width ?? available
-    let width = min(available, ceil(natural) + 1)
-    let height = max(18, textView.measuredHeight(for: width))
-    textView.frame = NSRect(x: Self.padding.width, y: Self.padding.height, width: width, height: height)
-    return NSSize(width: width + Self.padding.width * 2, height: height + Self.padding.height * 2)
-  }
-
-  override func draw(_ dirtyRect: NSRect) {
-    Theme.bubble.setFill()
-    NSBezierPath(roundedRect: bounds, xRadius: 14, yRadius: 14).fill()
-  }
-
-  func clear() {
-    textView.string = ""
-    textView.undoManager?.removeAllActions()
-  }
-}
-
 /// Spinner first; after five seconds, a label and the elapsed time.
 final class PendingView: NSView {
   private let spinner = NSProgressIndicator()
@@ -165,7 +126,7 @@ final class PendingView: NSView {
   }
 }
 
-/// A failed request, with Retry on the newest one.
+/// A failed request, with Retry.
 final class FailureView: NSView {
   let message = NSTextField(wrappingLabelWithString: "")
   private let icon = NSImageView()
@@ -212,49 +173,19 @@ final class FailureView: NSView {
   }
 }
 
-/// A conversation-level notice, such as older turns removed to stay within the limit.
-final class NoticeView: NSView {
-  let label = NSTextField(wrappingLabelWithString: "")
-  override var isFlipped: Bool { true }
-
-  init(message: String) {
-    super.init(frame: .zero)
-    label.stringValue = message
-    label.font = .systemFont(ofSize: 11.5)
-    label.textColor = .secondaryLabelColor
-    label.alignment = .center
-    addSubview(label)
-  }
-
-  required init?(coder: NSCoder) { nil }
-
-  func height(for width: CGFloat) -> CGFloat {
-    let textWidth = max(40, width - 48)
-    let height = ceil(label.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: textWidth,
-      height: .greatestFiniteMagnitude)).height ?? 16)
-    label.frame = NSRect(x: 24, y: 0, width: textWidth, height: height)
-    return height
-  }
-}
-
 enum AnswerStatus: String { case streaming, done, stopped }
 
 enum TurnState: Equatable { case waiting, thinking, streaming, done, stopped, failed(String) }
 
-/// One exchange: an optional follow-up question, then its answer, progress, failure and actions.
+/// The snip's answer, with its progress, failure and actions.
 final class TurnView: NSView {
-  let question: String?
   private(set) var state: TurnState = .waiting
-  private let bubble: QuestionBubbleView?
   let answer = AnswerView()
   let pending = PendingView()
   let failure: FailureView
   let copyButton: ActionButton
   let retryButton: ActionButton
   private let stoppedLabel = NSTextField(labelWithString: "Stopped")
-  /// A notice about this request, such as older turns removed to make room for it.
-  private(set) var noticeView: NoticeView?
-  var isLatest = true { didSet { updateVisibility() } }
   var canRetry = false { didSet { updateVisibility() } }
   var actionsEnabled = true {
     didSet {
@@ -262,15 +193,13 @@ final class TurnView: NSView {
       answer.copyEnabled = actionsEnabled
     }
   }
-  /// The shortcut that copies this answer, while it's the newest that offers Copy.
+  /// The shortcut that copies this answer, while it offers Copy.
   var copyShortcut: String? {
     didSet { copyButton.toolTip = "Copy answer" + (copyShortcut.map { " (\($0))" } ?? "") }
   }
   override var isFlipped: Bool { true }
 
-  init(question: String?, target: AnyObject?, copy: Selector, retry: Selector) {
-    self.question = question
-    bubble = question.map { QuestionBubbleView(text: $0) }
+  init(target: AnyObject?, copy: Selector, retry: Selector) {
     failure = FailureView(target: target, retry: retry)
     copyButton = ActionButton(symbol: "doc.on.doc", label: "Copy answer", target: target, action: copy)
     retryButton = ActionButton(symbol: "arrow.clockwise", title: "Retry", label: "Retry", target: target, action: retry)
@@ -278,7 +207,6 @@ final class TurnView: NSView {
     copyButton.hoverTint = Theme.accent
     stoppedLabel.font = .systemFont(ofSize: 12)
     stoppedLabel.textColor = .secondaryLabelColor
-    if let bubble = bubble { addSubview(bubble) }
     [answer, pending, failure, copyButton, stoppedLabel, retryButton].forEach(addSubview)
     updateVisibility()
   }
@@ -327,50 +255,20 @@ final class TurnView: NSView {
     updateVisibility()
   }
 
-  func setNotice(_ message: String) {
-    if let notice = noticeView { notice.label.stringValue = message; return }
-    let notice = NoticeView(message: message)
-    addSubview(notice)
-    noticeView = notice
-  }
-
-  /// Whether the session keeps this exchange in its conversation, mirroring its settle rules:
-  /// a first answer that failed without text is cleared (the next request becomes the first),
-  /// a stopped first answer is kept, and a follow-up stopped before any text is dropped.
-  func isHeld(asFirst first: Bool) -> Bool {
-    switch state {
-    case .done: return true
-    case .stopped: return first || hasAnswerText
-    case .failed: return !first || hasAnswerText
-    case .waiting, .thinking, .streaming: return false
-    }
-  }
-
   private func updateVisibility() {
     pending.isHidden = !isPending
     if case .failed = state { failure.isHidden = false } else { failure.isHidden = true }
-    failure.retryButton.isHidden = !(isLatest && canRetry)
+    failure.retryButton.isHidden = !canRetry
     let settled = state == .done || state == .stopped || { if case .failed = state { return true } else { return false } }()
     copyButton.isHidden = !(settled && hasAnswerText)
     stoppedLabel.isHidden = state != .stopped
-    retryButton.isHidden = !(state == .stopped && isLatest && canRetry)
+    retryButton.isHidden = !(state == .stopped && canRetry)
     needsLayout = true
   }
 
   func height(for width: CGFloat) -> CGFloat {
     var y: CGFloat = 0
     func gap(_ value: CGFloat) { if y > 0 { y += value } }
-    if let notice = noticeView {
-      let height = notice.height(for: width)
-      notice.frame = NSRect(x: 0, y: y, width: width, height: height)
-      y += height
-    }
-    if let bubble = bubble {
-      gap(16)
-      let size = bubble.size(maximumWidth: (width * 0.82).rounded())
-      bubble.frame = NSRect(x: width - size.width, y: y, width: size.width, height: size.height)
-      y += size.height
-    }
     if !answer.segmentViews.isEmpty {
       gap(14)
       let height = answer.height(for: width)
@@ -413,9 +311,7 @@ final class TurnView: NSView {
   }
 
   func clear() {
-    bubble?.clear()
     answer.clear()
-    noticeView?.label.stringValue = ""
     failure.message.stringValue = ""
     for button in [copyButton, retryButton, failure.retryButton] {
       button.cancelFeedback()
@@ -425,56 +321,41 @@ final class TurnView: NSView {
   }
 }
 
-/// The scrolling thread: screenshot, answers, follow-ups, progress and failures. Streaming text is
-/// followed until the newest exchange's start reaches the top, which then stays in view as the rest
-/// arrives below; scrolling to the bottom follows again. Reading elsewhere keeps its position, and
-/// asking a question scrolls it into view.
+/// The scrolling thread: the screenshot, then its answer, progress and failure. Streaming text is
+/// followed until the answer's start reaches the top, which then stays in view as the rest arrives
+/// below; scrolling to the bottom follows again. Reading elsewhere keeps its position.
 final class ConversationView: NSView {
   let scrollView = NSScrollView(frame: .zero)
   private let document = ThreadDocumentView(frame: .zero)
   private(set) lazy var thumbnail = ThumbnailButton(target: self, action: #selector(previewPressed))
-  private(set) var turns: [TurnView] = []
+  private(set) var turn: TurnView?
   /// A hairline under the title bar, shown only while the thread is scrolled beneath it.
   private let topSeparator = NSBox()
   private var pendingTimer: Timer?
   private var layingOut = false
   var onPreview: (() -> Void)?
   var onRetry: (() -> Void)?
-  /// Where keyboard focus goes when the view holding it is removed, usually the composer.
-  var focusFallback: (() -> NSView?)?
   /// Passive panels cannot receive shortcuts, so their Copy buttons must not advertise them.
   var showsCopyShortcuts = true { didSet { updateCopyShortcuts() } }
-  var canRetry = false { didSet { turns.forEach { $0.canRetry = canRetry }; relayout() } }
+  var canRetry = false { didSet { turn?.canRetry = canRetry; relayout() } }
   var actionsEnabled = true {
     didSet {
-      turns.forEach { $0.actionsEnabled = actionsEnabled }
+      turn?.actionsEnabled = actionsEnabled
       thumbnail.isEnabled = actionsEnabled && thumbnail.screenshot != nil
     }
   }
   /// The thread's height when nothing is scrolled out of view, as last laid out.
   private(set) var contentHeight: CGFloat = 0
   static let horizontalPadding: CGFloat = 18
-  /// Above the first item and below the last, and above an exchange held at the top.
+  /// Above the first item and below the last, and above the answer when it's held at the top.
   static let verticalPadding: CGFloat = 16
   static let followThreshold: CGFloat = 24
 
-  var latestTurn: TurnView? { turns.last }
+  /// The answer while it offers Copy, which Copy Answer (⇧⌘C) copies.
+  var answerToCopy: TurnView? { turn.flatMap { $0.copyButton.isHidden ? nil : $0 } }
 
-  /// The newest answer that offers Copy, which Copy Answer (⇧⌘C) copies.
-  var answerToCopy: TurnView? { turns.last { !$0.copyButton.isHidden } }
-
-  /// The newest code block that offers Copy, which Copy Code (⌥⌘C) copies.
-  var codeToCopy: AnswerSegmentView? {
-    turns.reversed().lazy.compactMap { $0.answer.segmentViews.last { $0.copyButton?.isHidden == false } }.first
-  }
-
-  /// The earlier exchanges the session still holds, oldest first. The newest exchange is the
-  /// request in progress, so the session prunes only these.
-  var heldTurns: [TurnView] {
-    var held: [TurnView] = []
-    for turn in turns.dropLast() where turn.isHeld(asFirst: held.isEmpty) { held.append(turn) }
-    return held
-  }
+  /// The answer's last code block that offers Copy, which Copy Code (⌥⌘C) copies.
+  var codeToCopy: AnswerSegmentView? { turn?.answer.segmentViews.last { $0.copyButton?.isHidden == false } }
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -523,86 +404,49 @@ final class ConversationView: NSView {
     relayout(followBottom: false)
   }
 
-  /// Starts an exchange: the first answer (no question) or a follow-up.
-  func beginTurn(question: String?) {
-    turns.forEach { $0.isLatest = false }
-    let turn = TurnView(question: question, target: self, copy: #selector(copyPressed(_:)), retry: #selector(retryPressed))
+  /// Starts the answer, waiting for its first text.
+  func beginTurn() {
+    guard turn == nil else { return }
+    let turn = TurnView(target: self, copy: #selector(copyPressed(_:)), retry: #selector(retryPressed))
     turn.canRetry = canRetry
     turn.actionsEnabled = actionsEnabled
-    turns.append(turn)
+    self.turn = turn
     document.addSubview(turn)
     updatePendingTimer()
     relayout(scrollToBottom: true)
     window?.recalculateKeyViewLoop()
   }
 
-  func restartLatestTurn() {
-    preservingFocus { latestTurn?.restart() }
+  /// Retry starts the answer again.
+  func restartTurn() {
+    turn?.restart()
     updatePendingTimer()
     relayout(scrollToBottom: true)
   }
 
   func setThinking() {
-    guard let turn = latestTurn, turn.isPending else { return }
+    guard let turn = turn, turn.isPending else { return }
     turn.apply(.thinking)
     turn.pending.update()
   }
 
   func updateAnswer(_ text: String, status: AnswerStatus) {
-    guard let turn = latestTurn else { return }
+    guard let turn = turn else { return }
     let state: TurnState = status == .streaming ? .streaming : (status == .done ? .done : .stopped)
-    var changed = false
-    preservingFocus { changed = turn.apply(state, text: text) }
+    let changed = turn.apply(state, text: text)
     updatePendingTimer()
     relayout()
     if changed { window?.recalculateKeyViewLoop() }
   }
 
   func fail(_ message: String, clearAnswer: Bool) {
-    guard let turn = latestTurn else { return }
-    var changed = false
-    preservingFocus {
-      changed = turn.apply(.failed(message), text: clearAnswer ? "" : turn.answer.renderedText)
-    }
+    guard let turn = turn else { return }
+    let changed = turn.apply(.failed(message), text: clearAnswer ? "" : turn.answer.renderedText)
     updatePendingTimer()
     relayout()
     if changed { window?.recalculateKeyViewLoop() }
     NSAccessibility.post(element: turn.failure.message, notification: .announcementRequested,
       userInfo: [.announcement: message, .priority: NSAccessibilityPriorityLevel.high.rawValue])
-  }
-
-  /// A notice concerns the newest request, so it appears above that exchange. When the session
-  /// removed older turns to make room, the same turns leave this thread: it keeps the first
-  /// answer and drops the oldest follow-ups after it.
-  func addNotice(_ message: String, removedTurns: Int) {
-    guard let latest = latestTurn else { return }
-    if removedTurns > 0 {
-      let removed = Array(heldTurns.dropFirst().prefix(removedTurns))
-      preservingFocus {
-        for turn in removed {
-          turn.clear()
-          turn.removeFromSuperview()
-        }
-      }
-      turns.removeAll { turn in removed.contains { $0 === turn } }
-      window?.recalculateKeyViewLoop()
-    }
-    latest.setNotice(message)
-    relayout()
-  }
-
-  /// A follow-up stopped before any text is not part of the conversation; drop it before the next.
-  func removeAbandonedTurn() {
-    guard let turn = latestTurn, turn.question != nil, turn.state == .stopped else { return }
-    var held: [TurnView] = []
-    for earlier in turns.dropLast() where earlier.isHeld(asFirst: held.isEmpty) { held.append(earlier) }
-    guard !turn.isHeld(asFirst: held.isEmpty) else { return }
-    preservingFocus {
-      turn.clear()
-      turn.removeFromSuperview()
-    }
-    turns.removeLast()
-    latestTurn?.isLatest = true
   }
 
   /// Following pauses only while the reader is selecting text in the thread; text views keep an
@@ -628,27 +472,37 @@ final class ConversationView: NSView {
     defer { layingOut = false }
     let position = scrollView.contentView.bounds.origin
     let follow = scrollToBottom || (followBottom ?? (isAtBottom && !hasSelection))
-    scrollView.tile()
-    let width = max(1, scrollView.contentSize.width)
-    let inner = max(1, width - Self.horizontalPadding * 2)
-    var y = Self.verticalPadding
-    if !thumbnail.isHidden {
-      let size = thumbnail.size(for: inner)
-      thumbnail.frame = NSRect(x: width - Self.horizontalPadding - size.width, y: y, width: size.width, height: size.height)
-      y += size.height + 18
+    // Showing or hiding the scroller changes the width the thread wraps to, and the scroll view can
+    // do either once the thread's new height is in place. So it lays out again at the new width
+    // until the width holds, a pass or two at most.
+    var width: CGFloat = 0
+    for _ in 0..<3 {
+      scrollView.tile()
+      let available = max(1, scrollView.contentSize.width)
+      guard available != width else { break }
+      width = available
+      let inner = max(1, width - Self.horizontalPadding * 2)
+      var y = Self.verticalPadding
+      if !thumbnail.isHidden {
+        let size = thumbnail.size(for: inner)
+        thumbnail.frame = NSRect(x: width - Self.horizontalPadding - size.width, y: y, width: size.width,
+          height: size.height)
+        y += size.height + 18
+      }
+      if let turn = turn {
+        let height = turn.height(for: inner)
+        turn.frame = NSRect(x: Self.horizontalPadding, y: y, width: inner, height: height)
+        y += height
+      }
+      y += Self.verticalPadding
+      contentHeight = y
+      document.frame = NSRect(x: 0, y: 0, width: width, height: max(scrollView.contentSize.height, y))
+      scrollView.reflectScrolledClipView(scrollView.contentView)
     }
-    for (index, turn) in turns.enumerated() {
-      let height = turn.height(for: inner)
-      turn.frame = NSRect(x: Self.horizontalPadding, y: y, width: inner, height: height)
-      y += height + (index == turns.count - 1 ? 0 : 22)
-    }
-    y += Self.verticalPadding
-    contentHeight = y
-    document.frame = NSRect(x: 0, y: 0, width: width, height: max(scrollView.contentSize.height, y))
     let maximum = max(0, document.frame.height - scrollView.contentSize.height)
-    // Following stops where the newest exchange starts at the top, so its first lines stay in view
-    // while the rest streams in below. A reader who scrolls on past that is followed to the bottom.
-    let start = turns.last.map { max(0, $0.frame.minY - Self.verticalPadding) } ?? maximum
+    // Following stops where the answer starts at the top, so its first lines stay in view while the
+    // rest streams in below. A reader who scrolls on past that is followed to the bottom.
+    let start = turn.map { max(0, $0.frame.minY - Self.verticalPadding) } ?? maximum
     let target: CGFloat
     if scrollToBottom {
       target = min(maximum, start)
@@ -664,17 +518,15 @@ final class ConversationView: NSView {
 
   /// Names the copy shortcuts in the tooltips of the Copy buttons they press.
   private func updateCopyShortcuts() {
-    let answer = answerToCopy
+    guard let turn = turn else { return }
     let code = codeToCopy
-    for turn in turns {
-      turn.copyShortcut = showsCopyShortcuts && turn === answer ? "⇧⌘C" : nil
-      for block in turn.answer.segmentViews where block.segment.isCode {
-        block.copyShortcut = showsCopyShortcuts && block === code ? "⌥⌘C" : nil
-      }
+    turn.copyShortcut = showsCopyShortcuts && turn === answerToCopy ? "⇧⌘C" : nil
+    for block in turn.answer.segmentViews where block.segment.isCode {
+      block.copyShortcut = showsCopyShortcuts && block === code ? "⌥⌘C" : nil
     }
   }
 
-  /// Copies the newest answer, as its Copy button does. Returns false when no answer offers Copy.
+  /// Copies the answer, as its Copy button does. Returns false when it doesn't offer Copy.
   @discardableResult
   func copyLatestAnswer() -> Bool {
     guard actionsEnabled, let button = answerToCopy?.copyButton, button.isEnabled else { return false }
@@ -682,7 +534,7 @@ final class ConversationView: NSView {
     return true
   }
 
-  /// Copies the newest code block, as its Copy button does. Returns false when none offers Copy.
+  /// Copies the last code block, as its Copy button does. Returns false when none offers Copy.
   @discardableResult
   func copyLatestCode() -> Bool {
     guard actionsEnabled, let button = codeToCopy?.copyButton, button.isEnabled else { return false }
@@ -690,20 +542,12 @@ final class ConversationView: NSView {
     return true
   }
 
-  /// Removing a view that holds keyboard focus must not leave the panel without a responder.
-  private func preservingFocus(_ change: () -> Void) {
-    change()
-    if let window = window, window.firstResponder === window || window.firstResponder == nil,
-      let fallback = focusFallback?() {
-      window.makeFirstResponder(fallback)
-    }
-  }
-
   private func updatePendingTimer() {
-    let pending = turns.contains { $0.isPending }
+    let pending = turn?.isPending == true
     if pending && pendingTimer == nil {
       let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
-        self?.turns.filter { $0.isPending }.forEach { $0.pending.update() }
+        guard let turn = self?.turn, turn.isPending else { return }
+        turn.pending.update()
       }
       RunLoop.main.add(timer, forMode: .common)
       pendingTimer = timer
@@ -719,7 +563,7 @@ final class ConversationView: NSView {
 
   /// Copies exactly the answer text that was streamed, including code fences.
   @objc private func copyPressed(_ sender: ActionButton) {
-    guard actionsEnabled, let turn = turns.first(where: { $0.copyButton === sender }) else { return }
+    guard actionsEnabled, let turn = turn, turn.copyButton === sender else { return }
     let text = turn.answer.renderedText
     guard !trimProtocolText(text).isEmpty else { return }
     Clipboard.copy(text)
@@ -733,11 +577,9 @@ final class ConversationView: NSView {
     if let responder = window?.firstResponder as? NSView, responder.isDescendant(of: self) {
       window?.makeFirstResponder(nil)
     }
-    for turn in turns {
-      turn.clear()
-      turn.removeFromSuperview()
-    }
-    turns.removeAll()
+    turn?.clear()
+    turn?.removeFromSuperview()
+    turn = nil
     thumbnail.screenshot = nil
     thumbnail.reservedSize = nil
     thumbnail.isHidden = true
@@ -745,7 +587,6 @@ final class ConversationView: NSView {
     thumbnail.action = nil
     onPreview = nil
     onRetry = nil
-    focusFallback = nil
     document.frame = NSRect(origin: .zero, size: scrollView.contentSize)
     scrollView.contentView.scroll(to: .zero)
     scrollView.reflectScrolledClipView(scrollView.contentView)

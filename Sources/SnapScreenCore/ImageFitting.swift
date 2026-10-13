@@ -83,22 +83,6 @@ private func byteScale(_ bytes: Int, _ maxBytes: Int) -> Double {
   bytes > maxBytes ? (Double(maxBytes) / Double(bytes)).squareRoot() * 0.9 : 1
 }
 
-/// Fits every screenshot in a conversation, like `fitScreenshotToLimits`. History rebuilt after a
-/// first answer is stopped or interrupted holds the full-size capture. History from a completed
-/// answer already holds the fitted one, which passes through unchanged.
-public func fitHistoryScreenshotsToLimits(_ history: [AnthropicMessage], limits: SnapScreenLimits)
-  -> [AnthropicMessage] {
-  history.map { message in
-    guard case .blocks(let blocks) = message.content else { return message }
-    var fitted = message
-    fitted.content = .blocks(blocks.map { block in
-      guard case .image(let png) = block else { return block }
-      return .image(fitScreenshotToLimits(png, limits: limits))
-    })
-    return fitted
-  }
-}
-
 func decodePNG(_ png: Data) throws -> CGImage {
   guard let source = CGImageSourceCreateWithData(png as CFData, nil),
     let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { throw ImageFittingError.unreadableImage }

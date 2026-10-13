@@ -31,17 +31,6 @@ public struct StreamHandlers: Sendable {
   }
 }
 
-public struct Answer: Equatable, Sendable {
-  public let text: String
-  /// The request's messages followed by the answer, which the next follow-up sends.
-  public let history: [AnthropicMessage]
-
-  public init(text: String, history: [AnthropicMessage]) {
-    self.text = text
-    self.history = history
-  }
-}
-
 /// The Messages API client. Cancelling the calling task stops a
 /// request with `CancellationError`; every other failure is an `AnthropicError`.
 public struct AnthropicClient: Sendable {
@@ -58,11 +47,11 @@ public struct AnthropicClient: Sendable {
     self.transport = transport
   }
 
-  /// Answers a new screenshot. The Default Prompt goes with it as guidance, and a question when the
-  /// user asks one before the first answer.
+  /// Answers a screenshot. The Default Prompt goes with it as guidance, and `userQuestion` when
+  /// there is one. Returns the answer's text.
   public func analyzeImage(apiKey: String, image: Data, hiddenInstruction: String? = nil,
     userQuestion: String? = nil, limits: SnapScreenLimits = .defaults,
-    handlers: StreamHandlers = StreamHandlers()) async throws -> Answer {
+    handlers: StreamHandlers = StreamHandlers()) async throws -> String {
     let limits = limits.normalized
     do {
       try assertScreenshotWithinLimits(image, limits: limits)
@@ -76,33 +65,9 @@ public struct AnthropicClient: Sendable {
     } catch let error as RequestLimitError {
       throw AnthropicError(error)
     }
-    let messages = [AnthropicMessage(role: .user,
-      content: .blocks(createScreenshotUserContent(image, instruction: hiddenInstruction, question: userQuestion)))]
-    let text = try await answer(apiKey: apiKey, messages: messages, handlers: handlers)
-    return Answer(text: text, history: messages + [.assistant(text)])
-  }
-
-  /// Answers a follow-up. `history` is the conversation so far; its oldest turns are trimmed to fit
-  /// `maxConversationTurns`, always keeping the screenshot turn.
-  public func followUp(apiKey: String, text: String, history: [AnthropicMessage], sessionInstruction: String? = nil,
-    limits: SnapScreenLimits = .defaults, handlers: StreamHandlers = StreamHandlers()) async throws -> Answer {
-    let limits = limits.normalized
-    let retained: [AnthropicMessage]
-    do {
-      try assertUserInputWithinLimit(text, maxCharacters: limits.maxInputCharacters)
-      try assertHistoryScreenshotsWithinLimits(history, limits: limits)
-      if let sessionInstruction, !sessionInstruction.isBlank {
-        try assertUserInputWithinLimit(sessionInstruction, maxCharacters: limits.maxInputCharacters,
-          label: "Default Prompt")
-      }
-      retained = try pruneApiHistoryForNewestTurn(retainSessionGuidance(history, instruction: sessionInstruction),
-        maxConversationTurns: limits.maxConversationTurns).messages
-    } catch let error as RequestLimitError {
-      throw AnthropicError(error)
-    }
-    let messages = retained + [.user(text)]
-    let answer = try await answer(apiKey: apiKey, messages: messages, handlers: handlers)
-    return Answer(text: answer, history: messages + [.assistant(answer)])
+    let message = AnthropicMessage(role: .user,
+      content: .blocks(createScreenshotUserContent(image, instruction: hiddenInstruction, question: userQuestion)))
+    return try await answer(apiKey: apiKey, messages: [message], handlers: handlers)
   }
 
   /// Checks a key with a one-token request.
@@ -124,17 +89,14 @@ public struct AnthropicClient: Sendable {
         maxTokens: 32_000,
         // Adaptive thinking: the model reasons before answering, which math, logic and test-style
         // questions need. Thinking text is omitted by default and the stream reader skips thinking
-        // blocks, so history keeps only answer text and never replays thinking.
+        // blocks, so the answer holds only its text.
         thinking: .init(type: "adaptive"),
         // Opus 5.5 defaults to medium.
         outputConfig: .init(effort: "high"),
         fallbacks: "default",
         stream: true,
-        // Automatic prompt caching: the cache breakpoint follows the newest message, so follow-ups
-        // re-read the screenshot and earlier turns at the cache-read rate. Any change to the system
-        // prompt or earlier messages misses the cache, which is why first answers and follow-ups
-        // share one system prompt.
-        cacheControl: .init(type: "ephemeral"),
+        // No prompt caching: without follow-ups only a Retry could read a cache, which isn't worth
+        // its write cost or the longer time Anthropic would keep the screenshot.
         system: screenshotQASystemPrompt,
         messages: messages), betas: [Self.refusalFallbackBeta])
       defer { response.cancel() }
@@ -146,7 +108,7 @@ public struct AnthropicClient: Sendable {
       if cleaned.isBlank { throw AnthropicError("api", "No response text received from the API.") }
       if stopReason == "max_tokens" {
         // A cut-off can land inside a code block; close it so the notice isn't shown, or copied, as code.
-        return closeOpenCodeFence(cleaned) + "\n\n(Answer was cut off — ask a follow-up to continue.)"
+        return closeOpenCodeFence(cleaned) + "\n\n(Answer was cut off — snip a smaller region for a complete answer.)"
       }
       return cleaned
     }
@@ -243,7 +205,6 @@ private struct MessagesRequest: Encodable {
   var outputConfig: OutputConfig?
   var fallbacks: String?
   var stream: Bool?
-  var cacheControl: TypeField?
   var system: String?
   let messages: [AnthropicMessage]
 
@@ -251,7 +212,6 @@ private struct MessagesRequest: Encodable {
     case model, thinking, fallbacks, stream, system, messages
     case maxTokens = "max_tokens"
     case outputConfig = "output_config"
-    case cacheControl = "cache_control"
   }
 }
 

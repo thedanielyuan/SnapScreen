@@ -19,9 +19,6 @@ extension String {
   /// Whether `trim()` would leave nothing.
   var isBlank: Bool { unicodeScalars.allSatisfy { javaScriptWhitespace.contains($0) } }
 
-  /// JavaScript's `startsWith`, which compares code points rather than characters.
-  func jsHasPrefix(_ prefix: String) -> Bool { unicodeScalars.starts(with: prefix.unicodeScalars) }
-
   /// JavaScript's `===`. Swift's `==` also matches canonically equivalent strings.
   func jsEquals(_ other: String) -> Bool { unicodeScalars.elementsEqual(other.unicodeScalars) }
 

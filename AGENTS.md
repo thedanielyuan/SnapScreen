@@ -27,15 +27,15 @@ show for a few seconds. After changing activation, panels, notices, the menu or 
 ## Layout
 
 - `Sources/SnapScreenCore/`: the API client (`AnthropicClient`, `SSEParser`, `HTTPTransport`),
-  `SessionController`, which runs snips and their conversations and reports to the app through a
-  delegate, and the rules they share: `ConversationState`, `RequestLimits`, `ImageFitting`,
-  `SystemPrompt`, `CodeFence` and `Settings`.
+  `SessionController`, which runs snips and their answers and reports to the app through a
+  delegate, and the rules they share: `RequestLimits`, `ImageFitting`, `SystemPrompt`, `CodeFence`
+  and `Settings`.
 - `Sources/SnapScreen/`: the AppKit app. `AppDelegate`, `Hotkey` and `StatusMenu` are the shell,
   `ScreenCapturer`, `SelectionOverlay` and `SessionWindows` the snip, and `SettingsWindow`,
-  `KeychainStore` and `NoticePanel` the rest. `UI/` holds the conversation, composer, preview and
-  selection views.
-- `Tests/SnapScreenCoreTests/`: Swift Testing. `Fixtures/` holds golden requests, streams and
-  conversation states recorded from the extension's TypeScript before it was removed.
+  `KeychainStore` and `NoticePanel` the rest. `UI/` holds the conversation, preview and selection
+  views.
+- `Tests/SnapScreenCoreTests/`: Swift Testing. `Fixtures/` holds golden requests and streams
+  recorded from the extension's TypeScript before it was removed.
 - `scripts/build-app.sh` bundles and signs the app, and `scripts/test-app-live.sh` runs the live
   test. `docs/security.md` is the security and privacy contract.
 
@@ -63,12 +63,13 @@ show for a few seconds. After changing activation, panels, notices, the menu or 
   Keychain prompts turned off (`readWithoutPrompt`), and no window keeps it. Only Settings may let
   macOS ask for the login password.
 - The app captures only when you press the shortcut or choose Snip, only the display under the
-  pointer, and leaves out its own windows. Captures, crops, answers and drafts stay in memory,
-  are never written to disk or logged, and are released when their session closes.
+  pointer, and leaves out its own windows. Captures, crops and answers stay in memory, are never
+  written to disk or logged, and are released when their session closes.
 - Capture, conversation, preview and notice panels use `.nonactivatingPanel` and `orderFront(nil)`
   and can never become key or main. Never activate the app or request keyboard focus in this flow.
-  Selection and dismissal use the pointer; keyboard selection, Escape/Command-W and editable
-  follow-ups are unavailable. Keep Stop, Retry, Copy and close buttons usable without focus.
+  Selection and dismissal use the pointer; keyboard selection and Escape/Command-W are
+  unavailable, and a snip gets one answer, with no follow-ups or other text input. Keep Stop,
+  Retry, Copy and close buttons usable without focus.
   Settings is a separate foreground flow opened explicitly; a missing key shows a passive notice.
   Only Settings keeps the app active: `applicationDidBecomeActive` hands any other activation back
   after `AppDelegate.handbackDelay`, which lets a reopen claim it for Settings, and closing Settings
@@ -97,24 +98,23 @@ show for a few seconds. After changing activation, panels, notices, the menu or 
 - Adaptive thinking, effort `high`, and `max_tokens: 32_000` are deliberate for answer quality;
   don't change them casually. Keep effort explicit: Opus 5.5 defaults to `medium`.
 - Opus 5.5 always thinks: any `thinking.type` other than `'adaptive'`, even `'between_tools'`,
-  returns 400, so `verifyAPIKey`'s one-token key check sends no `thinking` field. Keep history to
-  answer text: replayed thinking would trip its history-editing check when old turns are pruned.
+  returns 400, so `verifyAPIKey`'s one-token key check sends no `thinking` field.
 - Answer requests send `fallbacks: 'default'` with the `server-side-fallback-2026-07-01` beta, so a
   refused answer continues in the same SSE stream on a model Anthropic picks, after a `fallback`
   content block the parser ignores. Categories without a fallback, such as
   `reasoning_extraction`, still end in the `refusal` error.
-- Prompt caching is automatic (top-level `cache_control`): first answers and follow-ups must send
-  the same `system` prompt and resend earlier messages unchanged, or follow-ups silently miss the
-  cache. So follow-up rules live in `SystemPrompt.swift`, never in a separate prompt or a
-  mid-conversation `system` message (not every fallback model accepts one).
+- A snip sends one request, which only Retry resends, so answers don't use prompt caching: its
+  write cost and the 5 minutes it keeps the screenshot at Anthropic aren't worth a cheaper Retry.
+  The user can't reply, so `SystemPrompt.swift` has the model state its assumptions, such as Python
+  when no language is given, rather than ask questions.
 - Answers are plain text except fenced code blocks, which `CodeFence.swift` and
   `UI/AnswerView.swift` parse for per-block Copy buttons. Change the prompt's formatting rules and
   both parsers together.
 - Thinking can stream no text for over 30 s, so `HTTPTransport`'s 60 s idle timeout must stay above
   that; its 10-minute overall timeout bounds the whole answer.
-- The golden fixtures pin request bodies, streams and conversation states, and nothing
-  regenerates them now. After an intended change to the client, conversation state, limits or
-  prompt, edit the affected fixtures by hand in the same change.
+- The golden fixtures pin request bodies and streams, and nothing regenerates them now. After an
+  intended change to the client, limits or prompt, edit the affected fixtures by hand in the same
+  change.
 - Other tests mock the API: only `LiveAPITests` catches the real API rejecting a model, beta
   header, or request field. `swift test` skips it without `SNAPSCREEN_LIVE_API_KEY`;
   `.github/workflows/live-api.yml` runs it daily. After changing any of those, ask the user before

@@ -1,19 +1,6 @@
 {
-  "description": "A first answer stopped after some text keeps it; a follow-up builds on it.",
+  "description": "An answer stopped after some text keeps it; Retry resends the same request.",
   "steps": [
-    {
-      "op": "prepareAlignedConversationForNewestTurn",
-      "input": {
-        "displayMessages": [],
-        "conversationHistory": [],
-        "maxConversationTurns": 12
-      },
-      "output": {
-        "displayMessages": [],
-        "conversationHistory": [],
-        "removedTurns": 0
-      }
-    },
     {
       "note": "Stopped after some text",
       "op": "analyzeImage",
@@ -24,8 +11,7 @@
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -56,9 +42,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {
@@ -99,149 +82,16 @@
       }
     },
     {
-      "op": "settleStoppedConversation",
-      "input": {
-        "kind": "initial",
-        "baseDisplayMessages": [],
-        "baseHistory": [],
-        "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-        "sessionInstruction": "Answer in one sentence.",
-        "partialAnswer": "Partial answer"
-      },
-      "output": {
-        "displayMessages": [
-          {
-            "role": "assistant",
-            "content": "Partial answer"
-          }
-        ],
-        "conversationHistory": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              },
-              {
-                "type": "text",
-                "text": "Screenshot task guidance:\nAnswer in one sentence."
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "Partial answer"
-          }
-        ]
-      }
-    },
-    {
-      "op": "prepareAlignedConversationForNewestTurn",
-      "input": {
-        "displayMessages": [
-          {
-            "role": "assistant",
-            "content": "Partial answer"
-          }
-        ],
-        "conversationHistory": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              },
-              {
-                "type": "text",
-                "text": "Screenshot task guidance:\nAnswer in one sentence."
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "Partial answer"
-          }
-        ],
-        "maxConversationTurns": 12
-      },
-      "output": {
-        "displayMessages": [
-          {
-            "role": "assistant",
-            "content": "Partial answer"
-          }
-        ],
-        "conversationHistory": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              },
-              {
-                "type": "text",
-                "text": "Screenshot task guidance:\nAnswer in one sentence."
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "Partial answer"
-          }
-        ],
-        "removedTurns": 0
-      }
-    },
-    {
-      "note": "Follow-up",
-      "op": "followUp",
+      "note": "Retry",
+      "op": "analyzeImage",
       "input": {
         "apiKey": "test-key",
-        "text": "Go on",
-        "history": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              },
-              {
-                "type": "text",
-                "text": "Screenshot task guidance:\nAnswer in one sentence."
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "Partial answer"
-          }
-        ],
-        "sessionInstruction": "Answer in one sentence.",
+        "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        "hiddenInstruction": "Answer in one sentence.",
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -271,9 +121,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {
@@ -292,14 +139,6 @@
                   "text": "Screenshot task guidance:\nAnswer in one sentence."
                 }
               ]
-            },
-            {
-              "role": "assistant",
-              "content": "Partial answer"
-            },
-            {
-              "role": "user",
-              "content": "Go on"
             }
           ]
         }
@@ -315,155 +154,7 @@
       ],
       "outcome": {
         "type": "answer",
-        "text": "The rest.",
-        "history": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              },
-              {
-                "type": "text",
-                "text": "Screenshot task guidance:\nAnswer in one sentence."
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "Partial answer"
-          },
-          {
-            "role": "user",
-            "content": "Go on"
-          },
-          {
-            "role": "assistant",
-            "content": "The rest."
-          }
-        ]
-      }
-    },
-    {
-      "op": "settleSuccessfulConversation",
-      "input": {
-        "kind": "follow-up",
-        "userText": "Go on",
-        "baseDisplayMessages": [
-          {
-            "role": "assistant",
-            "content": "Partial answer"
-          }
-        ],
-        "baseHistory": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              },
-              {
-                "type": "text",
-                "text": "Screenshot task guidance:\nAnswer in one sentence."
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "Partial answer"
-          }
-        ],
-        "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-        "sessionInstruction": "Answer in one sentence.",
-        "assistantText": "The rest.",
-        "providerHistory": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              },
-              {
-                "type": "text",
-                "text": "Screenshot task guidance:\nAnswer in one sentence."
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "Partial answer"
-          },
-          {
-            "role": "user",
-            "content": "Go on"
-          },
-          {
-            "role": "assistant",
-            "content": "The rest."
-          }
-        ]
-      },
-      "output": {
-        "displayMessages": [
-          {
-            "role": "assistant",
-            "content": "Partial answer"
-          },
-          {
-            "role": "user",
-            "content": "Go on"
-          },
-          {
-            "role": "assistant",
-            "content": "The rest."
-          }
-        ],
-        "conversationHistory": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              },
-              {
-                "type": "text",
-                "text": "Screenshot task guidance:\nAnswer in one sentence."
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "Partial answer"
-          },
-          {
-            "role": "user",
-            "content": "Go on"
-          },
-          {
-            "role": "assistant",
-            "content": "The rest."
-          }
-        ]
+        "text": "The rest."
       }
     }
   ]

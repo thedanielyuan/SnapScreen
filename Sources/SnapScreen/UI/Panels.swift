@@ -158,7 +158,7 @@ final class PointerShieldController {
   }
 }
 
-/// The only content left after a session ends: no screenshot, answer or draft.
+/// The only content left after a session ends: no screenshot or answer.
 final class SessionEndedView: NSView {
   let messageLabel: NSTextField
 

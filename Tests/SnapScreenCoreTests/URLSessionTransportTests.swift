@@ -62,7 +62,7 @@ private final class StubServer: URLProtocol, @unchecked Sendable {
   let answer = try await AnthropicClient(transport: transport).analyzeImage(apiKey: "key", image: pixelPNG,
     handlers: StreamHandlers(onThinking: { seen.withLock { $0.append("(thinking)") } },
       onDelta: { text in seen.withLock { $0.append(text) } }))
-  #expect(answer.text == "Hello, café")
+  #expect(answer == "Hello, café")
   #expect(seen.current == ["(thinking)", "Hello, ", "Hello, café"])
 }
 

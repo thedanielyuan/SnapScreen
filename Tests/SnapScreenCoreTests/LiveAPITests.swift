@@ -20,6 +20,6 @@ struct LiveAPITests {
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")!
     let answer = try await AnthropicClient().analyzeImage(apiKey: apiKey, image: png,
       userQuestion: "Reply with the single word OK.", limits: .defaults)
-    #expect(!answer.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    #expect(!answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
   }
 }

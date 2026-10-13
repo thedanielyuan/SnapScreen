@@ -81,9 +81,10 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
   static let defaultConversationSize = NSSize(width: 460, height: 560)
   /// The smallest content size, which a conversation opens at and can be resized to.
   static let minimumConversationSize = NSSize(width: 340, height: 280)
-  /// Between the thread and the follow-up field, and from the field to the panel's edges.
-  private static let composerGap: CGFloat = 8
-  private static let composerMargin: CGFloat = 14
+  /// From Stop to the panel's bottom and right edges, and the band it takes beneath the thread
+  /// while a request is in progress.
+  private static let stopMargin: CGFloat = 14
+  static let stopBandHeight: CGFloat = 8 + StopButton.size + stopMargin
   /// A click in another app this close to a panel, where macOS resizes it, was probably aimed at
   /// the panel, so it doesn't close it.
   static let outsideClickMargin: CGFloat = 8
@@ -98,12 +99,15 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
   private(set) var panel: CompanionPanel?
   private(set) var previewPanel: CompanionPanel?
   private(set) var conversation: ConversationView?
-  private(set) var composer: ComposerView?
+  /// Shown beneath the thread while a request is in progress.
+  private(set) var stopButton: StopButton?
+  /// The thread's bottom edge, raised above Stop while it shows.
+  private var threadBottom: NSLayoutConstraint?
   private var screenshot: NSImage?
   private let shields: PointerShieldController
   private let chosenSize: ChosenConversationSize
   private let present: @MainActor (CompanionPanel) -> Void
-  /// The conversation grows to fit its thread and draft until you resize it yourself.
+  /// The conversation grows to fit its thread until you resize it yourself.
   private(set) var fitsContent = true
   /// How tall the conversation may grow: its frame at its largest, where it was placed.
   private var largestHeight: CGFloat = 0
@@ -133,25 +137,18 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
       break
     case .thinking:
       conversation?.setThinking()
-    case .notice(let message, let removedTurns):
-      conversation?.addNotice(message, removedTurns: removedTurns)
     case .answer(let text, let status):
       conversation?.updateAnswer(text, status: AnswerStatus(status))
       if status != .streaming { announce(status == .done ? "Answer complete" : "Answer stopped") }
-      // A draft queued behind a stopped answer stays in the field, unsent.
-      if status == .stopped { composer?.cancelQueue() }
     case .failed(let error):
-      // The session drops refused text from the conversation, so the window does too.
+      // Refused text is never kept, so the window clears it.
       conversation?.fail(error.message, clearAnswer: error.code == "refusal")
-      composer?.cancelQueue()
     case .ended:
       end()
       return
     }
     updateControls()
     fitPanel()
-    // The answer a queued draft waited for has finished, so it goes now.
-    if case .answer(_, .done) = event { composer?.sendQueued() }
   }
 
   private func showOverlay(_ frozen: FrozenScreen) {
@@ -229,31 +226,29 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
     thread.translatesAutoresizingMaskIntoConstraints = false
     thread.onPreview = { [weak self] in self?.showPreview() }
     thread.onRetry = { [weak self] in self?.retryAnswer() }
-    let input = ComposerView()
-    input.isReadOnly = true
-    input.translatesAutoresizingMaskIntoConstraints = false
-    input.onSubmit = { [weak self] text in self?.ask(text) }
-    input.onStop = { [weak self] in self?.stopAnswer() }
-    input.onChange = { [weak self] in
-      self?.updateControls()
-      self?.fitPanel()
-    }
+    // Pinned to the panel's corner rather than placed after the answer, so a long answer can't
+    // scroll it out of view.
+    let stop = StopButton(target: self, action: #selector(stopPressed))
+    stop.translatesAutoresizingMaskIntoConstraints = false
     root.addSubview(thread)
-    root.addSubview(input)
+    root.addSubview(stop)
+    let bottom = thread.bottomAnchor.constraint(equalTo: root.bottomAnchor)
     NSLayoutConstraint.activate([
       thread.leadingAnchor.constraint(equalTo: root.leadingAnchor),
       thread.trailingAnchor.constraint(equalTo: root.trailingAnchor),
       thread.topAnchor.constraint(equalTo: root.topAnchor),
-      thread.bottomAnchor.constraint(equalTo: input.topAnchor, constant: -Self.composerGap),
-      input.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: Self.composerMargin),
-      input.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -Self.composerMargin),
-      input.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -Self.composerMargin),
+      bottom,
+      stop.widthAnchor.constraint(equalToConstant: StopButton.size),
+      stop.heightAnchor.constraint(equalToConstant: StopButton.size),
+      stop.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -Self.stopMargin),
+      stop.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -Self.stopMargin),
     ])
     panel = window
     conversation = thread
-    composer = input
+    stopButton = stop
+    threadBottom = bottom
     if let size = cropSize { thread.reserveScreenshot(size: size) }
-    thread.beginTurn(question: nil)
+    thread.beginTurn()
     updateControls()
     fitPanel()
     present(window)
@@ -263,26 +258,26 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
   private func updateControls() {
     conversation?.canRetry = session.canRetry
     conversation?.actionsEnabled = session.phase != .ended
-    // Not while an answer, a follow-up or Retry is running, or after one failed or stopped.
+    // Not while the answer or a Retry is running, or after one failed or stopped.
     watchOutsideClicks(panel != nil && session.phase == .ready)
-    guard let composer = composer else { return }
-    composer.maximumCharacters = session.maxInputCharacters
-    composer.isRunning = session.phase == .cropping || session.phase == .running
-    composer.canStop = session.canStop
-    composer.canSubmit = session.canAsk
+    guard let stop = stopButton else { return }
+    // Stop shows from the moment the region is selected, and can act once the request starts.
+    stop.isHidden = !(session.phase == .cropping || session.phase == .running)
+    stop.isEnabled = session.canStop
+    threadBottom?.constant = stop.isHidden ? 0 : -Self.stopBandHeight
   }
 
-  /// Grows the conversation to show its whole thread and draft, up to its largest size, until you
-  /// resize it yourself. It never shrinks, so a Retry or a sent draft doesn't make it jump.
+  /// Grows the conversation to show its whole thread, and Stop while it shows, up to its largest
+  /// size, until you resize it yourself. It never shrinks, so a Retry doesn't make it jump.
   private func fitPanel() {
     guard fitsContent, let window = panel, let root = window.contentView, let thread = conversation,
-      let input = composer else { return }
+      let stop = stopButton else { return }
     let visible = window.isVisible ? (window.screen?.visibleFrame ?? openingVisibleFrame) : openingVisibleFrame
     // Growing can hide the thread's scroller, which widens the thread: its text rewraps and its
     // thumbnail grows. So it measures again until the panel holds still, a pass or two at most.
     for _ in 0..<4 {
       root.layoutSubtreeIfNeeded()
-      let content = thread.contentHeight + Self.composerGap + input.intrinsicContentSize.height + Self.composerMargin
+      let content = thread.contentHeight + (stop.isHidden ? 0 : Self.stopBandHeight)
       let height = window.frameRect(forContentRect: NSRect(x: 0, y: 0, width: 1, height: ceil(content))).height
       let frame = grownFrame(window.frame, toHeight: height, maximumHeight: largestHeight, upward: growsUpward,
         in: visible)
@@ -292,24 +287,16 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
     root.layoutSubtreeIfNeeded()
   }
 
-  private func ask(_ text: String) {
-    guard session.ask(text) else { return }
-    conversation?.removeAbandonedTurn()
-    conversation?.beginTurn(question: text)
-    composer?.clearDraft()
-    updateControls()
-    fitPanel()
-  }
-
-  private func stopAnswer() {
+  @objc private func stopPressed() {
     guard session.stop() else { return }
     updateControls()
   }
 
   private func retryAnswer() {
     guard session.retry() else { return }
-    conversation?.restartLatestTurn()
+    conversation?.restartTurn()
     updateControls()
+    fitPanel()
   }
 
   private func showPreview() {
@@ -397,12 +384,12 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
     closeConversation()
   }
 
-  /// Edit > Copy Answer (⇧⌘C): the newest answer, as its Copy button copies it.
+  /// Edit > Copy Answer (⇧⌘C): the answer, as its Copy button copies it.
   @objc func copyAnswer(_ sender: Any?) {
     conversation?.copyLatestAnswer()
   }
 
-  /// Edit > Copy Code (⌥⌘C): the newest code block, as its Copy button copies it.
+  /// Edit > Copy Code (⌥⌘C): the answer's last code block, as its Copy button copies it.
   @objc func copyLastCode(_ sender: Any?) {
     conversation?.copyLatestCode()
   }
@@ -445,7 +432,7 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
     window.contentView = SessionEndedView(message: Self.endedMessage)
   }
 
-  /// Releases the frozen display, screenshot, conversation and draft. The session releases its own.
+  /// Releases the frozen display, screenshot and conversation. The session releases its own.
   private func clearContent() {
     watchOutsideClicks(false)
     releaseOverlay()
@@ -457,8 +444,10 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
     screenshot = nil
     conversation?.clear()
     conversation = nil
-    composer?.clear()
-    composer = nil
+    stopButton?.target = nil
+    stopButton?.action = nil
+    stopButton = nil
+    threadBottom = nil
     panel?.makeFirstResponder(nil)
     panel?.contentView = nil
   }

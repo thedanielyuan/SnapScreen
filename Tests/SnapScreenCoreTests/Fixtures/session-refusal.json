@@ -1,19 +1,6 @@
 {
-  "description": "Refused text is never kept, so the next question starts a new first request.",
+  "description": "A refused answer reports the refusal; Retry resends the same request.",
   "steps": [
-    {
-      "op": "prepareAlignedConversationForNewestTurn",
-      "input": {
-        "displayMessages": [],
-        "conversationHistory": [],
-        "maxConversationTurns": 12
-      },
-      "output": {
-        "displayMessages": [],
-        "conversationHistory": [],
-        "removedTurns": 0
-      }
-    },
     {
       "note": "Refused",
       "op": "analyzeImage",
@@ -24,8 +11,7 @@
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -55,9 +41,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {
@@ -93,44 +76,16 @@
       }
     },
     {
-      "op": "settleFailedFirstAnswer",
-      "input": {
-        "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-        "sessionInstruction": "Answer the question shown in this screenshot.",
-        "partialAnswer": "",
-        "errorMessage": "Claude declined to answer this question."
-      },
-      "output": {
-        "displayMessages": [],
-        "conversationHistory": []
-      }
-    },
-    {
-      "op": "prepareAlignedConversationForNewestTurn",
-      "input": {
-        "displayMessages": [],
-        "conversationHistory": [],
-        "maxConversationTurns": 12
-      },
-      "output": {
-        "displayMessages": [],
-        "conversationHistory": [],
-        "removedTurns": 0
-      }
-    },
-    {
-      "note": "Question",
+      "note": "Retry",
       "op": "analyzeImage",
       "input": {
         "apiKey": "test-key",
         "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
         "hiddenInstruction": "Answer the question shown in this screenshot.",
-        "userQuestion": "Try a different part",
         "limits": {
           "maxInputCharacters": 4000,
           "maxScreenshotBytes": 5000000,
-          "maxScreenshotDimension": 2576,
-          "maxConversationTurns": 12
+          "maxScreenshotDimension": 2576
         }
       },
       "response": {
@@ -160,9 +115,6 @@
           },
           "fallbacks": "default",
           "stream": true,
-          "cache_control": {
-            "type": "ephemeral"
-          },
           "system": "(system-prompt.txt)",
           "messages": [
             {
@@ -179,10 +131,6 @@
                 {
                   "type": "text",
                   "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
-                },
-                {
-                  "type": "text",
-                  "text": "Try a different part"
                 }
               ]
             }
@@ -200,108 +148,7 @@
       ],
       "outcome": {
         "type": "answer",
-        "text": "Sure.",
-        "history": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              },
-              {
-                "type": "text",
-                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
-              },
-              {
-                "type": "text",
-                "text": "Try a different part"
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "Sure."
-          }
-        ]
-      }
-    },
-    {
-      "op": "settleSuccessfulConversation",
-      "input": {
-        "kind": "initial",
-        "userText": "Try a different part",
-        "baseDisplayMessages": [],
-        "baseHistory": [],
-        "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-        "sessionInstruction": "Answer the question shown in this screenshot.",
-        "assistantText": "Sure.",
-        "providerHistory": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              },
-              {
-                "type": "text",
-                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
-              },
-              {
-                "type": "text",
-                "text": "Try a different part"
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "Sure."
-          }
-        ]
-      },
-      "output": {
-        "displayMessages": [
-          {
-            "role": "assistant",
-            "content": "Sure."
-          }
-        ],
-        "conversationHistory": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "image/png",
-                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                }
-              },
-              {
-                "type": "text",
-                "text": "Screenshot task guidance:\nAnswer the question shown in this screenshot."
-              },
-              {
-                "type": "text",
-                "text": "Try a different part"
-              }
-            ]
-          },
-          {
-            "role": "assistant",
-            "content": "Sure."
-          }
-        ]
+        "text": "Sure."
       }
     }
   ]

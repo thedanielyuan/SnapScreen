@@ -106,21 +106,3 @@ private let limits = SnapScreenLimits.defaults
   let notAPNG = Data("SOURCE".utf8)
   #expect(fitScreenshotToLimits(notAPNG, limits: limits) == notAPNG)
 }
-
-@Test func fitsOnlyOversizeScreenshotsInHistory() throws {
-  let fitting = pngHeader(width: 2_576, height: 1_000, bytes: 1_000)
-  let history: [AnthropicMessage] = [
-    AnthropicMessage(role: .user, content: .blocks([.image(makePNG(width: 2_880, height: 1_800)), .text("Guidance")])),
-    .assistant("Answer"),
-    AnthropicMessage(role: .user, content: .blocks([.image(fitting)])),
-  ]
-  let fitted = fitHistoryScreenshotsToLimits(history, limits: limits)
-  guard case .blocks(let first) = fitted[0].content, case .image(let png) = first[0] else {
-    Issue.record("The screenshot turn lost its image")
-    return
-  }
-  #expect(try size(png) == (2_576, 1_610))
-  #expect(first[1] == .text("Guidance"))
-  #expect(fitted[1] == history[1])
-  #expect(fitted[2] == history[2])
-}

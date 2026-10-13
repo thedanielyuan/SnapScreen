@@ -111,7 +111,7 @@ func runAnswerViewTests() throws -> Int {
   try check(legible, "code stays legible on its background")
   let level = { (color: NSColor) in color.usingColorSpace(.deviceRGB)!.redComponent }
   try check(level(Theme.background) < 0.06 && level(Theme.background) < level(Theme.surface) &&
-    level(Theme.surface) < level(Theme.surfaceBorder), "code and the field sit a shade lighter than the near-black window, outlined")
+    level(Theme.surface) < level(Theme.surfaceBorder), "code sits a shade lighter than the near-black window, outlined")
   // List items hang wrapped lines under their text, a little apart, and the text stays as written.
   let list = AnswerView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
   let item = "1. The first cause is long enough to wrap onto a second line at this width."
@@ -169,14 +169,5 @@ func runAnswerViewTests() throws -> Int {
   try check(view.segmentViews.isEmpty && view.renderedText.isEmpty, "clear removes answer")
   try check(canonicalBlock.textView.string.isEmpty && canonicalBlock.segment.text.isEmpty &&
     canonicalBlock.copyButton?.target == nil, "removed views release text and copy targets")
-  try check(ReadOnlyTextView.isTyping(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
-    timestamp: 0, windowNumber: 0, context: nil, characters: "a", charactersIgnoringModifiers: "a",
-    isARepeat: false, keyCode: 0)!), "printable keys continue in the composer")
-  try check(!ReadOnlyTextView.isTyping(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.command],
-    timestamp: 0, windowNumber: 0, context: nil, characters: "c", charactersIgnoringModifiers: "c",
-    isARepeat: false, keyCode: 8)!), "Command shortcuts stay with the selected text")
-  try check(!ReadOnlyTextView.isTyping(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
-    timestamp: 0, windowNumber: 0, context: nil, characters: "\u{F701}", charactersIgnoringModifiers: "\u{F701}",
-    isARepeat: false, keyCode: 125)!), "arrow keys stay with the selected text")
   return count
 }
