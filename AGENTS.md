@@ -37,7 +37,7 @@ show for a few seconds. After changing activation, panels, notices, the menu or 
 - `Tests/SnapScreenCoreTests/`: Swift Testing. `Fixtures/` holds golden requests and streams
   recorded from the extension's TypeScript before it was removed.
 - `scripts/build-app.sh` bundles and signs the app, and `scripts/test-app-live.sh` runs the live
-  test. `docs/security.md` is the security and privacy contract.
+  test.
 
 ## Conventions
 
@@ -61,10 +61,14 @@ show for a few seconds. After changing activation, panels, notices, the menu or 
 - The API key lives only in the Keychain (service `com.snapscreen.app`, account
   `anthropic-api-key`), never in files, `UserDefaults` or logs. It's read for each request, with
   Keychain prompts turned off (`readWithoutPrompt`), and no window keeps it. Only Settings may let
-  macOS ask for the login password.
+  macOS ask for the login password. The key goes only to `api.anthropic.com`.
 - The app captures only when you press the shortcut or choose Snip, only the display under the
   pointer, and leaves out its own windows. Captures, crops and answers stay in memory, are never
-  written to disk or logged, and are released when their session closes.
+  written to disk or logged, and are released when their session closes. The clipboard changes
+  only when the user chooses Copy, and tests use private pasteboards.
+- Screen Recording is the only permission. The shortcut is a Carbon hot key (`Hotkey`), which
+  needs no Accessibility or Input Monitoring. Access checks use `CGPreflightScreenCaptureAccess`,
+  which never prompts; only the Open System Settings button requests access.
 - Capture, conversation, preview and notice panels use `.nonactivatingPanel` and `orderFront(nil)`
   and can never become key or main. Never activate the app or request keyboard focus in this flow.
   Selection and dismissal use the pointer; keyboard selection and Escape/Command-W are
@@ -89,8 +93,8 @@ show for a few seconds. After changing activation, panels, notices, the menu or 
   the user is running; keep that, and don't widen what it accepts.
 - Test hooks (`SNAPSCREEN_TEST_HOOKS`) compile only into `build/test-hooks/`, which has its own
   bundle ID, and `build-app.sh` refuses a production binary that contains them.
-- `docs/security.md` is the full contract: update it when you change a boundary or how data is
-  handled. Never add a privacy section to `README.md`.
+- This section is the security and privacy contract, with no separate document: update it when
+  you change a boundary or how data is handled. Never add a privacy section to `README.md`.
 
 ## Anthropic API (`Sources/SnapScreenCore/AnthropicClient.swift`)
 
