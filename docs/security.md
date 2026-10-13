@@ -106,7 +106,10 @@ sharing, other apps, or the OS.
 
 The app takes no commands from other processes: it has no URL scheme, socket or XPC service, and
 the only Apple events it acts on are the standard ones, where reopening the app shows Settings. A
-second copy exits when it finds one running. Notices about failures before a conversation exists
+second copy exits when it finds one running. It refuses a quit event from a command-line tool or
+script, such as `osascript`, so a script or test can't quit the copy you're using: it quits when you
+choose Quit SnapScreen, when you log out, restart or shut down, and when macOS or an app, such as
+Activity Monitor, quits it. This isn't a security boundary: Force Quit and signals still end it. Notices about failures before a conversation exists
 use a panel that never activates the app or takes the keyboard.
 
 ## Tests
