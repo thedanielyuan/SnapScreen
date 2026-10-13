@@ -193,10 +193,6 @@ final class TurnView: NSView {
       answer.copyEnabled = actionsEnabled
     }
   }
-  /// The shortcut that copies this answer, while it offers Copy.
-  var copyShortcut: String? {
-    didSet { copyButton.toolTip = "Copy answer" + (copyShortcut.map { " (\($0))" } ?? "") }
-  }
   override var isFlipped: Bool { true }
 
   init(target: AnyObject?, copy: Selector, retry: Selector) {
@@ -336,7 +332,6 @@ final class ConversationView: NSView {
   var onPreview: (() -> Void)?
   var onRetry: (() -> Void)?
   /// Passive panels cannot receive shortcuts, so their Copy buttons must not advertise them.
-  var showsCopyShortcuts = true { didSet { updateCopyShortcuts() } }
   var canRetry = false { didSet { turn?.canRetry = canRetry; relayout() } }
   var actionsEnabled = true {
     didSet {
@@ -351,10 +346,7 @@ final class ConversationView: NSView {
   static let verticalPadding: CGFloat = 16
   static let followThreshold: CGFloat = 24
 
-  /// The answer while it offers Copy, which Copy Answer (⇧⌘C) copies.
-  var answerToCopy: TurnView? { turn.flatMap { $0.copyButton.isHidden ? nil : $0 } }
-
-  /// The answer's last code block that offers Copy, which Copy Code (⌥⌘C) copies.
+  /// The answer's last code block that offers Copy.
   var codeToCopy: AnswerSegmentView? { turn?.answer.segmentViews.last { $0.copyButton?.isHidden == false } }
 
   override init(frame frameRect: NSRect) {
@@ -513,33 +505,6 @@ final class ConversationView: NSView {
     }
     scrollView.contentView.scroll(to: NSPoint(x: 0, y: target))
     scrollView.reflectScrolledClipView(scrollView.contentView)
-    updateCopyShortcuts()
-  }
-
-  /// Names the copy shortcuts in the tooltips of the Copy buttons they press.
-  private func updateCopyShortcuts() {
-    guard let turn = turn else { return }
-    let code = codeToCopy
-    turn.copyShortcut = showsCopyShortcuts && turn === answerToCopy ? "⇧⌘C" : nil
-    for block in turn.answer.segmentViews where block.segment.isCode {
-      block.copyShortcut = showsCopyShortcuts && block === code ? "⌥⌘C" : nil
-    }
-  }
-
-  /// Copies the answer, as its Copy button does. Returns false when it doesn't offer Copy.
-  @discardableResult
-  func copyLatestAnswer() -> Bool {
-    guard actionsEnabled, let button = answerToCopy?.copyButton, button.isEnabled else { return false }
-    button.performClick(nil)
-    return true
-  }
-
-  /// Copies the last code block, as its Copy button does. Returns false when none offers Copy.
-  @discardableResult
-  func copyLatestCode() -> Bool {
-    guard actionsEnabled, let button = codeToCopy?.copyButton, button.isEnabled else { return false }
-    button.performClick(nil)
-    return true
   }
 
   private func updatePendingTimer() {

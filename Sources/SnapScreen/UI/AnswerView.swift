@@ -86,17 +86,8 @@ func splitNativeAnswerSegments(_ text: String) -> [NativeAnswerSegment] {
 }
 
 
-/// Selectable, read-only text. Tab moves focus instead of being swallowed by the text view.
+/// Selectable, read-only text.
 class ReadOnlyTextView: NSTextView {
-  override func keyDown(with event: NSEvent) {
-    if event.keyCode == 48 && event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
-      if event.modifierFlags.contains(.shift) { window?.selectPreviousKeyView(self) }
-      else { window?.selectNextKeyView(self) }
-      return
-    }
-    super.keyDown(with: event)
-  }
-
   func configureReadOnly(font: NSFont) {
     isEditable = false
     isSelectable = true
@@ -159,8 +150,8 @@ enum AnswerStyle {
   }
 }
 
-/// Each segment keeps its text view while streaming, so selections, keyboard focus and copy
-/// targets survive incremental snapshots. Text storage contains literal strings, never markup.
+/// Each segment keeps its text view while streaming, so selections and copy targets survive
+/// incremental snapshots. Text storage contains literal strings, never markup.
 final class AnswerSegmentView: NSView {
   private(set) var segment: NativeAnswerSegment
   let textView = ReadOnlyTextView(frame: .zero)
@@ -174,8 +165,6 @@ final class AnswerSegmentView: NSView {
   /// A streaming code block has no Copy control until its fence closes or the answer ends.
   var answerIsFinal = false { didSet { updateCopyVisibility() } }
   var copyEnabled = true { didSet { copyButton?.isEnabled = copyEnabled } }
-  /// The shortcut that copies this block, while it's the newest that offers Copy.
-  var copyShortcut: String? { didSet { updateCopyTooltip() } }
   private var copyLabel = "Copy code"
   override var isFlipped: Bool { true }
 
@@ -248,13 +237,9 @@ final class AnswerSegmentView: NSView {
       textView.setAccessibilityLabel(language.isEmpty ? "Code block" : "\(language) code block")
       copyLabel = language.isEmpty ? "Copy code" : "Copy \(language) code"
       copyButton?.setAccessibilityLabel(copyLabel)
-      updateCopyTooltip()
+      copyButton?.toolTip = copyLabel
     }
     updateCopyVisibility()
-  }
-
-  private func updateCopyTooltip() {
-    copyButton?.toolTip = copyLabel + (copyShortcut.map { " (\($0))" } ?? "")
   }
 
   private func updateCopyVisibility() {

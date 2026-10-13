@@ -186,18 +186,15 @@ func runSessionWindowsTests() throws -> Int {
   windows.previewPanel?.performClose(nil)
   try check(windows.previewPanel == nil && windows.panel === panel, "closing the preview keeps the conversation")
 
-  // Copy actions find the answer and its code block without a key window. These checks write to a
-  // private pasteboard, never the clipboard.
+  // The Copy buttons work in a panel that never becomes key. These checks write to a private
+  // pasteboard, never the clipboard.
   let general = Clipboard.pasteboard
   let pasteboard = NSPasteboard(name: NSPasteboard.Name("com.snapscreen.self-test.\(UUID().uuidString)"))
   Clipboard.pasteboard = pasteboard
-  func enables(_ action: Selector) -> Bool { windows.validateMenuItem(NSMenuItem(title: "", action: action, keyEquivalent: "")) }
-  try check(enables(#selector(SessionWindows.copyAnswer(_:))) && enables(#selector(SessionWindows.copyLastCode(_:))),
-    "Copy Answer and Copy Code are available")
-  windows.copyAnswer(nil)
-  try check(pasteboard.string(forType: .string) == SelfTestAnswers.codeAnswer, "Copy Answer copies the answer")
-  windows.copyLastCode(nil)
-  try check(pasteboard.string(forType: .string) == "print(1)", "Copy Code copies its code block")
+  windows.conversation?.turn?.copyButton.performClick(nil)
+  try check(pasteboard.string(forType: .string) == SelfTestAnswers.codeAnswer, "Copy copies the answer")
+  windows.conversation?.codeToCopy?.copyButton?.performClick(nil)
+  try check(pasteboard.string(forType: .string) == "print(1)", "a code block's Copy copies its code")
   Clipboard.pasteboard = general
   pasteboard.releaseGlobally()
 
@@ -207,8 +204,6 @@ func runSessionWindowsTests() throws -> Int {
     windows.stopButton == nil &&
     (windows.panel?.contentView as? SessionEndedView)?.messageLabel.stringValue == SessionWindows.endedMessage,
     "an ended session keeps no screenshot or answer")
-  try check(!enables(#selector(SessionWindows.copyAnswer(_:))) && !enables(#selector(SessionWindows.copyLastCode(_:))),
-    "an ended session has nothing to copy")
   windows.panel?.performClose(nil)
   try check(windows.session.phase == .ended && windows.panel == nil && snips.sessions.isEmpty,
     "closing the conversation ends the session")
@@ -332,7 +327,7 @@ func runSessionWindowsTests() throws -> Int {
   guard let selecting = snip() else { throw SessionWindowsTestError.failed("another snip") }
   try check(selecting.overlay != nil && finished.panel === finishedPanel && finished.dismissesOnOutsideClick &&
     snips.sessions.count == 2, "a new snip leaves a finished conversation open and dismissible while you select")
-  selecting.overlay?.closeAction?()
+  selecting.selectionView?.onCancel?()
   try check(snips.sessions.count == 1 && finished.panel === finishedPanel && finished.dismissesOnOutsideClick,
     "cancelling the new snip leaves it as it was")
 

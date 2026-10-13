@@ -121,37 +121,33 @@ func runConversationViewTests() throws -> Int {
     "streaming follows the bottom once the reader goes there")
   try check(reader.contentHeight == scroll.documentView!.frame.height, "the thread reports its unscrolled height")
 
-  // ⇧⌘C and ⌥⌘C press the answer's Copy buttons. These checks write to a private pasteboard, never
-  // the clipboard.
+  // The answer's and code blocks' Copy buttons. These checks write to a private pasteboard, never the
+  // clipboard.
   let general = Clipboard.pasteboard
   let pasteboard = NSPasteboard(name: NSPasteboard.Name("com.snapscreen.self-test.\(UUID().uuidString)"))
   Clipboard.pasteboard = pasteboard
   let copier = ConversationView(frame: NSRect(x: 0, y: 0, width: 460, height: 300))
   copier.beginTurn()
-  try check(copier.answerToCopy == nil && !copier.copyLatestAnswer() && !copier.copyLatestCode(),
-    "nothing is copied while the answer is pending")
+  try check(copier.turn!.copyButton.isHidden && copier.codeToCopy == nil, "nothing offers Copy while the answer is pending")
   copier.updateAnswer("Streaming", status: .streaming)
-  try check(copier.answerToCopy == nil && !copier.copyLatestAnswer(), "nothing is copied while the answer streams")
+  try check(copier.turn!.copyButton.isHidden, "the answer doesn't offer Copy while it streams")
   let coded = "First\n```js\none()\n```\nThen\n```py\ntwo()\n```"
   copier.updateAnswer(coded, status: .done)
-  try check(copier.copyLatestAnswer() && pasteboard.string(forType: .string) == coded, "⇧⌘C copies the answer")
-  try check(copier.copyLatestCode() && pasteboard.string(forType: .string) == "two()", "⌥⌘C copies the last code block")
+  copier.turn!.copyButton.performClick(nil)
+  try check(pasteboard.string(forType: .string) == coded, "Copy copies the answer")
+  copier.codeToCopy?.copyButton?.performClick(nil)
+  try check(pasteboard.string(forType: .string) == "two()", "the last code block's Copy copies its code")
   let blocks = copier.turn!.answer.segmentViews
-  try check(copier.turn!.copyButton.toolTip == "Copy answer (⇧⌘C)" && blocks[3].copyButton?.toolTip == "Copy py code (⌥⌘C)" &&
-    blocks[1].copyButton?.toolTip == "Copy js code", "tooltips name the shortcuts on the buttons they press")
-  copier.showsCopyShortcuts = false
-  try check(copier.turn!.copyButton.toolTip == "Copy answer" && blocks[3].copyButton?.toolTip == "Copy py code",
-    "passive panels remove existing keyboard shortcut hints")
+  try check(copier.turn!.copyButton.toolTip == "Copy answer" && blocks[3].copyButton?.toolTip == "Copy py code" &&
+    blocks[1].copyButton?.toolTip == "Copy js code", "each Copy button names what it copies")
   copier.restartTurn()
   copier.updateAnswer("```swift\nlet answer = 42\n```", status: .done)
-  try check(copier.turn?.copyButton.toolTip == "Copy answer" &&
-    copier.turn?.answer.segmentViews.first?.copyButton?.toolTip == "Copy swift code",
-    "a retried answer keeps keyboard shortcut hints hidden in passive panels")
-  try check(copier.copyLatestAnswer() && pasteboard.string(forType: .string) == "```swift\nlet answer = 42\n```" &&
-    copier.copyLatestCode() && pasteboard.string(forType: .string) == "let answer = 42",
-    "passive panels retain their answer and code Copy button actions")
+  copier.codeToCopy?.copyButton?.performClick(nil)
+  try check(copier.codeToCopy?.copyButton?.toolTip == "Copy swift code" &&
+    pasteboard.string(forType: .string) == "let answer = 42", "a retried answer's code block offers Copy")
   copier.actionsEnabled = false
-  try check(!copier.copyLatestAnswer() && !copier.copyLatestCode(), "an ended session copies nothing")
+  try check(copier.turn?.copyButton.isEnabled == false && copier.codeToCopy?.copyButton?.isEnabled == false,
+    "an ended session copies nothing")
   copier.clear()
   Clipboard.pasteboard = general
   pasteboard.releaseGlobally()
@@ -209,51 +205,6 @@ func runConversationViewTests() throws -> Int {
   try check(iconsCentred, "Stop is a 32-point circle with its square centred, enabled or not")
   try check(stopButton.accessibilityLabel() == "Stop answer" && stopButton.toolTip == "Stop answer",
     "Stop is named for VoiceOver and the pointer")
-
-  // Escape and Command-W close on key release, so the release can't reach the app beneath.
-  final class CloseCounter: NSObject, NSWindowDelegate {
-    var count = 0
-    func windowShouldClose(_ sender: NSWindow) -> Bool { count += 1; return false }
-  }
-  let panel = CompanionPanel(contentRect: NSRect(x: 0, y: 0, width: 200, height: 120),
-    styleMask: [.titled, .closable, .nonactivatingPanel], backing: .buffered, defer: false)
-  let counter = CloseCounter()
-  panel.delegate = counter
-  func key(_ type: NSEvent.EventType, _ code: UInt16, _ characters: String, _ flags: NSEvent.ModifierFlags = []) -> NSEvent {
-    NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: panel.windowNumber,
-      context: nil, characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code)!
-  }
-  panel.sendEvent(key(.keyDown, 53, "\u{1B}"))
-  try check(counter.count == 0, "Escape does not close on key down")
-  panel.sendEvent(key(.keyDown, 0, "a"))
-  try check(counter.count == 0, "keys pressed while Escape is held are ignored")
-  NSApp.sendEvent(key(.keyUp, 53, "\u{1B}"))
-  try check(counter.count == 1, "Escape closes on release")
-  try check(panel.performKeyEquivalent(with: key(.keyDown, 13, "w", .command)) && counter.count == 1,
-    "Command-W is claimed on key down without closing")
-  // AppKit never dispatches a key-up with Command held to a window; the release must still close.
-  NSApp.sendEvent(key(.keyUp, 13, "w", .command))
-  try check(counter.count == 2, "Command-W closes on release while Command is held")
-  NSApp.sendEvent(key(.keyUp, 13, "w", .command))
-  try check(counter.count == 2, "a later release does not close again")
-  // The File menu's Close arrives as performClose during the key press, on any keyboard layout.
-  panel.performClose(nil, during: key(.keyDown, 13, "w", .command))
-  try check(counter.count == 2, "a menu close from the keyboard waits for release")
-  NSApp.sendEvent(key(.keyUp, 13, "w", .command))
-  try check(counter.count == 3, "the menu close completes on release")
-  panel.performClose(nil, during: NSEvent.mouseEvent(with: .leftMouseUp, location: .zero, modifierFlags: [],
-    timestamp: 0, windowNumber: panel.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
-  try check(counter.count == 4, "the close button closes at once")
-  panel.sendEvent(key(.keyDown, 53, "\u{1B}"))
-  panel.resignKey()
-  // The close is queued on the main queue. Wait for it rather than a fixed slice, since slow CI
-  // runners can miss a short one, but stop well before the 4 s release fallback could close it.
-  let resignDeadline = Date(timeIntervalSinceNow: 1)
-  while counter.count < 5, Date() < resignDeadline {
-    RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.01))
-  }
-  try check(counter.count == 5, "losing the keyboard while Escape is held closes, since the release cannot arrive")
-  panel.delegate = nil
 
   // Window geometry.
   let natural = imageWindowContentSize(CGSize(width: 1600, height: 1000), backingScale: 2,

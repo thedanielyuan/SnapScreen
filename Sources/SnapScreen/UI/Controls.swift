@@ -44,105 +44,10 @@ enum Clipboard {
   }
 }
 
-/// Capture panels never activate SnapScreen or take the keyboard, including when clicked.
-/// Settings uses a separate foreground NSWindow. Keyboard-close handling is retained for actions
-/// dispatched by accessibility clients and the view tests, not for global key interception.
-final class CompanionPanel: PassivePanel {
-  private var closingKey: UInt16?
-  private var closeFallback: Timer?
-  private var releaseMonitor: Any?
-  /// Replaces `performClose`, which never reaches the delegate of a window without a close
-  /// button, such as the borderless selection overlay.
-  var closeAction: (() -> Void)?
-
-  /// Closes now for pointer actions; for a key press, closes when that key is released.
-  func closeAfterKeyRelease(_ event: NSEvent?) {
-    guard closingKey == nil else { return }
-    guard let event = event, event.type == .keyDown else { closeNow(nil); return }
-    closingKey = event.keyCode
-    // NSApplication never dispatches a key-up while Command is held, but local monitors see it.
-    releaseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
-      guard let self = self, let key = self.closingKey else { return event }
-      if event.keyCode == key {
-        if event.type == .keyUp { self.finishKeyClose() } else { self.armCloseFallback() }
-      }
-      // Nothing typed while the key is held goes anywhere.
-      return nil
-    }
-    armCloseFallback()
-  }
-
-  /// Only for a release that never arrives; each auto-repeat of the held key restarts it.
-  private func armCloseFallback() {
-    closeFallback?.invalidate()
-    let timer = Timer(timeInterval: 4, repeats: false) { [weak self] _ in self?.finishKeyClose() }
-    RunLoop.main.add(timer, forMode: .common)
-    closeFallback = timer
-  }
-
-  private func endKeyClose() {
-    closingKey = nil
-    closeFallback?.invalidate()
-    closeFallback = nil
-    if let monitor = releaseMonitor { NSEvent.removeMonitor(monitor) }
-    releaseMonitor = nil
-  }
-
-  private func finishKeyClose() {
-    guard closingKey != nil else { return }
-    endKeyClose()
-    closeNow(nil)
-  }
-
-  private func closeNow(_ sender: Any?) {
-    if let closeAction = closeAction { closeAction() } else { super.performClose(sender) }
-  }
-
-  override func sendEvent(_ event: NSEvent) {
-    if closingKey != nil, event.type == .keyDown || event.type == .keyUp { return }
-    if event.type == .keyDown, event.keyCode == 53,
-      event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
-      !((firstResponder as? NSTextView)?.hasMarkedText() ?? false) {
-      // An input method uses Escape to cancel composition; otherwise Escape closes this window.
-      closeAfterKeyRelease(event)
-      return
-    }
-    super.sendEvent(event)
-  }
-
-  override func performKeyEquivalent(with event: NSEvent) -> Bool {
-    if event.type == .keyDown, event.modifierFlags.intersection([.command, .control, .option, .shift]) == .command,
-      event.charactersIgnoringModifiers?.lowercased() == "w" {
-      closeAfterKeyRelease(event)
-      return true
-    }
-    return super.performKeyEquivalent(with: event)
-  }
-
-  /// The File menu's Close (Command-W on any keyboard layout) and Command-period also wait for release.
-  override func performClose(_ sender: Any?) { performClose(sender, during: NSApp.currentEvent) }
-
-  func performClose(_ sender: Any?, during event: NSEvent?) {
-    if let event = event, event.type == .keyDown, event.window === self || event.window == nil {
-      closeAfterKeyRelease(event)
-    } else {
-      closeNow(sender)
-    }
-  }
-
-  override func cancelOperation(_ sender: Any?) { performClose(sender) }
-
-  /// Once another window has the keyboard, the release can no longer arrive here.
-  override func resignKey() {
-    super.resignKey()
-    if closingKey != nil { DispatchQueue.main.async { [weak self] in self?.finishKeyClose() } }
-  }
-
-  override func close() {
-    endKeyClose()
-    super.close()
-  }
-}
+/// A snip's panels: the selection overlay, the conversation and the screenshot preview. Like every
+/// capture panel, they never activate SnapScreen or take the keyboard, including when clicked, so
+/// they close only from the pointer. Settings uses a separate foreground NSWindow.
+final class CompanionPanel: PassivePanel {}
 
 /// Keep native actions reachable with Tab even when macOS Full Keyboard Access is off.
 class CompanionButton: NSButton {

@@ -75,7 +75,7 @@ final class ChosenConversationSize {
 /// grows to fit its thread until you resize it. Once its answer has finished, a click in another
 /// app closes the conversation and preview. Selecting a region in a new snip closes them too.
 @MainActor
-final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
+final class SessionWindows: NSObject, NSWindowDelegate {
   static let endedMessage = "Snip again to start a new capture."
   /// A conversation's largest content size, until you choose one by resizing a conversation.
   static let defaultConversationSize = NSSize(width: 460, height: 560)
@@ -159,7 +159,6 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
       return
     }
     let window = SelectionOverlay.make(covering: screen)
-    window.closeAction = { [weak self] in self?.cancelSelection() }
     window.delegate = self
     let view = SelectionView(frame: NSRect(origin: .zero, size: screen.frame.size))
     view.fillsBounds = true
@@ -198,7 +197,6 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
     selectionView?.onCancel = nil
     selectionView?.onConfirm = nil
     selectionView = nil
-    overlay?.closeAction = nil
     overlay?.delegate = nil
     overlay?.contentView = nil
     overlay?.close()
@@ -222,7 +220,6 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
     let root = NSView()
     window.contentView = root
     let thread = ConversationView()
-    thread.showsCopyShortcuts = false
     thread.translatesAutoresizingMaskIntoConstraints = false
     thread.onPreview = { [weak self] in self?.showPreview() }
     thread.onRetry = { [weak self] in self?.retryAnswer() }
@@ -382,24 +379,6 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
     else { return }
     // Every capture panel permanently refuses the keyboard, including during this close.
     closeConversation()
-  }
-
-  /// Edit > Copy Answer (⇧⌘C): the answer, as its Copy button copies it.
-  @objc func copyAnswer(_ sender: Any?) {
-    conversation?.copyLatestAnswer()
-  }
-
-  /// Edit > Copy Code (⌥⌘C): the answer's last code block, as its Copy button copies it.
-  @objc func copyLastCode(_ sender: Any?) {
-    conversation?.copyLatestCode()
-  }
-
-  func validateMenuItem(_ item: NSMenuItem) -> Bool {
-    switch item.action {
-    case #selector(copyAnswer(_:)): return conversation?.answerToCopy != nil
-    case #selector(copyLastCode(_:)): return conversation?.codeToCopy != nil
-    default: return true
-    }
   }
 
   func windowWillStartLiveResize(_ notification: Notification) {
