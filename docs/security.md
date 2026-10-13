@@ -1,7 +1,7 @@
 # Security and privacy
 
 How SnapScreen handles your API key and screen captures, and how it keeps out of the way of the
-app you snip. The [privacy policy](../PRIVACY.md) is the short version.
+app you snip.
 
 ## API key
 
