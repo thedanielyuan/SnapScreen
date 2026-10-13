@@ -134,10 +134,21 @@ func runAppShellTests() throws -> Int {
   try check(store.hasKey && (try store.read()) == "sk-ant-self-test-first", "a saved key reads back from the Keychain")
   try store.save("sk-ant-self-test-second")
   try check((try store.read()) == "sk-ant-self-test-second", "saving again replaces the key")
+  // The item trusts the binary that saved it, so it reads without asking.
+  try check(KeychainPrompts.canDisallow && KeychainPrompts.areAllowed == true &&
+    (try store.readWithoutPrompt()) == "sk-ant-self-test-second" && KeychainPrompts.areAllowed == true,
+    "answers read the key with Keychain prompts turned off, then turn them back on")
+  try check(KeychainPrompts.disallowed { KeychainPrompts.areAllowed } == false,
+    "Keychain prompts are off while an answer reads the key")
   try store.remove()
-  try check(!store.hasKey && (try store.read()) == nil, "Remove key deletes the Keychain item")
+  try check(!store.hasKey && (try store.read()) == nil && (try store.readWithoutPrompt()) == nil,
+    "Remove key deletes the Keychain item")
   try store.remove()
   try check(KeychainError(operation: .read, status: errSecAuthFailed).message ==
     "Couldn't read the API key from your Keychain because access was denied.", "a denied Keychain read is explained")
+  try check([errSecAuthFailed, errSecInteractionNotAllowed].allSatisfy {
+    KeychainError(operation: .readWithoutPrompt, status: $0).message ==
+      "Open SnapScreen Settings to allow access to your API key in the Keychain, then Retry."
+  }, "an answer that would need a Keychain prompt sends you to Settings instead")
   return count
 }

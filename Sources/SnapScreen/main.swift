@@ -45,6 +45,8 @@ if CommandLine.arguments.contains("--focus-target") {
   delegate = MainActor.assumeIsolated { LiveFocusTarget() }
 } else if CommandLine.arguments.contains("--focus-test") {
   delegate = MainActor.assumeIsolated { LiveFocusTest() }
+} else if CommandLine.arguments.contains("--focus-app") {
+  delegate = AppDelegate(services: .focusTest)
 } else if CommandLine.arguments.contains("--live-test") {
   delegate = MainActor.assumeIsolated { LiveTest() }
 } else {
