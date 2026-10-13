@@ -107,6 +107,9 @@ show for a few seconds. After changing activation, panels, notices, the menu or 
   write cost and the 5 minutes it keeps the screenshot at Anthropic aren't worth a cheaper Retry.
   The user can't reply, so `SystemPrompt.swift` has the model state its assumptions, such as Python
   when no language is given, rather than ask questions.
+- Answers lead with the result and add at most one short reason, with working only when asked:
+  the model reasons before it replies, so visible working only adds length. Shorten answers in
+  `SystemPrompt.swift`, not with effort, which mostly changes how much the model thinks.
 - Answers are plain text except fenced code blocks, which `CodeFence.swift` and
   `UI/AnswerView.swift` parse for per-block Copy buttons. Change the prompt's formatting rules and
   both parsers together.
