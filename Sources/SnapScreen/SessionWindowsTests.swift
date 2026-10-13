@@ -83,12 +83,15 @@ func runSessionWindowsTests() throws -> Int {
   let overlay = SelectionOverlay.make(covering: screen)
   try check(!overlay.isOpaque && overlay.backgroundColor == .clear && !overlay.hasShadow,
     "the overlay is non-opaque, so Chrome doesn't mark the page as hidden")
-  try check(overlay.styleMask == [.borderless, .nonactivatingPanel] && !overlay.canBecomeKey && !overlay.canBecomeMain &&
-    !overlay.hidesOnDeactivate, "the overlay cannot take the keyboard or activate SnapScreen")
+  try check(overlay.styleMask == [.borderless, .nonactivatingPanel] && hasPassivePanelConfiguration(overlay),
+    "the selection overlay cannot take the keyboard or activate SnapScreen")
   try check(overlay.frame == screen.frame && overlay.level == .screenSaver &&
     overlay.collectionBehavior.contains([.canJoinAllSpaces, .fullScreenAuxiliary]),
     "the overlay covers its whole display, above the menu bar and fullscreen apps")
   try check(BackgroundCursor.isAvailable, "the overlay can show its crosshair while SnapScreen isn't frontmost")
+  let shield = PointerShield(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+  try check(hasPassivePanelConfiguration(shield) && shield.level == .floating,
+    "the pointer shield inherits the passive panel behavior even without an explicit style flag")
 
   let answers = SelfTestAnswers()
   let slot = KeySlot()
@@ -166,8 +169,8 @@ func runSessionWindowsTests() throws -> Int {
   guard let panel = windows.panel, let thread = windows.conversation else {
     throw SessionWindowsTestError.failed("the conversation stays open")
   }
-  try check(!panel.canBecomeKey && !panel.canBecomeMain && panel.styleMask.contains(.nonactivatingPanel) &&
-    panel.level == .floating, "the conversation is a floating panel that cannot take keyboard focus")
+  try check(hasPassivePanelConfiguration(panel) && panel.level == .floating,
+    "the conversation is a floating panel that cannot take keyboard focus")
   func fitsThread() -> Bool { thread.scrollView.documentView!.frame.height <= thread.scrollView.contentSize.height + 1 }
   let largest = panel.frameRect(forContentRect: NSRect(origin: .zero, size: SessionWindows.defaultConversationSize))
   let top = panel.frame.maxY
@@ -177,8 +180,9 @@ func runSessionWindowsTests() throws -> Int {
     panel.standardWindowButton(.miniaturizeButton)?.isHidden == true && panel.standardWindowButton(.zoomButton)?.isHidden == true &&
     panel.titleVisibility == .hidden && panel.title == "SnapScreen", "the conversation's title bar holds only its close button")
   windows.conversation?.onPreview?()
-  try check(windows.previewPanel.map { !$0.frame.intersects(panel.frame) && !$0.canBecomeKey &&
-    !$0.canBecomeMain && $0.styleMask.contains(.nonactivatingPanel) && $0.level == .floating } == true,
+  try check(windows.previewPanel.map {
+    !$0.frame.intersects(panel.frame) && hasPassivePanelConfiguration($0) && $0.level == .floating
+  } == true,
     "the screenshot preview opens beside the conversation without eligibility for keyboard focus")
   windows.previewPanel?.performClose(nil)
   try check(windows.previewPanel == nil && windows.panel === panel, "closing the preview keeps the conversation")

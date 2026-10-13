@@ -3,6 +3,13 @@ import Carbon.HIToolbox
 
 private enum AppShellTestError: Error { case failed(String) }
 
+/// Shared by the shell and session checks, which never show these panels.
+func hasPassivePanelConfiguration(_ panel: NSPanel) -> Bool {
+  !panel.canBecomeKey && !panel.canBecomeMain && panel.styleMask.contains(.nonactivatingPanel) &&
+    panel.isFloatingPanel && panel.becomesKeyOnlyIfNeeded && !panel.hidesOnDeactivate && !panel.canHide &&
+    panel.collectionBehavior.contains([.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle])
+}
+
 /// The shortcut, menus, quit requests, notices and Keychain store. Windows stay offscreen. The
 /// Keychain checks use their own service and remove what they add.
 func runAppShellTests() throws -> Int {
@@ -12,6 +19,16 @@ func runAppShellTests() throws -> Int {
     count += 1
   }
   _ = NSApplication.shared
+  try check(NSApp.activationPolicy() == .accessory, "SnapScreen launches as an accessory app")
+  // The bare binary also supports --self-test, but only the app bundle has an Info.plist.
+  if Bundle.main.bundleIdentifier != nil {
+    try check(Bundle.main.object(forInfoDictionaryKey: "LSUIElement") as? Bool == true,
+      "the bundle is an agent with no Dock or App Switcher entry")
+  }
+  let passive = PassivePanel(contentRect: NSRect(x: 0, y: 0, width: 100, height: 80),
+    styleMask: [.titled], backing: .buffered, defer: false)
+  try check(hasPassivePanelConfiguration(passive) && passive.styleMask.contains(.titled) && passive.level == .floating,
+    "passive panels preserve the requested style and install nonactivating behavior at creation")
 
   let snip = Hotkey.Combination.snip
   try check(snip.keyCode == UInt32(kVK_ANSI_S) && snip.modifiers == UInt32(optionKey | shiftKey) && snip.display == "⌥⇧S",
@@ -103,8 +120,8 @@ func runAppShellTests() throws -> Int {
     "the close button closes the notice")
   try check(NoticePanelView(message: "Plain", action: nil, onClose: {}).actionButton == nil, "a notice may have no action")
   let panel = NoticePanel(content: NoticePanelView(message: "Plain", action: nil, onClose: {}))
-  try check(!panel.canBecomeKey && !panel.canBecomeMain && panel.styleMask.contains(.nonactivatingPanel) &&
-    !panel.hidesOnDeactivate, "a notice never activates SnapScreen or takes the keyboard")
+  try check(hasPassivePanelConfiguration(panel) && panel.level == .floating,
+    "a notice floats in every Space without activating SnapScreen or taking the keyboard")
   try check(notice.actionButton?.acceptsFirstMouse(for: nil) == true, "a notice's buttons act on the first click")
   try check([NSApp.effectiveAppearance, menu.effectiveAppearance, panel.effectiveAppearance].allSatisfy {
     $0.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua

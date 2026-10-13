@@ -88,11 +88,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     settings = nil
     closing.window.delegate = nil
     // The window is still closing, so release it afterwards.
-    DispatchQueue.main.async { _ = closing }
-    // Return the keyboard to the app you were using, unless another SnapScreen window is open.
-    if !NSApp.windows.contains(where: { $0 !== closing.window && $0.isVisible && $0.styleMask.contains(.titled) }) {
-      NSApp.hide(nil)
+    DispatchQueue.main.async {
+      SettingsFocus.returnToPreviousApp(afterClosing: closing.window)
     }
+  }
+}
+
+/// Only explicit foreground Settings may activate SnapScreen. Passive panels must not keep it
+/// active after Settings closes, and must stay visible when AppKit hands focus back.
+enum SettingsFocus {
+  static func returnToPreviousApp(afterClosing window: NSWindow) {
+    guard NSApp.isActive, !NSApp.windows.contains(where: {
+      $0 !== window && $0.isVisible && $0.canBecomeKey
+    }) else { return }
+    NSApp.hide(nil)
   }
 }
 

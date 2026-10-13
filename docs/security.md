@@ -53,8 +53,14 @@ and without it shows a notice with the same button. **Open at login** registers 
 
 ## Staying out of the way
 
-The selection overlay, conversation, preview and notice panels use `NSPanel` with
-`.nonactivatingPanel`, appear through `orderFront(nil)`, and cannot become key or main windows.
+The bundle sets `LSUIElement` and launch sets the accessory activation policy before constructing
+any windows, so SnapScreen has no Dock or App Switcher entry. The selection overlay, conversation,
+preview, notice and resize-shield panels share `PassivePanel`, an `NSPanel` subclass that installs
+`.nonactivatingPanel` at construction and cannot become key or main. Each is explicitly a floating
+panel, becomes key only if needed (and never qualifies), stays visible on deactivation, joins all
+Spaces, supports fullscreen apps and is excluded from window cycling. Selection uses the screen
+saver level; the other panels use the floating level. They appear through `orderFront(nil)`;
+the resize shield is ordered directly below its conversation.
 The capture and answer flow never activates SnapScreen or requests keyboard focus. Select a
 region by dragging, cancel by clicking, and use panel close buttons or **Close All Conversations**
 to dismiss it. The composer is read-only; Stop, Retry and Copy remain pointer actions. Keyboard
@@ -64,6 +70,10 @@ Keyboard input continues to go to the foreground app.
 Settings is a separate foreground setup flow and activates SnapScreen only when explicitly
 opened, including reopening the running app. If no API key exists at launch, a passive notice
 offers **Open Settings** rather than automatically opening Settings.
+After Settings closes, only another visible keyboard-eligible window can keep SnapScreen active.
+Otherwise AppKit's `hide` hands activation back to the previous app; passive panels set `canHide`
+to false, so an open snip does not disappear during that handoff. If another app already has focus,
+closing Settings leaves that choice alone.
 
 The overlay is non-opaque, because an opaque window covering the display could make Chrome mark
 its page as hidden. macOS shows only the frontmost app's cursor changes, so while the overlay is
@@ -122,3 +132,23 @@ write to a private pasteboard, never your clipboard. The live test,
 has its own bundle ID and an ad hoc signature, replaces the capture and the API with scripted
 ones, and reads no key. `build-app.sh` refuses to make a production app that contains its code.
 `LiveAPITests` calls the real API only when `SNAPSCREEN_LIVE_API_KEY` is set.
+
+For WindowServer focus checks, quit the production app to free its global shortcut and run
+`scripts/test-app-live.sh --focus`, then `scripts/test-app-live.sh --focus --fullscreen`.
+These optional modes require existing event-posting approval for the launching terminal; they
+never request or change that approval. They open an isolated helper app with a local WebKit
+textarea, use the actual registered shortcut and pointer events to select, copy, preview and
+dismiss, and check native focus, webpage blur, visibility, active element and keyboard input.
+A deliberate focus loss validates the observer before measuring. The test also explicitly opens
+a synthetic Settings window, then verifies that closing it returns focus with an answer open.
+The fullscreen
+mode uses a native macOS fullscreen Space and checks panel ordering above the target window.
+The helper reports only its synthetic webpage state through private pipes. All of this code is
+test-hooks-only. These checks still use fixture captures and API answers; they do not certify
+ScreenCaptureKit permission alerts, Canvas deployments or every browser's focus behavior.
+
+On 13 October 2026, both optional modes passed on macOS 27.0.1. The local webpage retained focus,
+visibility and typed input throughout each measured capture/answer interval and the pointer
+interactions; Settings returned focus while the passive answer stayed visible. The normal run
+passed 167 checks and the fullscreen run 183 (the count includes polling). The standard live
+window test also passed, along with the core suite and the app's self-test.

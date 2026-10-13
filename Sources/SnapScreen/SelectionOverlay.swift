@@ -16,9 +16,6 @@ enum SelectionOverlay {
     panel.hasShadow = false
     // Above the menu bar, the Dock and SnapScreen's own floating panels.
     panel.level = .screenSaver
-    panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-    panel.hidesOnDeactivate = false
-    panel.isReleasedWhenClosed = false
     panel.animationBehavior = .none
     panel.acceptsMouseMovedEvents = true
     panel.setFrame(screen.frame, display: false)
