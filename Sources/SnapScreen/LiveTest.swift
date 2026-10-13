@@ -1,6 +1,8 @@
 #if SNAPSCREEN_TEST_HOOKS
 import AppKit
+import Carbon.HIToolbox
 import SnapScreenCore
+import WebKit
 
 // The live test, compiled only into the test-hooks build that scripts/test-app-live.sh makes, with
 // its own bundle ID. A made-up capture replaces ScreenCaptureKit, because CI can't grant Screen
@@ -110,7 +112,7 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
     foregroundProcessID = NSWorkspace.shared.frontmostApplication?.processIdentifier
     checkBackground("before capture")
     let monitor = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
-      self?.checkBackground("while capture and answer windows are displayed")
+      MainActor.assumeIsolated { self?.checkBackground("while capture and answer windows are displayed") }
     }
     RunLoop.main.add(monitor, forMode: .common)
     focusMonitor = monitor
@@ -153,7 +155,9 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
 
   private func checkPassive(_ panel: CompanionPanel, _ stage: String) {
     check(panel.isVisible && !panel.canBecomeKey && !panel.canBecomeMain && !panel.isKeyWindow &&
-      panel.styleMask.contains(.nonactivatingPanel), "the \(stage) panel remains non-key")
+      panel.styleMask.contains(.nonactivatingPanel) && panel.isFloatingPanel && panel.becomesKeyOnlyIfNeeded &&
+      !panel.hidesOnDeactivate && panel.collectionBehavior.contains([.canJoinAllSpaces, .fullScreenAuxiliary]),
+      "the \(stage) panel remains non-key across applications and Spaces")
     checkBackground("with the \(stage) panel")
   }
 
@@ -355,7 +359,7 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
   }
 
   /// A stand-in for the display's contents, at its pixel size.
-  private static func fixture(for screen: NSScreen) -> CGImage {
+  fileprivate static func fixture(for screen: NSScreen) -> CGImage {
     let scale = screen.backingScaleFactor
     let width = Int(screen.frame.width * scale)
     let height = Int(screen.frame.height * scale)
@@ -373,6 +377,436 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
     label.draw(at: CGPoint(x: (CGFloat(width) - size.width) / 2, y: (CGFloat(height) - size.height) / 2))
     NSGraphicsContext.restoreGraphicsState()
     return context.makeImage()!
+  }
+}
+
+/// An opt-in WindowServer test. Unlike `LiveTest`, it posts the real shortcut and mouse events,
+/// and types into a local webpage in a separate app to prove that keyboard focus stayed there.
+/// Only the capture and API are fixtures. Event posting needs an existing macOS approval.
+@MainActor
+final class LiveFocusTest: NSObject, NSApplicationDelegate {
+  private let hotkey = Hotkey(.snip)
+  private let api = ScriptedAPI()
+  private let target = Process()
+  private let commands = Pipe()
+  private let reports = Pipe()
+  private let pasteboard = NSPasteboard(name: NSPasteboard.Name("com.snapscreen.app.focus-test.\(UUID().uuidString)"))
+  private var snips: SnipWindows?
+  private var previousApp: NSRunningApplication?
+  private var pending = Data()
+  private var messages: [[String: Any]] = []
+  private var expectedInput = ""
+  private var nativeFailures = 0
+  private var monitor: Timer?
+  private var checks = 0
+  private var pressedPoint: NSPoint?
+
+  private struct Failure: Error, CustomStringConvertible {
+    let description: String
+  }
+
+  func applicationDidFinishLaunching(_ notification: Notification) {
+    Task { @MainActor in
+      do {
+        try await run()
+        finish(nil)
+      } catch {
+        finish(String(describing: error))
+      }
+    }
+  }
+
+  private func require(_ value: Bool, _ message: String) throws {
+    guard value else { throw Failure(description: message) }
+    checks += 1
+  }
+
+  private func waitFor(_ message: String, _ predicate: () -> Bool) async throws {
+    let deadline = Date().addingTimeInterval(15)
+    while !predicate() {
+      try require(target.isRunning, "the isolated focus target stays open")
+      guard Date() < deadline else { throw Failure(description: message) }
+      try await Task.sleep(for: .milliseconds(25))
+    }
+  }
+
+  private func run() async throws {
+    try require(CGPreflightPostEventAccess(),
+      "event posting is not approved; grant Accessibility to the terminal running --focus, then retry")
+    try require(NSApp.activationPolicy() == .accessory && Bundle.main.object(forInfoDictionaryKey: "LSUIElement") as? Bool == true,
+      "the test app is an accessory agent")
+    try require(hotkey.register(), "⌥⇧S is in use; quit the running SnapScreen copy before --focus, then reopen it afterwards")
+    guard let path = ProcessInfo.processInfo.environment["SNAPSCREEN_FOCUS_TARGET"] else {
+      throw Failure(description: "run the focus test through scripts/test-app-live.sh --focus")
+    }
+    previousApp = NSWorkspace.shared.frontmostApplication
+    target.executableURL = URL(fileURLWithPath: path)
+    target.arguments = ["--focus-target"] + (CommandLine.arguments.contains("--fullscreen") ? ["--fullscreen"] : [])
+    target.standardInput = commands
+    target.standardOutput = reports
+    reports.fileHandleForReading.readabilityHandler = { [weak self] handle in
+      let data = handle.availableData
+      guard !data.isEmpty else { return }
+      Task { @MainActor in self?.receive(data) }
+    }
+    try target.run()
+    try await waitFor("the local webpage becomes ready") { self.messages.contains { $0["ready"] as? Bool == true } }
+    let ready = messages.removeFirst()
+    try require(ready["positiveControl"] as? Bool == true,
+      "the webpage's focus observer detects an intentional key-window change before measurement")
+    guard let targetWindow = ready["window"] as? Int, let x = ready["x"] as? Double,
+      let y = ready["y"] as? Double, let screen = NSScreen.screens.first(where: { $0.frame.contains(NSPoint(x: x, y: y)) }),
+      let displayID = screen.displayID else { throw Failure(description: "the target reports its focused field and display") }
+    let field = NSPoint(x: x, y: y)
+    let capture = FrozenScreen(image: LiveTest.fixture(for: screen), displayID: displayID)
+    Clipboard.pasteboard = pasteboard
+    let controller = SessionController(answers: AnthropicClient(transport: api),
+      apiKey: { "sk-ant-snapscreen-focus-test" }, settings: { .defaults })
+    snips = SnipWindows(controller: controller, showNotice: { [weak self] _, _ in self?.nativeFailures += 1 })
+    hotkey.onPress = { controller.start { capture } }
+    let monitor = Timer(timeInterval: 0.01, repeats: true) { [weak self] _ in
+      MainActor.assumeIsolated {
+        guard let self else { return }
+        if NSApp.isActive || NSApp.keyWindow != nil || NSApp.mainWindow != nil ||
+          NSWorkspace.shared.frontmostApplication?.processIdentifier != self.target.processIdentifier {
+          self.nativeFailures += 1
+        }
+      }
+    }
+    RunLoop.main.add(monitor, forMode: .common)
+    self.monitor = monitor
+    try await probe("before the hotkey")
+    // Keep the pointer on the target's display before using the registered global shortcut.
+    try postPointer(.mouseMoved, at: field)
+    try postKey(CGKeyCode(kVK_ANSI_S), flags: [.maskAlternate, .maskShift])
+    try await waitFor("the actual global hotkey opens the selection overlay") { self.snips?.sessions.first?.overlay != nil }
+    guard let windows = snips?.sessions.first, let overlay = windows.overlay, let view = windows.selectionView else {
+      throw Failure(description: "the hotkey creates a selection session")
+    }
+    try passive(overlay, above: targetWindow, stage: "selection")
+    try await probe("with the selection open")
+    let start = NSPoint(x: screen.frame.midX - 140, y: screen.frame.midY - 80)
+    let end = NSPoint(x: start.x + 280, y: start.y + 160)
+    try postPointer(.leftMouseDown, at: start)
+    try await Task.sleep(for: .milliseconds(80))
+    try postPointer(.leftMouseDragged, at: end)
+    try await waitFor("WindowServer delivers the drag to the selection") { view.isDragging && view.canConfirm }
+    try await probe("during the selection drag")
+    try postPointer(.leftMouseUp, at: end)
+    try await waitFor("releasing the selection opens the answer") { windows.panel?.isVisible == true }
+    guard let panel = windows.panel else { throw Failure(description: "the answer panel exists") }
+    try passive(panel, above: targetWindow, stage: "streaming answer")
+    try await probe("while the answer streams")
+    try await waitFor("the answer finishes") { windows.session.phase == .ready }
+    guard let thread = windows.conversation, let copy = thread.codeToCopy?.copyButton else {
+      throw Failure(description: "the answer exposes its Copy button")
+    }
+    try passive(panel, above: targetWindow, stage: "finished answer")
+    try await probe("after answer completes, before Settings")
+    // Settings deliberately takes focus. Closing it must return to the webpage even when a
+    // visible passive conversation remains, without hiding that conversation along with the app.
+    monitor.invalidate()
+    let settings = NSWindow(contentRect: NSRect(x: screen.frame.midX - 160, y: screen.frame.midY - 100,
+      width: 320, height: 200), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+    settings.isReleasedWhenClosed = false
+    settings.title = "SnapScreen Focus Test — synthetic Settings"
+    settings.level = .floating
+    settings.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+    settings.orderFrontRegardless()
+    try await Task.sleep(for: .milliseconds(100))
+    // macOS can reject a background process's unsolicited activation. Give this intentionally
+    // foreground flow the real user gesture it has in the app: a click in its normal window.
+    let titlebar = NSPoint(x: settings.frame.midX, y: settings.frame.maxY - 12)
+    try postPointer(.mouseMoved, at: titlebar)
+    try postPointer(.leftMouseDown, at: titlebar)
+    releasePostedPointer()
+    try await waitFor("the explicit Settings flow takes focus") { NSApp.isActive && settings.isKeyWindow }
+    settings.close()
+    SettingsFocus.returnToPreviousApp(afterClosing: settings)
+    try await waitFor("closing Settings returns to the original app with an answer still open") {
+      NSWorkspace.shared.frontmostApplication?.processIdentifier == self.target.processIdentifier && !NSApp.isActive
+    }
+    // Reset only after confirming Settings returned focus. The helper separately verifies that
+    // its key window, original responder and webpage focus have all actually been restored.
+    messages.removeAll()
+    try commands.fileHandleForWriting.write(contentsOf: Data("reset\n".utf8))
+    try await waitFor("the target confirms focus after Settings") { !self.messages.isEmpty }
+    let restored = messages.removeFirst()
+    try require(restored["restored"] as? Bool == true,
+      "closing Settings restores the original webpage and native first responder")
+    nativeFailures = 0
+    let resumed = Timer(timeInterval: 0.01, repeats: true) { [weak self] _ in
+      MainActor.assumeIsolated {
+        guard let self else { return }
+        if NSApp.isActive || NSApp.keyWindow != nil || NSApp.mainWindow != nil ||
+          NSWorkspace.shared.frontmostApplication?.processIdentifier != self.target.processIdentifier {
+          self.nativeFailures += 1
+        }
+      }
+    }
+    RunLoop.main.add(resumed, forMode: .common)
+    self.monitor = resumed
+    try passive(panel, above: targetWindow, stage: "conversation after closing Settings")
+    try await probe("after closing Settings")
+    try await click(copy)
+    try await waitFor("a real pointer click copies the code") { self.pasteboard.string(forType: .string) == "print(2 + 2)" }
+    try await probe("after clicking Copy")
+    try await click(thread.thumbnail)
+    try await waitFor("a real pointer click opens the preview") { windows.previewPanel?.isVisible == true }
+    guard let preview = windows.previewPanel else { throw Failure(description: "the preview exists") }
+    try passive(preview, above: targetWindow, stage: "preview")
+    try await probe("with the preview open")
+    guard let close = preview.standardWindowButton(.closeButton) else {
+      throw Failure(description: "the preview exposes its close button")
+    }
+    try await click(close)
+    try await waitFor("the preview closes by its pointer button") { windows.previewPanel == nil }
+    try await probe("after closing the preview")
+    // Click the original textarea. Its input handler must still receive this click, and the global
+    // mouse monitor must close the finished conversation without consuming it or taking focus.
+    try require(!panel.frame.insetBy(dx: -10, dy: -10).contains(field), "the original field is outside the answer")
+    try postPointer(.leftMouseDown, at: field)
+    try postPointer(.leftMouseUp, at: field)
+    try await waitFor("the actual outside click dismisses the answer") { self.snips?.sessions.isEmpty == true }
+    try await probe("after outside dismissal")
+    try require(nativeFailures == 0, "the original app remains frontmost with its key window throughout")
+    print("SnapScreen focus test passed (test hooks build): \(checks) checks, actual ⌥⇧S, pointer selection, " +
+      "Settings return, Copy, preview, close and outside dismissal; webpage focus and typed input preserved" +
+      (CommandLine.arguments.contains("--fullscreen") ? " in a fullscreen Space" : "") + ". Capture and API used fixtures.")
+  }
+
+  private func receive(_ data: Data) {
+    pending.append(data)
+    while let newline = pending.firstIndex(of: 10) {
+      let line = pending.prefix(upTo: newline)
+      pending.removeSubrange(...newline)
+      if let report = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any] { messages.append(report) }
+    }
+  }
+
+  private func probe(_ stage: String) async throws {
+    try postKey(CGKeyCode(kVK_ANSI_X))
+    expectedInput += "x"
+    try await Task.sleep(for: .milliseconds(100))
+    messages.removeAll()
+    try commands.fileHandleForWriting.write(contentsOf: Data("check\n".utf8))
+    try await waitFor("the target reports webpage focus \(stage)") { !self.messages.isEmpty }
+    let report = messages.removeFirst()
+    try require(report["focused"] as? Bool == true && report["activeElement"] as? Bool == true &&
+      report["blurCount"] as? Int == 0 && report["visible"] as? Bool == true &&
+      report["hiddenCount"] as? Int == 0 && report["nativeFailures"] as? Int == 0 &&
+      report["text"] as? String == expectedInput && nativeFailures == 0,
+      "the original webpage retains its focus ring, first responder and keyboard input \(stage): \(report)")
+  }
+
+  private func passive(_ panel: CompanionPanel, above window: Int, stage: String) throws {
+    try require(panel.isVisible && panel.isOnActiveSpace && !panel.isKeyWindow && !panel.isMainWindow &&
+      !panel.canBecomeKey && !panel.canBecomeMain && panel.styleMask.contains(.nonactivatingPanel) &&
+      panel.isFloatingPanel && panel.becomesKeyOnlyIfNeeded && !panel.hidesOnDeactivate &&
+      panel.collectionBehavior.contains([.canJoinAllSpaces, .fullScreenAuxiliary]), "the \(stage) panel stays passive")
+    let order = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+      as? [[String: Any]] ?? []).compactMap { $0[kCGWindowNumber as String] as? Int }
+    try require(order.firstIndex(of: panel.windowNumber).flatMap { panelIndex in
+      order.firstIndex(of: window).map { panelIndex < $0 }
+    } == true, "the \(stage) panel appears above the foreground webpage")
+  }
+
+  private func click(_ view: NSView) async throws {
+    guard let window = view.window else { throw Failure(description: "the pointer control has a window") }
+    window.contentView?.layoutSubtreeIfNeeded()
+    let point = window.convertPoint(toScreen: view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil))
+    try postPointer(.mouseMoved, at: point)
+    try postPointer(.leftMouseDown, at: point)
+    try await Task.sleep(for: .milliseconds(60))
+    try postPointer(.leftMouseUp, at: point)
+    try await Task.sleep(for: .milliseconds(100))
+  }
+
+  private func postPointer(_ type: CGEventType, at point: NSPoint) throws {
+    try requireInputTarget()
+    let height = CGDisplayBounds(CGMainDisplayID()).height
+    CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: CGPoint(x: point.x, y: height - point.y),
+      mouseButton: .left)?.post(tap: .cghidEventTap)
+    if type == .leftMouseDown || (type == .leftMouseDragged && pressedPoint != nil) { pressedPoint = point }
+    if type == .leftMouseUp { pressedPoint = nil }
+  }
+
+  private func postKey(_ code: CGKeyCode, flags: CGEventFlags = []) throws {
+    try requireInputTarget()
+    for down in [true, false] {
+      let event = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)
+      event?.flags = flags
+      event?.post(tap: .cghidEventTap)
+    }
+  }
+
+  private func requireInputTarget() throws {
+    try require(target.isRunning && nativeFailures == 0 && !NSApp.isActive &&
+      NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier,
+      "focus must remain on the isolated target before posting any input")
+  }
+
+  private func finish(_ failure: String?) {
+    monitor?.invalidate()
+    hotkey.unregister()
+    releasePostedPointer()
+    snips?.closeAll()
+    reports.fileHandleForReading.readabilityHandler = nil
+    if target.isRunning { target.terminate() }
+    previousApp?.activate(options: [])
+    pasteboard.releaseGlobally()
+    if let failure { FileHandle.standardError.write(Data("SnapScreen focus test failed: \(failure)\n".utf8)) }
+    exit(failure == nil ? 0 : 1)
+  }
+
+  private func releasePostedPointer() {
+    // A failed assertion during a drag must release our own press even when the target lost
+    // focus. So must the one intentional Settings click that activates this test process. This
+    // pairs an already-posted event; it never starts input in another application.
+    if let point = pressedPoint {
+      let height = CGDisplayBounds(CGMainDisplayID()).height
+      CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp,
+        mouseCursorPosition: CGPoint(x: point.x, y: height - point.y), mouseButton: .left)?.post(tap: .cghidEventTap)
+      pressedPoint = nil
+    }
+  }
+}
+
+/// The isolated foreground app used only by the opt-in focus test. Its local webpage contains no
+/// user data or network resources. Reports describe that fixture only and travel through pipes.
+@MainActor
+final class LiveFocusTarget: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate {
+  private var window: NSWindow!
+  private var webView: WKWebView!
+  private var monitor: Timer?
+  private var responder: NSResponder?
+  private var nativeFailures = 0
+  private var pending = Data()
+  private var positiveControl = false
+
+  func applicationDidFinishLaunching(_ notification: Notification) {
+    NSApp.setActivationPolicy(.regular)
+    let screen = screenUnderPointer() ?? NSScreen.main!
+    window = NSWindow(contentRect: screen.visibleFrame.insetBy(dx: 20, dy: 20),
+      styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
+    window.title = "SnapScreen Focus Test — local webpage"
+    window.collectionBehavior = [.fullScreenPrimary]
+    window.delegate = self
+    webView = WKWebView(frame: window.contentLayoutRect)
+    webView.navigationDelegate = self
+    window.contentView = webView
+    window.makeKeyAndOrderFront(nil)
+    NSApp.activate()
+    webView.loadHTMLString("""
+      <!doctype html><html><head><meta name="color-scheme" content="dark"><style>
+      body { font: 22px -apple-system; padding: 32px; background: #172239; color: white }
+      textarea { position: fixed; left: 40px; bottom: 40px; width: 220px; height: 90px;
+        font: 24px -apple-system; } textarea:focus { outline: 4px solid #8bb9ff }
+      </style></head><body>Focus must stay on this local webpage throughout the snip.
+      <textarea id="field" aria-label="Keyboard focus test" autofocus></textarea>
+      <script>window.blurCount = 0; window.hiddenCount = 0;
+      window.addEventListener('blur', () => window.blurCount++);
+      document.addEventListener('visibilitychange', () => { if (document.hidden) window.hiddenCount++; });
+      document.getElementById('field').addEventListener('blur', () => window.blurCount++);</script>
+      </body></html>
+      """, baseURL: nil)
+    FileHandle.standardInput.readabilityHandler = { [weak self] handle in
+      let data = handle.availableData
+      if data.isEmpty { exit(0) }
+      Task { @MainActor in self?.receive(data) }
+    }
+  }
+
+  func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+    if CommandLine.arguments.contains("--fullscreen") {
+      window.toggleFullScreen(nil)
+    } else {
+      prepare()
+    }
+  }
+
+  func windowDidEnterFullScreen(_ notification: Notification) { prepare() }
+
+  private func prepare() {
+    window.makeFirstResponder(webView)
+    webView.evaluateJavaScript("document.getElementById('field').focus(); window.blurCount = 0; window.hiddenCount = 0")
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+      guard let self else { return }
+      // A positive control establishes that this WKWebView reports a real loss of page focus.
+      // It happens before the measured snip, and uses no external application or user content.
+      let other = NSWindow(contentRect: NSRect(x: 20, y: 20, width: 100, height: 100),
+        styleMask: [.titled], backing: .buffered, defer: false)
+      other.isReleasedWhenClosed = false
+      other.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+      other.makeKeyAndOrderFront(nil)
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+        guard let self else { return }
+        self.webView.evaluateJavaScript("!document.hasFocus() && window.blurCount > 0") { [weak self] value, _ in
+          guard let self else { return }
+          self.positiveControl = value as? Bool == true
+          other.close()
+          self.window.makeKeyAndOrderFront(nil)
+          self.window.makeFirstResponder(self.webView)
+          self.webView.evaluateJavaScript("document.getElementById('field').focus(); window.blurCount = 0; window.hiddenCount = 0")
+          self.startMeasuring()
+        }
+      }
+    }
+  }
+
+  private func startMeasuring() {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+      guard let self else { return }
+      self.responder = self.window.firstResponder
+      let monitor = Timer(timeInterval: 0.01, repeats: true) { [weak self] _ in
+        MainActor.assumeIsolated {
+          guard let self else { return }
+          if !NSApp.isActive || !self.window.isKeyWindow || self.window.firstResponder !== self.responder {
+            self.nativeFailures += 1
+          }
+        }
+      }
+      RunLoop.main.add(monitor, forMode: .common)
+      self.monitor = monitor
+      // The HTML field sits 40 points above the content's bottom edge, in either Space mode.
+      let field = self.window.convertPoint(toScreen: NSPoint(x: 150, y: 85))
+      self.report(["ready": true, "window": self.window.windowNumber, "x": field.x, "y": field.y,
+        "positiveControl": self.positiveControl])
+    }
+  }
+
+  private func receive(_ data: Data) {
+    pending.append(data)
+    while let newline = pending.firstIndex(of: 10) {
+      let reset = String(decoding: pending.prefix(upTo: newline), as: UTF8.self) == "reset"
+      pending.removeSubrange(...newline)
+      webView.evaluateJavaScript("""
+        ({ focused: document.hasFocus(), activeElement: document.activeElement === document.getElementById('field'),
+          blurCount: window.blurCount, visible: document.visibilityState === 'visible',
+          hiddenCount: window.hiddenCount, text: document.getElementById('field').value })
+        """) { [weak self] value, error in
+        guard let self else { return }
+        var result = value as? [String: Any] ?? ["error": error?.localizedDescription ?? "No webpage result"]
+        if reset {
+          let restored = NSApp.isActive && self.window.isKeyWindow && self.window.firstResponder === self.responder &&
+            result["focused"] as? Bool == true && result["activeElement"] as? Bool == true &&
+            result["visible"] as? Bool == true
+          self.nativeFailures = 0
+          self.webView.evaluateJavaScript("window.blurCount = 0; window.hiddenCount = 0") { [weak self] _, _ in
+            self?.report(["restored": restored])
+          }
+          return
+        }
+        result["nativeFailures"] = self.nativeFailures
+        self.report(result)
+      }
+    }
+  }
+
+  private func report(_ value: [String: Any]) {
+    guard var data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) else { return }
+    data.append(10)
+    FileHandle.standardOutput.write(data)
   }
 }
 #endif

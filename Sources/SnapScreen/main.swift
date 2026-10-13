@@ -2,7 +2,11 @@ import AppKit
 
 // SnapScreen has no light mode: its windows and menus are dark whatever the system's appearance,
 // in the self-test too. The menu bar icon still follows the menu bar.
-NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
+let application = NSApplication.shared
+// Set this before any window is constructed, including in the self-test. LSUIElement in the
+// bundle also keeps Launch Services from putting the app in the Dock or App Switcher.
+application.setActivationPolicy(.accessory)
+application.appearance = NSAppearance(named: .darkAqua)
 
 if CommandLine.arguments.contains("--self-test") {
   do {
@@ -34,12 +38,18 @@ if NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifi
   exit(0)
 }
 
-let application = NSApplication.shared
-application.setActivationPolicy(.accessory)
 #if SNAPSCREEN_TEST_HOOKS
 // scripts/test-app-live.sh runs the live test in the test-hooks build, which has its own bundle ID.
-let delegate: NSApplicationDelegate = CommandLine.arguments.contains("--live-test")
-  ? MainActor.assumeIsolated { LiveTest() } : AppDelegate()
+let delegate: NSApplicationDelegate
+if CommandLine.arguments.contains("--focus-target") {
+  delegate = MainActor.assumeIsolated { LiveFocusTarget() }
+} else if CommandLine.arguments.contains("--focus-test") {
+  delegate = MainActor.assumeIsolated { LiveFocusTest() }
+} else if CommandLine.arguments.contains("--live-test") {
+  delegate = MainActor.assumeIsolated { LiveTest() }
+} else {
+  delegate = AppDelegate()
+}
 #else
 let delegate = AppDelegate()
 #endif

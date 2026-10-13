@@ -1,5 +1,29 @@
 import AppKit
 
+/// Every window in the capture flow shares this policy, including borderless notices and the
+/// resize shield. Set the nonactivating style at construction: changing it after AppKit creates
+/// the window can leave its window-server activation behavior out of sync with the style mask.
+/// None of these panels has an editable input; Settings uses a separate NSWindow.
+class PassivePanel: NSPanel {
+  final override var canBecomeKey: Bool { false }
+  final override var canBecomeMain: Bool { false }
+
+  override init(contentRect: NSRect, styleMask style: NSWindow.StyleMask,
+    backing backingStoreType: NSWindow.BackingStoreType, defer flag: Bool) {
+    super.init(contentRect: contentRect, styleMask: style.union(.nonactivatingPanel),
+      backing: backingStoreType, defer: flag)
+    level = .floating
+    isFloatingPanel = true
+    becomesKeyOnlyIfNeeded = true
+    hidesOnDeactivate = false
+    // Closing explicit Settings hides the foreground app to hand focus back. Passive snips
+    // remain visible and interactive through that handoff.
+    canHide = false
+    isReleasedWhenClosed = false
+    collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+  }
+}
+
 extension CompanionPanel {
   /// A floating panel that never activates the app. Media panels (selection and preview) show an
   /// image edge to edge under a transparent title bar. The title bar holds only the close button:
@@ -12,12 +36,7 @@ extension CompanionPanel {
       styleMask: style, backing: .buffered, defer: false)
     value.title = title
     value.identifier = NSUserInterfaceItemIdentifier(title)
-    value.level = .floating
-    value.hidesOnDeactivate = false
-    value.becomesKeyOnlyIfNeeded = true
-    value.isReleasedWhenClosed = false
     value.autorecalculatesKeyViewLoop = true
-    value.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     value.acceptsMouseMovedEvents = true
     value.titlebarAppearsTransparent = true
     value.titleVisibility = .hidden
@@ -36,10 +55,7 @@ extension CompanionPanel {
 
 /// Kept below the active panel, click-through except during an edge resize. This preserves
 /// Phase 1's tested protection from pointer events falling through a shrinking native panel.
-final class PointerShield: NSPanel {
-  override var canBecomeKey: Bool { false }
-  override var canBecomeMain: Bool { false }
-}
+final class PointerShield: PassivePanel {}
 
 /// Places the pointer shield beneath each panel as it appears, and lets it take the pointer only
 /// while a panel is pressed within 8 points of its edge or is live-resizing.
@@ -100,11 +116,8 @@ final class PointerShieldController {
       panel.backgroundColor = NSColor(calibratedWhite: 0, alpha: 1 / 255)
       panel.ignoresMouseEvents = true
       panel.hasShadow = false
-      panel.level = .floating
-      panel.hidesOnDeactivate = false
-      panel.isReleasedWhenClosed = false
       panel.animationBehavior = .none
-      panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle, .stationary]
+      panel.collectionBehavior.insert(.stationary)
       return panel
     }()
     shield = value

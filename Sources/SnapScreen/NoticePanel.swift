@@ -9,20 +9,13 @@ struct NoticeAction {
 /// A small panel for failures before a conversation window
 /// exists. It never activates SnapScreen or takes the keyboard, so the app you were using keeps
 /// focus.
-final class NoticePanel: NSPanel {
-  override var canBecomeKey: Bool { false }
-  override var canBecomeMain: Bool { false }
-
+final class NoticePanel: PassivePanel {
   init(content: NoticePanelView) {
     super.init(contentRect: NSRect(origin: .zero, size: content.fittingSize),
       styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
     isOpaque = false
     backgroundColor = .clear
     hasShadow = true
-    level = .floating
-    hidesOnDeactivate = false
-    isReleasedWhenClosed = false
-    collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
     contentView = content
   }
 }

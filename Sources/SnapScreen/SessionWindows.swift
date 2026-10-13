@@ -10,12 +10,12 @@ final class SnipWindows: SessionControllerDelegate {
   let chosenSize = ChosenConversationSize()
   private(set) var sessions: [SessionWindows] = []
   private let showNotice: (String, NoticeAction?) -> Void
-  private let present: @MainActor (NSWindow) -> Void
+  private let present: @MainActor (CompanionPanel) -> Void
 
   /// `showNotice` shows a message, with a button when it has an action. `present` shows a window;
   /// the self-test leaves windows offscreen.
   init(controller: SessionController, showNotice: @escaping (String, NoticeAction?) -> Void,
-    present: @escaping @MainActor (NSWindow) -> Void = { $0.orderFront(nil) }) {
+    present: @escaping @MainActor (CompanionPanel) -> Void = { $0.orderFront(nil) }) {
     self.controller = controller
     self.showNotice = showNotice
     self.present = present
@@ -102,7 +102,7 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
   private var screenshot: NSImage?
   private let shields: PointerShieldController
   private let chosenSize: ChosenConversationSize
-  private let present: @MainActor (NSWindow) -> Void
+  private let present: @MainActor (CompanionPanel) -> Void
   /// The conversation grows to fit its thread and draft until you resize it yourself.
   private(set) var fitsContent = true
   /// How tall the conversation may grow: its frame at its largest, where it was placed.
@@ -115,7 +115,7 @@ final class SessionWindows: NSObject, NSWindowDelegate, NSMenuItemValidation {
   private var outsideClickMonitor: Any?
 
   init(session: SnipSession, shields: PointerShieldController, chosenSize: ChosenConversationSize,
-    present: @escaping @MainActor (NSWindow) -> Void) {
+    present: @escaping @MainActor (CompanionPanel) -> Void) {
     self.session = session
     self.shields = shields
     self.chosenSize = chosenSize

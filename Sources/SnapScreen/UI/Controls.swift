@@ -50,15 +50,13 @@ enum Clipboard {
 /// Capture panels never activate SnapScreen or take the keyboard, including when clicked.
 /// Settings uses a separate foreground NSWindow. Keyboard-close handling is retained for actions
 /// dispatched by accessibility clients and the view tests, not for global key interception.
-final class CompanionPanel: NSPanel {
+final class CompanionPanel: PassivePanel {
   private var closingKey: UInt16?
   private var closeFallback: Timer?
   private var releaseMonitor: Any?
   /// Replaces `performClose`, which never reaches the delegate of a window without a close
   /// button, such as the borderless selection overlay.
   var closeAction: (() -> Void)?
-  override var canBecomeKey: Bool { false }
-  override var canBecomeMain: Bool { false }
 
   /// Closes now for pointer actions; for a key press, closes when that key is released.
   func closeAfterKeyRelease(_ event: NSEvent?) {
