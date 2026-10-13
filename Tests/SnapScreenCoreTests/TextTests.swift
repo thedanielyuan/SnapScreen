@@ -6,15 +6,28 @@ import Testing
 
 @Test func guidesCarefulScreenshotAnswers() {
   for phrase in ["Carefully inspect the screenshot", "Identify the main question", "Ignore irrelevant UI",
-    "briefly explain why", "answer each one in order", "unclear, unreadable, cropped", "Do not guess",
-    "solve the problem carefully", "rather than using Markdown for styling", "rather than LaTeX",
-    "whenever they are part of the correct answer"] {
+    "answer each one in order", "unclear, unreadable, cropped", "Do not guess",
+    "Work the problem out fully and check the result", "rather than using Markdown for styling",
+    "rather than LaTeX", "whenever they are part of the correct answer"] {
     #expect(screenshotQASystemPrompt.contains(phrase), "\(phrase)")
   }
   #expect(!screenshotQASystemPrompt.contains("no asterisks, hashtags, underscores, backticks"))
   // Adaptive thinking reasons; the prompt has no rules about hiding reasoning.
   #expect(screenshotQASystemPrompt.range(of: "chain-of-thought|hidden reasoning|internally",
     options: [.regularExpression, .caseInsensitive]) == nil)
+}
+
+@Test func leadsWithTheAnswerAndKeepsItShort() {
+  for phrase in ["Keep the reply short, not the work behind it", "Start with the answer itself",
+    "at most one short sentence with the key reason", "only when the screenshot or the user's guidance asks",
+    "then one short reason", "Examples of the expected length", "followed by at most one sentence"] {
+    #expect(screenshotQASystemPrompt.contains(phrase), "\(phrase)")
+  }
+  // The model reasons before it replies, so asking it to explain every answer only adds length.
+  for phrase in ["briefly explain why", "explanation improves correctness", "enough explanation",
+    "math working", "at most two sentences"] {
+    #expect(!screenshotQASystemPrompt.contains(phrase), "\(phrase)")
+  }
 }
 
 @Test func answersAndCodesWithoutAskingTheUserAnything() {
