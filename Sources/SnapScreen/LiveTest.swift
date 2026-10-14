@@ -434,6 +434,7 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
   private var monitor: Timer?
   private var checks = 0
   private var pressedPoint: NSPoint?
+  private var pressedButton = CGMouseButton.left
   /// Who the app shell phase lets be in front: the target; Settings, which you open yourself; or
   /// SnapScreen, briefly, while it hands an activation it didn't ask for straight back.
   private enum Front { case target, settings, handback }
@@ -503,6 +504,14 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
     let ready = messages.removeFirst()
     try require(ready["positiveControl"] as? Bool == true,
       "the webpage's focus observer detects an intentional key-window change before measurement")
+    // The positive control restores focus asynchronously. Start transition counts only
+    // after that setup has finished and its original responder is confirmed.
+    messages.removeAll()
+    try commands.fileHandleForWriting.write(contentsOf: Data("reset\n".utf8))
+    try await waitFor("measurement starts from a restored target") { !self.messages.isEmpty }
+    let initial = messages.removeFirst()
+    try require(initial["restored"] as? Bool == true, "the target is focused before measurement: \(initial)")
+    try preservedSpace(initial, stage: "initial focus baseline")
     guard let targetWindow = ready["window"] as? Int, let x = ready["x"] as? Double,
       let y = ready["y"] as? Double, let screen = NSScreen.screens.first(where: { $0.frame.contains(NSPoint(x: x, y: y)) }),
       let displayID = screen.displayID else { throw Failure(description: "the target reports its focused field and display") }
@@ -593,8 +602,7 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
     try commands.fileHandleForWriting.write(contentsOf: Data("reset\n".utf8))
     try await waitFor("the target confirms focus after Settings") { !self.messages.isEmpty }
     let restored = messages.removeFirst()
-    try require(restored["restored"] as? Bool == true,
-      "closing Settings restores the original webpage and native first responder")
+    try restoredMeasurement(restored, stage: "synthetic Settings closes", allowFocusRoundTrip: true)
     nativeFailures = 0
     let resumed = Timer(timeInterval: 0.01, repeats: true) { [weak self] _ in
       MainActor.assumeIsolated {
@@ -634,6 +642,7 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
     try await drag(from: textStart, to: textEnd)
     try await waitFor("a real pointer drag selects read-only answer text") { text.selectedRange().length > 0 }
     try await probe("after selecting answer text")
+    try await checkContextMenu(for: text, at: textStart, above: targetWindow)
     let beforeMove = panel.frame
     let moveX: CGFloat = beforeMove.maxX + 24 <= screen.visibleFrame.maxX ? 24 : -24
     let moveHandle = NSPoint(x: beforeMove.midX, y: beforeMove.maxY - 12)
@@ -647,17 +656,31 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
       panel.frame.width < beforeResize.width - 8 && !windows.fitsContent
     }
     try await probe("after resizing the conversation")
+    let contextPoint = panel.convertPoint(toScreen: text.convert(NSPoint(x: 3, y: textY), to: nil))
+    try await rightClick(at: contextPoint)
+    try await waitFor("the context menu reopens before an outside click") { self.contextMenu != nil }
+    try require(contextMenu?.frame.contains(field) == false, "the original field is outside the context menu")
+    try await probe("with the context menu awaiting an outside click")
     // Click the original textarea. Its input handler must still receive this click, and the global
     // mouse monitor must close the finished conversation without consuming it or taking focus.
     try require(!panel.frame.insetBy(dx: -10, dy: -10).contains(field), "the original field is outside the answer")
+    let beforeOutside = try await probe("before outside dismissal")
     try postPointer(.leftMouseDown, at: field)
     try postPointer(.leftMouseUp, at: field)
-    try await waitFor("the actual outside click dismisses the answer") { self.snips?.sessions.isEmpty == true }
-    try await probe("after outside dismissal")
+    try await waitFor("the actual outside click dismisses the answer and its context menu") {
+      self.snips?.sessions.isEmpty == true && self.contextMenu == nil
+    }
+    let afterOutside = try await probe("after outside dismissal")
+    try require(beforeOutside["fieldPointerDownCount"] as? Int != nil &&
+      afterOutside["fieldPointerDownCount"] as? Int ==
+        (beforeOutside["fieldPointerDownCount"] as? Int).map { $0 + 1 },
+      "the outside click reaches the original webpage field: before \(beforeOutside), after \(afterOutside)")
     try require(nativeFailures == 0, "the original app remains frontmost with its key window throughout")
+    try await checkReplacementAndClose(at: field, from: start, to: end, above: targetWindow)
     try await runAppShell(at: field, on: screen)
     print("SnapScreen focus test passed (test hooks build): \(checks) checks, actual ⌥⇧S, pointer selection, " +
-      "Stop, Retry, Settings return, Copy, preview, text selection, move, resize, close and outside dismissal; " +
+      "Stop, Retry, Settings return, Copy, preview, text selection, context menu typing and Copy, move, resize, " +
+      "outside click delivery, replacement and conversation close; " +
       "then the real app shell launched through " +
       "LaunchServices, its notice, an activation it handed back, " +
       (CommandLine.arguments.contains("--fullscreen") ? "a conversation open through Settings" :
@@ -674,7 +697,8 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
     }
   }
 
-  private func probe(_ stage: String) async throws {
+  @discardableResult
+  private func probe(_ stage: String) async throws -> [String: Any] {
     try postKey(CGKeyCode(kVK_ANSI_X))
     expectedInput += "x"
     try await Task.sleep(for: .milliseconds(100))
@@ -682,14 +706,142 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
     try commands.fileHandleForWriting.write(contentsOf: Data("check\n".utf8))
     try await waitFor("the target reports webpage focus \(stage)") { !self.messages.isEmpty }
     let report = messages.removeFirst()
+    let focusEvents = report["focusEvents"] as? [String: Int] ?? [:]
     try require(report["focused"] as? Bool == true && report["activeElement"] as? Bool == true &&
       report["blurCount"] as? Int == 0 && report["visible"] as? Bool == true &&
       report["hiddenCount"] as? Int == 0 && report["nativeFailures"] as? Int == 0 &&
+      ["windowBlur", "windowFocus", "fieldBlur", "fieldFocus"].allSatisfy { focusEvents[$0] == 0 } &&
       report["text"] as? String == expectedInput && nativeFailures == 0,
       "the original webpage retains its focus ring, first responder and keyboard input \(stage): \(report)")
+    try preservedSpace(report, stage: stage)
+    return report
   }
 
-  private func passive(_ panel: CompanionPanel, above window: Int, stage: String) throws {
+  private func preservedSpace(_ report: [String: Any], stage: String) throws {
+    try require(report["fullscreen"] as? Bool == CommandLine.arguments.contains("--fullscreen") &&
+      report["fullscreenExitEvents"] as? Int == 0,
+      "the target retains its original fullscreen mode \(stage): \(report)")
+  }
+
+  private func restoredMeasurement(_ report: [String: Any], stage: String,
+    allowFocusRoundTrip: Bool) throws {
+    try require(report["restored"] as? Bool == true, "the original focus is restored \(stage): \(report)")
+    try preservedSpace(report, stage: stage)
+    let events = report["focusEvents"] as? [String: Int] ?? [:]
+    let maximum = allowFocusRoundTrip ? 1 : 0
+    try require(["windowBlur", "windowFocus", "fieldBlur", "fieldFocus"].allSatisfy {
+      events[$0].map { (0...maximum).contains($0) } == true
+    }, "at most \(maximum) focus round trip occurs \(stage): \(report)")
+    let reasons = report["nativeFailureReasons"] as? [String: Int] ?? [:]
+    try require((reasons["resignActiveEvents"] ?? 0) <= maximum &&
+      (reasons["resignKeyEvents"] ?? 0) <= maximum &&
+      (allowFocusRoundTrip || report["nativeFailures"] as? Int == 0) &&
+      report["hiddenCount"] as? Int == 0,
+      "only the permitted native and visibility transitions occur \(stage): \(report)")
+  }
+
+  /// These menus use real pointer input, including their read-only actions, while every key
+  /// still goes to the foreground webpage. Each opening is checked before its action is chosen.
+  private func checkContextMenu(for text: NSTextView, at point: NSPoint, above targetWindow: Int) async throws {
+    for title in ["Select All", "Copy"] {
+      try await rightClick(at: point)
+      try await waitFor("right-clicking answer text opens its passive menu") { self.contextMenu != nil }
+      guard let menu = contextMenu, let button = button(title, in: menu.contentView) else {
+        throw Failure(description: "the answer menu exposes \(title)")
+      }
+      try passive(menu, above: targetWindow, stage: "answer context menu")
+      try require(button.isEnabled, "the answer menu's \(title) is enabled")
+      try await probe("with the answer context menu open for \(title)")
+      try require(menu.isVisible, "typing into the webpage leaves the context menu open")
+      try await click(button)
+      try await waitFor("choosing \(title) closes the answer context menu") { self.contextMenu == nil }
+      if title == "Select All" {
+        try require(text.selectedRange() == NSRange(location: 0, length: (text.string as NSString).length),
+          "the context menu selects all answer text without taking the keyboard")
+      } else {
+        try require(pasteboard.string(forType: .string) == text.string,
+          "the context menu copies the selected answer text to the private pasteboard")
+      }
+      try await probe("after the answer context menu's \(title)")
+    }
+  }
+
+  private var contextMenu: PassivePanel? {
+    NSApp.windows.first { $0.title == "SnapScreen menu" && $0.isVisible } as? PassivePanel
+  }
+
+  private func button(_ title: String, in view: NSView?) -> NSButton? {
+    guard let view else { return nil }
+    if let button = view as? NSButton, button.title == title { return button }
+    for child in view.subviews {
+      if let found = button(title, in: child) { return found }
+    }
+    return nil
+  }
+
+  /// Replacement and titlebar close need WindowServer coverage too: configuration checks cannot
+  /// detect a brief transfer of the keyboard while AppKit closes the earlier windows.
+  private func checkReplacementAndClose(at field: NSPoint, from start: NSPoint, to end: NSPoint,
+    above targetWindow: Int) async throws {
+    let earlier = try await startSelection(at: field)
+    let earlierPanel = try await select(earlier, from: start, to: end, above: targetWindow)
+    try await waitFor("the earlier replacement-test answer finishes") { earlier.session.phase == .ready }
+    guard let thumbnail = earlier.conversation?.thumbnail else {
+      throw Failure(description: "the earlier conversation exposes its thumbnail")
+    }
+    try await click(thumbnail)
+    try await waitFor("the earlier preview opens before a new snip") { earlier.previewPanel?.isVisible == true }
+    guard let preview = earlier.previewPanel else { throw Failure(description: "the earlier preview exists") }
+    try await probe("with the earlier conversation and preview open")
+
+    let replacement = try await startSelection(at: field)
+    try require(earlierPanel.isVisible && preview.isVisible,
+      "a new overlay leaves the earlier conversation and preview visible until selection")
+    try await probe("while selecting a replacement snip")
+    let panel = try await select(replacement, from: start, to: end, above: targetWindow)
+    try require(!earlierPanel.isVisible && !preview.isVisible && earlier.session.phase == .ended &&
+      snips?.sessions.count == 1 && snips?.sessions.first === replacement,
+      "selecting the replacement closes the earlier conversation and preview")
+    try await probe("after a new snip replaces the earlier conversation and preview")
+    try await waitFor("the replacement answer finishes") { replacement.session.phase == .ready }
+    guard let close = panel.standardWindowButton(.closeButton) else {
+      throw Failure(description: "the conversation exposes its close button")
+    }
+    try await click(close)
+    try await waitFor("the real conversation close button ends its session") { self.snips?.sessions.isEmpty == true }
+    try await probe("after clicking the conversation close button")
+  }
+
+  private func startSelection(at field: NSPoint) async throws -> SessionWindows {
+    try postPointer(.mouseMoved, at: field)
+    try postKey(CGKeyCode(kVK_ANSI_S), flags: [.maskAlternate, .maskShift])
+    try await waitFor("the actual shortcut opens another selection") {
+      self.snips?.sessions.contains { $0.overlay != nil } == true
+    }
+    guard let windows = snips?.sessions.first(where: { $0.overlay != nil }) else {
+      throw Failure(description: "the new selection has a session")
+    }
+    return windows
+  }
+
+  private func select(_ windows: SessionWindows, from start: NSPoint, to end: NSPoint,
+    above targetWindow: Int) async throws -> CompanionPanel {
+    guard let overlay = windows.overlay, let view = windows.selectionView else {
+      throw Failure(description: "the new selection has an overlay and view")
+    }
+    try passive(overlay, above: targetWindow, stage: "new selection")
+    try postPointer(.leftMouseDown, at: start)
+    try await Task.sleep(for: .milliseconds(80))
+    try postPointer(.leftMouseDragged, at: end)
+    try await waitFor("the real drag selects the new region") { view.isDragging && view.canConfirm }
+    try postPointer(.leftMouseUp, at: end)
+    try await waitFor("the new selection opens its conversation") { windows.panel?.isVisible == true }
+    guard let panel = windows.panel else { throw Failure(description: "the new conversation exists") }
+    try passive(panel, above: targetWindow, stage: "new conversation")
+    return panel
+  }
+
+  private func passive(_ panel: PassivePanel, above window: Int, stage: String) throws {
     try require(panel.isVisible && panel.isOnActiveSpace && !panel.isKeyWindow && !panel.isMainWindow &&
       !panel.canBecomeKey && !panel.canBecomeMain && panel.styleMask.contains(.nonactivatingPanel) &&
       panel.isFloatingPanel && panel.becomesKeyOnlyIfNeeded && !panel.hidesOnDeactivate &&
@@ -752,10 +904,25 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
       try requireInputTarget()
     }
     let height = CGDisplayBounds(CGMainDisplayID()).height
+    let button: CGMouseButton = [.rightMouseDown, .rightMouseUp, .rightMouseDragged].contains(type) ? .right : .left
     CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: CGPoint(x: point.x, y: height - point.y),
-      mouseButton: .left)?.post(tap: .cghidEventTap)
-    if type == .leftMouseDown || (type == .leftMouseDragged && pressedPoint != nil) { pressedPoint = point }
-    if type == .leftMouseUp { pressedPoint = nil }
+      mouseButton: button)?.post(tap: .cghidEventTap)
+    if type == .leftMouseDown || type == .rightMouseDown {
+      pressedPoint = point
+      pressedButton = button
+    } else if (type == .leftMouseDragged || type == .rightMouseDragged) && pressedPoint != nil {
+      pressedPoint = point
+    } else if type == .leftMouseUp || type == .rightMouseUp {
+      pressedPoint = nil
+    }
+  }
+
+  private func rightClick(at point: NSPoint) async throws {
+    try postPointer(.mouseMoved, at: point)
+    try postPointer(.rightMouseDown, at: point)
+    try await Task.sleep(for: .milliseconds(60))
+    try postPointer(.rightMouseUp, at: point)
+    try await Task.sleep(for: .milliseconds(100))
   }
 
   private func postKey(_ code: CGKeyCode, flags: CGEventFlags = []) throws {
@@ -793,8 +960,8 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
     // pairs an already-posted event; it never starts input in another application.
     if let point = pressedPoint {
       let height = CGDisplayBounds(CGMainDisplayID()).height
-      CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp,
-        mouseCursorPosition: CGPoint(x: point.x, y: height - point.y), mouseButton: .left)?.post(tap: .cghidEventTap)
+      CGEvent(mouseEventSource: nil, mouseType: pressedButton == .right ? .rightMouseUp : .leftMouseUp,
+        mouseCursorPosition: CGPoint(x: point.x, y: height - point.y), mouseButton: pressedButton)?.post(tap: .cghidEventTap)
       pressedPoint = nil
     }
   }
@@ -915,7 +1082,6 @@ extension LiveFocusTest {
     // Settings… takes the keyboard on purpose, as does opening the running app again, which shows
     // Settings. Closing it returns the keyboard each time.
     if menuBar {
-      front = .settings
       try await chooseMenuItem("Settings…", in: app, pid)
       try await waitFor("Settings… gives Settings the keyboard") { self.settingsHasKeyboard(app, pid) }
       try await closeSettings(app, pid)
@@ -928,6 +1094,9 @@ extension LiveFocusTest {
     try await closeSettings(app, pid)
     try await settle("after reopened Settings closes", blurAllowed: true)
     try await probe("after reopened Settings closes")
+    if !menuBar {
+      try require(hasConversation(pid), "the real app shell keeps its conversation visible through fullscreen Settings")
+    }
 
     if menuBar {
       try await chooseMenuItem("Quit SnapScreen", in: app, pid)
@@ -940,38 +1109,33 @@ extension LiveFocusTest {
     try require(nativeFailures == 0, "only Settings, opened on purpose, ever took the target's place in front")
   }
 
-  /// Clicks the menu bar item, waits for its menu, and chooses `title`.
+  /// Opening a menu and typing while it is open must leave every focus observer clean. Only the
+  /// final Settings button, after those checks, is allowed to activate the app.
   private func chooseMenuItem(_ title: String, in app: AXUIElement, _ pid: pid_t) async throws {
     guard let item = statusItem(of: app), let point = axCenter(item) else {
       throw Failure(description: "the app shell has a menu bar item")
     }
     try await click(at: point)
     var choice: NSPoint?
-    try await waitFor("the menu bar item's menu opens with \(title)") {
-      guard !self.windowFrames(of: pid, .popUpMenuWindow).isEmpty else { return false }
-      choice = self.axDescendants(of: item, depth: 3).first { self.axString($0, kAXTitleAttribute) == title }
-        .flatMap { self.axCenter($0) }
-      return choice != nil
+    do {
+      try await waitFor("the menu bar item's menu opens with \(title)") {
+        guard !self.windowFrames(of: pid, .popUpMenuWindow).isEmpty else { return false }
+        // Borderless panel titles needn't be exposed as AX window titles. Find the actual
+        // command button among this isolated app's windows, as for the missing-key notice.
+        choice = self.axButton(title, in: app).flatMap { self.axCenter($0) }
+        return choice != nil
+      }
+    } catch {
+      throw Failure(description: "the menu bar item's menu opens with \(title): " +
+        "\(windowFrames(of: pid, .popUpMenuWindow).count) menu panels, button found \(choice != nil)")
     }
+    try await probe("with the menu open before choosing \(title)")
+    try require(!windowFrames(of: pid, .popUpMenuWindow).isEmpty,
+      "typing into the webpage leaves the menu bar item's menu open")
+    if title == "Settings…" { front = .settings }
     try await click(at: choice!)
     try await waitFor("the menu closes once \(title) is chosen") { self.windowFrames(of: pid, .popUpMenuWindow).isEmpty }
-    // A tracking menu makes the front app's window resign key without deactivating it, changing
-    // its first responder or blurring its page, for about 550 ms (measured 2026-10-14), and the
-    // window is key again as the menu closes. That period is accounted for here, so the stages
-    // after the menu are held to the full standard. An item that takes focus on purpose, such as
-    // Settings…, is checked once Settings closes instead.
-    guard front == .target else { return }
-    messages.removeAll()
-    try commands.fileHandleForWriting.write(contentsOf: Data("reset\n".utf8))
-    try await waitFor("the target reports its focus once the \(title) menu closes") {
-      self.messages.contains { $0["restored"] != nil }
-    }
-    let report = messages.first { $0["restored"] != nil }!
-    messages.removeAll()
-    let reasons = report["nativeFailureReasons"] as? [String: Int] ?? [:]
-    try require(report["restored"] as? Bool == true && report["blurCount"] as? Int == 0 &&
-      report["hiddenCount"] as? Int == 0 && reasons.keys.allSatisfy { ["nonKeySamples", "resignKeyEvents"].contains($0) },
-      "the \(title) menu only made the original window resign key, unseen by its page, and it's key again: \(report)")
+    if front == .target { try await probe("after choosing \(title) from the menu") }
   }
 
   private func settingsHasKeyboard(_ app: AXUIElement, _ pid: pid_t) -> Bool {
@@ -1001,10 +1165,7 @@ extension LiveFocusTest {
     try await waitFor("the target reports its focus \(stage)") { self.messages.contains { $0["restored"] != nil } }
     let report = messages.first { $0["restored"] != nil }!
     messages.removeAll()
-    try require(report["restored"] as? Bool == true &&
-      (blurAllowed || report["blurCount"] as? Int == 0 && report["hiddenCount"] as? Int == 0 &&
-        report["nativeFailures"] as? Int == 0),
-      "the webpage has the keyboard \(stage)\(blurAllowed ? "" : ", and never blurred or hid"): \(report)")
+    try restoredMeasurement(report, stage: stage, allowFocusRoundTrip: blurAllowed)
   }
 
   private func click(at point: NSPoint, frontmost: pid_t? = nil) async throws {
@@ -1087,6 +1248,7 @@ final class LiveFocusTarget: NSObject, NSApplicationDelegate, NSWindowDelegate, 
   private var nativeFailureReasons: [String: Int] = [:]
   private var pending = Data()
   private var positiveControl = false
+  private var fullscreenExitEvents = 0
   private var focusObservers: [NSObjectProtocol] = []
 
   func applicationDidFinishLaunching(_ notification: Notification) {
@@ -1109,10 +1271,15 @@ final class LiveFocusTarget: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         font: 24px -apple-system; } textarea:focus { outline: 4px solid #8bb9ff }
       </style></head><body>Focus must stay on this local webpage throughout the snip.
       <textarea id="field" aria-label="Keyboard focus test" autofocus></textarea>
-      <script>window.blurCount = 0; window.hiddenCount = 0;
-      window.addEventListener('blur', () => window.blurCount++);
+      <script>window.blurCount = 0; window.hiddenCount = 0; window.fieldPointerDownCount = 0;
+      window.focusEvents = { windowBlur: 0, windowFocus: 0, fieldBlur: 0, fieldFocus: 0 };
+      window.addEventListener('blur', () => { window.blurCount++; window.focusEvents.windowBlur++; });
+      window.addEventListener('focus', () => window.focusEvents.windowFocus++);
       document.addEventListener('visibilitychange', () => { if (document.hidden) window.hiddenCount++; });
-      document.getElementById('field').addEventListener('blur', () => window.blurCount++);</script>
+      const field = document.getElementById('field');
+      field.addEventListener('blur', () => { window.blurCount++; window.focusEvents.fieldBlur++; });
+      field.addEventListener('focus', () => window.focusEvents.fieldFocus++);
+      field.addEventListener('pointerdown', () => window.fieldPointerDownCount++);</script>
       </body></html>
       """, baseURL: nil)
     FileHandle.standardInput.readabilityHandler = { [weak self] handle in
@@ -1146,10 +1313,11 @@ final class LiveFocusTarget: NSObject, NSApplicationDelegate, NSWindowDelegate, 
   }
 
   func windowDidEnterFullScreen(_ notification: Notification) { prepare() }
+  func windowDidExitFullScreen(_ notification: Notification) { fullscreenExitEvents += 1 }
 
   private func prepare() {
     window.makeFirstResponder(webView)
-    webView.evaluateJavaScript("document.getElementById('field').focus(); window.blurCount = 0; window.hiddenCount = 0")
+    webView.evaluateJavaScript("document.getElementById('field').focus(); window.blurCount = 0; window.hiddenCount = 0; Object.keys(window.focusEvents).forEach(key => window.focusEvents[key] = 0)")
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
       guard let self else { return }
       // A positive control establishes that this WKWebView reports a real loss of page focus.
@@ -1167,7 +1335,7 @@ final class LiveFocusTarget: NSObject, NSApplicationDelegate, NSWindowDelegate, 
           other.close()
           self.window.makeKeyAndOrderFront(nil)
           self.window.makeFirstResponder(self.webView)
-          self.webView.evaluateJavaScript("document.getElementById('field').focus(); window.blurCount = 0; window.hiddenCount = 0")
+          self.webView.evaluateJavaScript("document.getElementById('field').focus(); window.blurCount = 0; window.hiddenCount = 0; Object.keys(window.focusEvents).forEach(key => window.focusEvents[key] = 0)")
           self.startMeasuring()
         }
       }
@@ -1232,24 +1400,30 @@ final class LiveFocusTarget: NSObject, NSApplicationDelegate, NSWindowDelegate, 
   /// `reset` also reports what the page saw since the last reset, then starts counting again.
   private func reportState(reset: Bool) {
     webView.evaluateJavaScript("""
-      ({ focused: document.hasFocus(), activeElement: document.activeElement === document.getElementById('field'),
-        blurCount: window.blurCount, visible: document.visibilityState === 'visible',
-        hiddenCount: window.hiddenCount, text: document.getElementById('field').value })
+      (() => {
+        const result = { focused: document.hasFocus(), activeElement: document.activeElement === document.getElementById('field'),
+          blurCount: window.blurCount, visible: document.visibilityState === 'visible',
+          hiddenCount: window.hiddenCount, text: document.getElementById('field').value,
+          focusEvents: { ...window.focusEvents }, fieldPointerDownCount: window.fieldPointerDownCount };
+        if (\(reset ? "true" : "false")) {
+          window.blurCount = 0; window.hiddenCount = 0;
+          Object.keys(window.focusEvents).forEach(key => window.focusEvents[key] = 0);
+        }
+        return result;
+      })()
       """) { [weak self] value, error in
       guard let self else { return }
       var result = value as? [String: Any] ?? ["error": error?.localizedDescription ?? "No webpage result"]
       result["nativeFailures"] = self.nativeFailures
       result["nativeFailureReasons"] = self.nativeFailureReasons
+      result["fullscreen"] = self.window.styleMask.contains(.fullScreen)
+      result["fullscreenExitEvents"] = self.fullscreenExitEvents
       if reset {
         result["restored"] = NSApp.isActive && self.window.isKeyWindow && self.window.firstResponder === self.responder &&
           result["focused"] as? Bool == true && result["activeElement"] as? Bool == true &&
           result["visible"] as? Bool == true
         self.nativeFailures = 0
         self.nativeFailureReasons = [:]
-        self.webView.evaluateJavaScript("window.blurCount = 0; window.hiddenCount = 0") { [weak self] _, _ in
-          self?.report(result)
-        }
-        return
       }
       self.report(result)
     }

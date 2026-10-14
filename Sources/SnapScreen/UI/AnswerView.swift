@@ -88,6 +88,50 @@ func splitNativeAnswerSegments(_ text: String) -> [NativeAnswerSegment] {
 
 /// Selectable, read-only text.
 class ReadOnlyTextView: NSTextView {
+  private let contextMenu = PassiveMenu()
+
+  // NSTextView's native contextual menu tracks the keyboard even in a non-key panel. Keep its
+  // useful read-only actions in a passive pointer menu instead; typing still reaches the app below.
+  override func menu(for event: NSEvent) -> NSMenu? { nil }
+
+  override func rightMouseDown(with event: NSEvent) { showContextMenu(for: event) }
+
+  override func mouseDown(with event: NSEvent) {
+    if event.modifierFlags.contains(.control) { showContextMenu(for: event) }
+    else { super.mouseDown(with: event) }
+  }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    if window == nil { contextMenu.dismiss() }
+  }
+
+  /// Retry may clear a failed answer through accessibility without a pointer press to dismiss
+  /// its menu. Close that menu even when this view stays attached to the same window.
+  func clearText() {
+    contextMenu.dismiss()
+    string = ""
+  }
+
+  private func showContextMenu(for event: NSEvent) {
+    guard let window else { return }
+    contextMenu.show(contextMenuItems(), at: window.convertPoint(toScreen: event.locationInWindow))
+  }
+
+  /// Actions read the current selection only when clicked and never keep answer text alive.
+  func contextMenuItems() -> [PassiveMenuItem] {
+    [PassiveMenuItem(title: "Copy", isEnabled: selectedRange().length > 0) { [weak self] in
+      guard let self else { return }
+      let text = self.string as NSString
+      let range = self.selectedRange()
+      guard range.location != NSNotFound, range.length > 0, NSMaxRange(range) <= text.length else { return }
+      Clipboard.copy(text.substring(with: range))
+    }, PassiveMenuItem(title: "Select All", isEnabled: !string.isEmpty) { [weak self] in
+      guard let self else { return }
+      self.setSelectedRange(NSRange(location: 0, length: (self.string as NSString).length))
+    }]
+  }
+
   func configureReadOnly(font: NSFont) {
     isEditable = false
     isSelectable = true
@@ -303,7 +347,7 @@ final class AnswerSegmentView: NSView {
 
   func clear() {
     segment = .text("")
-    textView.string = ""
+    textView.clearText()
     textView.undoManager?.removeAllActions()
     languageLabel?.stringValue = ""
     copyButton?.cancelFeedback()
