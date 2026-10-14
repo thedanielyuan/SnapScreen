@@ -55,6 +55,8 @@ final class NoticePanelView: NSVisualEffectView {
       color: .secondaryLabelColor) ?? NSImage())
     icon.setAccessibilityElement(false)
     messageLabel.font = .systemFont(ofSize: 13)
+    // Selectable text would open the native text menu, which takes the keyboard from your app.
+    messageLabel.isSelectable = false
     // A fixed width lets the panel's fitting size include every wrapped line.
     messageLabel.preferredMaxLayoutWidth = Self.messageWidth
     messageLabel.widthAnchor.constraint(equalToConstant: Self.messageWidth).isActive = true

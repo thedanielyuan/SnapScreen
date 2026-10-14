@@ -171,6 +171,8 @@ final class SessionEndedView: NSView {
     let title = NSTextField(labelWithString: "Session ended")
     title.font = .systemFont(ofSize: 15, weight: .semibold)
     messageLabel.font = .systemFont(ofSize: 13)
+    // Selectable text would open the native text menu, which takes the keyboard from your app.
+    messageLabel.isSelectable = false
     messageLabel.textColor = .secondaryLabelColor
     messageLabel.alignment = .center
     let stack = NSStackView(views: [icon, title, messageLabel])

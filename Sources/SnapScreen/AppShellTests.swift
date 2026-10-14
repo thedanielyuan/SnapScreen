@@ -1,5 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
+import SnapScreenCore
 
 private enum AppShellTestError: Error { case failed(String) }
 
@@ -8,6 +9,16 @@ func hasPassivePanelConfiguration(_ panel: NSPanel) -> Bool {
   !panel.canBecomeKey && !panel.canBecomeMain && panel.styleMask.contains(.nonactivatingPanel) &&
     panel.isFloatingPanel && panel.becomesKeyOnlyIfNeeded && !panel.hidesOnDeactivate && !panel.canHide &&
     panel.collectionBehavior.contains([.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle])
+}
+
+/// Text in a passive panel that could open the native text menu or a dragging session, each of
+/// which takes the foreground window's key status: a selectable or editable label, or a text view
+/// other than the read-only one with a passive menu.
+func nativeTextViews(in view: NSView?) -> [NSView] {
+  guard let view else { return [] }
+  let native = (view as? NSTextField).map { $0.isSelectable || $0.isEditable } ??
+    (view as? NSTextView).map { !($0 is ReadOnlyTextView) || $0.isEditable } ?? false
+  return (native ? [view] : []) + view.subviews.flatMap { nativeTextViews(in: $0) }
 }
 
 /// The shortcut, menus, quit requests, notices and Keychain store. Windows stay offscreen. The
@@ -140,6 +151,9 @@ func runAppShellTests() throws -> Int {
   try check(hasPassivePanelConfiguration(panel) && panel.level == .floating,
     "a notice floats in every Space without activating SnapScreen or taking the keyboard")
   try check(notice.actionButton?.acceptsFirstMouse(for: nil) == true, "a notice's buttons act on the first click")
+  try check(nativeTextViews(in: notice).isEmpty && nativeTextViews(in: menuContent).isEmpty &&
+    nativeTextViews(in: SessionEndedView(message: "Snip again.")).isEmpty,
+    "notices, menus and the Session ended message have no text that opens a native menu")
   try check([NSApp.effectiveAppearance, menuPanel.effectiveAppearance, panel.effectiveAppearance].allSatisfy {
     $0.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
   }, "SnapScreen's windows and menus are dark whatever the system's appearance")
@@ -192,9 +206,44 @@ func runAppShellTests() throws -> Int {
     try check(!duringRead && allowed == original && changes == [false, original],
       "a nonprompting read restores prompts to their original setting: \(original)")
   }
+  // With prompts off, a locked keychain still shows its unlock dialog, so an answer's read first
+  // checks the item's keychain. The self-test's item is in the unlocked login keychain.
+  let item: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: store.service,
+    kSecAttrAccount as String: store.account]
+  try check(KeychainLock.state(of: item) == .unlocked, "the saved key's keychain reports that it's unlocked")
+  func inspection(keychain: Bool = true, status: UInt32?) -> KeychainLock.Inspection {
+    KeychainLock.Inspection(keychain: { keychain ? $0 : nil }, status: { _ in status })
+  }
+  try check(KeychainLock.state(of: item, using: inspection(status: 0)) == .locked &&
+    KeychainLock.state(of: item, using: inspection(status: 7)) == .unlocked &&
+    KeychainLock.state(of: item, using: inspection(status: 6)) == .locked,
+    "the lock state follows the keychain's unlock flag")
+  try check(KeychainLock.state(of: item, using: nil) == .unknown &&
+    KeychainLock.state(of: item, using: inspection(status: nil)) == .unknown &&
+    KeychainLock.state(of: item, using: inspection(keychain: false, status: 1)) == .unknown,
+    "missing lock-status symbols or an unreadable status leave the state unknown")
+  for state in [KeychainLock.State.locked, .unknown] {
+    var checks = 0
+    let guarded = KeychainStore(service: store.service, account: store.account, lockState: { _ in
+      checks += 1
+      return state
+    })
+    do {
+      _ = try guarded.readForRequest()
+      throw AppShellTestError.failed("an answer reads the key despite a \(state) keychain")
+    } catch let error as AnthropicError {
+      try check(checks == 1 && error == AnthropicError("keychain",
+        KeychainError(operation: .readWithoutPrompt, status: errSecInteractionNotAllowed).message),
+        "a \(state) keychain fails an answer's read before the key is read, sending you to Settings")
+    }
+    try check((try guarded.read()) == "sk-ant-self-test-second" && checks == 1,
+      "Settings reads a \(state) keychain's key itself, where macOS may ask for the password")
+  }
+  try check((try KeychainStore(service: store.service, account: store.account, lockState: { _ in .missing })
+    .readWithoutPrompt()) == nil, "an item that isn't found is a missing key, not a Keychain failure")
   try store.remove()
-  try check(!store.hasKey && (try store.read()) == nil && (try store.readWithoutPrompt()) == nil,
-    "Remove key deletes the Keychain item")
+  try check(!store.hasKey && (try store.read()) == nil && (try store.readWithoutPrompt()) == nil &&
+    KeychainLock.state(of: item) == .missing, "Remove key deletes the Keychain item")
   try store.remove()
   try check(KeychainError(operation: .read, status: errSecAuthFailed).message ==
     "Couldn't read the API key from your Keychain because access was denied.", "a denied Keychain read is explained")

@@ -171,7 +171,8 @@ func runSessionWindowsTests() throws -> Int {
   }
   try check(hasPassivePanelConfiguration(panel) && panel.level == .floating,
     "the conversation is a floating panel that cannot take keyboard focus")
-  try check(editableViews(in: panel.contentView).isEmpty, "the conversation has no editable field")
+  try check(editableViews(in: panel.contentView).isEmpty && nativeTextViews(in: panel.contentView).isEmpty,
+    "the conversation has no editable field, nor text that opens a native menu")
   let largest = panel.frameRect(forContentRect: NSRect(origin: .zero, size: SessionWindows.defaultConversationSize))
   try check(panel.frame.height < largest.height && fitsThread(thread) && windows.fitsContent,
     "the conversation opens only as tall as its answer needs")
@@ -202,8 +203,9 @@ func runSessionWindowsTests() throws -> Int {
   windows.handle(.ended)
   try check(windows.panel?.title == "SnapScreen — Session ended" && windows.conversation == nil &&
     windows.stopButton == nil &&
-    (windows.panel?.contentView as? SessionEndedView)?.messageLabel.stringValue == SessionWindows.endedMessage,
-    "an ended session keeps no screenshot or answer")
+    (windows.panel?.contentView as? SessionEndedView)?.messageLabel.stringValue == SessionWindows.endedMessage &&
+    nativeTextViews(in: windows.panel?.contentView).isEmpty,
+    "an ended session keeps no screenshot or answer, and its message opens no native menu")
   windows.panel?.performClose(nil)
   try check(windows.session.phase == .ended && windows.panel == nil && snips.sessions.isEmpty,
     "closing the conversation ends the session")

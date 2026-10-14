@@ -64,6 +64,11 @@ func runAnswerViewTests() throws -> Int {
   selectedActions[1].action()
   try check(selectable.selectedRange() == NSRange(location: 0, length: 10),
     "the passive Select All action selects text without needing a key window")
+  let drag = #selector(NSTextView.dragSelection(with:offset:slideBack:))
+  try check(class_getMethodImplementation(ReadOnlyTextView.self, drag) !=
+    class_getMethodImplementation(NSTextView.self, drag) &&
+    !selectable.dragSelection(with: NSEvent(), offset: .zero, slideBack: false),
+    "selected answer text can't be dragged, which would start a session that takes the keyboard")
   selectable.setSelectedRange(NSRange(location: 0, length: 0))
   try check(!selectable.contextMenuItems()[0].isEnabled, "Copy is disabled without a selection")
   selectable.string = ""

@@ -51,7 +51,9 @@ how data is handled. Never add a privacy section to `README.md`.
   `anthropic-api-key`), never in files, `UserDefaults` or logs, and goes only to
   `api.anthropic.com`. Each request reads it with `readWithoutPrompt`, and no window keeps it;
   only Settings may let macOS ask for the login password. If Keychain prompts cannot be disabled,
-  fail the read without accessing the key, rather than risk a dialog taking focus.
+  fail the read without accessing the key, rather than risk a dialog taking focus. Disabling them
+  doesn't stop the dialog that unlocks a locked keychain, so the read first checks that the key's
+  keychain is unlocked (`KeychainLock`) and fails when it isn't or can't tell.
 - Capture only on the shortcut or Snip, only the display under the pointer, without SnapScreen's
   own windows. Captures, crops and answers stay in memory, are never written to disk or logged,
   and are released when their session closes. Only Copy changes the clipboard; tests use private
@@ -70,7 +72,10 @@ how data is handled. Never add a privacy section to `README.md`.
   key status and typed input. Their global and local mouse monitors run only while a menu is
   visible, read only the pointer event needed to dismiss it, and never consume an outside click.
   Menus take no keyboard input; typing stays in the foreground app. Answer and error text context
-  menus offer only Copy and Select All, and only Copy writes the clipboard.
+  menus offer only Copy and Select All, and only Copy writes the clipboard. Other text in passive
+  panels is a non-selectable label, since a selectable one opens the native text menu, and
+  `ReadOnlyTextView` refuses to drag its selection, since a dragging session takes the foreground
+  window's key status.
 - Only Settings, opened explicitly, keeps the app active: `applicationDidBecomeActive` hands any
   other activation back after `AppDelegate.handbackDelay`, and closing Settings hands focus back
   (`ForegroundFocus`). A missing key shows a passive notice instead of opening Settings.

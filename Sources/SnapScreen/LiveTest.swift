@@ -404,6 +404,15 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
       guard let button = view as? NSButton else { throw FocusTestFailure("the passive control is a button") }
       button.performClick(nil)
       await Task.yield()
+    }, contextClick: { view, control in
+      guard let window = view.window else { throw FocusTestFailure("the context-clicked text has a window") }
+      let point = view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil)
+      for type: NSEvent.EventType in control ? [.leftMouseDown, .leftMouseUp] : [.rightMouseDown, .rightMouseUp] {
+        window.sendEvent(NSEvent.mouseEvent(with: type, location: point, modifierFlags: control ? .control : [],
+          timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+          eventNumber: 0, clickCount: 1, pressure: 1)!)
+      }
+      await Task.yield()
     }, movePointer: { [self] point in
       let next = NSApp.windows.compactMap { window -> NoticePanelView? in
         guard window.isVisible, window.frame.contains(point) else { return nil }
@@ -726,6 +735,16 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
     try await drag(from: textStart, to: textEnd)
     try await waitFor("a real pointer drag selects read-only answer text") { text.selectedRange().length > 0 }
     try await probe("after selecting answer text")
+    // Dragging the selection would run a dragging session, which takes the webpage's key window.
+    // Hold the press as a person starting a text drag does, then drag onto the webpage.
+    let selectedText = panel.convertPoint(toScreen: text.convert(NSPoint(x: 40, y: textY), to: nil))
+    let onPage = NSPoint(x: screen.visibleFrame.minX + 160, y: screen.visibleFrame.maxY - 160)
+    try require(!panel.frame.insetBy(dx: -24, dy: -24).contains(onPage) &&
+      !NSRect(x: field.x - 140, y: field.y - 80, width: 280, height: 160).contains(onPage),
+      "the drag ends on the webpage, away from the answer and the field")
+    try await drag(from: selectedText, to: onPage, hold: .milliseconds(300), steps: 10)
+    try require(windows.panel?.isVisible == true, "dragging from selected answer text leaves the conversation open")
+    try await probe("after dragging selected answer text onto the webpage")
     try await checkContextMenu(for: text, at: textStart, above: targetWindow)
     let beforeMove = panel.frame
     let moveX: CGFloat = beforeMove.maxX + 24 <= screen.visibleFrame.maxX ? 24 : -24
@@ -766,6 +785,19 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
       probe: { [self] in _ = try await probe($0) },
       select: { [self] in _ = try await select($0, from: start, to: end, above: targetWindow) },
       click: { [self] in try await click($0) },
+      contextClick: { [self] view, control in
+        guard let window = view.window else { throw FocusTestFailure("the context-clicked text has a window") }
+        let point = window.convertPoint(toScreen: view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil))
+        if control {
+          try postPointer(.mouseMoved, at: point)
+          try postPointer(.leftMouseDown, at: point, flags: .maskControl)
+          try await Task.sleep(for: .milliseconds(60))
+          try postPointer(.leftMouseUp, at: point, flags: .maskControl)
+          try await Task.sleep(for: .milliseconds(100))
+        } else {
+          try await rightClick(at: point)
+        }
+      },
       movePointer: { [self] in
         try postPointer(.mouseMoved, at: $0)
         try await Task.sleep(for: .milliseconds(100))
@@ -969,7 +1001,7 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
   /// A native text/window drag can run a nested tracking loop on this process's main thread.
   /// Post its bounded continuation off-main, checking the foreground app before every move, and
   /// always release the press we started even if that app changed unexpectedly.
-  private func drag(from start: NSPoint, to end: NSPoint) async throws {
+  private func drag(from start: NSPoint, to end: NSPoint, hold: Duration = .zero, steps: Int = 4) async throws {
     try postPointer(.mouseMoved, at: start)
     try postPointer(.leftMouseDown, at: start)
     let expectedPID = target.processIdentifier
@@ -977,13 +1009,14 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
     let preserved = await Task.detached {
       var point = start
       var preserved = true
-      for step in 1...4 {
+      try? await Task.sleep(for: hold)
+      for step in 1...steps {
         try? await Task.sleep(for: .milliseconds(40))
         guard NSWorkspace.shared.frontmostApplication?.processIdentifier == expectedPID else {
           preserved = false
           break
         }
-        let fraction = CGFloat(step) / 4
+        let fraction = CGFloat(step) / CGFloat(steps)
         point = NSPoint(x: start.x + (end.x - start.x) * fraction, y: start.y + (end.y - start.y) * fraction)
         CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged,
           mouseCursorPosition: CGPoint(x: point.x, y: height - point.y), mouseButton: .left)?.post(tap: .cghidEventTap)
@@ -998,7 +1031,8 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
   }
 
   /// `frontmost` is the app expected in front instead of the target, such as Settings' app.
-  private func postPointer(_ type: CGEventType, at point: NSPoint, frontmost: pid_t? = nil) throws {
+  private func postPointer(_ type: CGEventType, at point: NSPoint, frontmost: pid_t? = nil,
+    flags: CGEventFlags = []) throws {
     if let frontmost {
       try require(target.isRunning && !NSApp.isActive && NSWorkspace.shared.frontmostApplication?.processIdentifier == frontmost,
         "only the expected app is in front before posting input to it")
@@ -1007,8 +1041,10 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
     }
     let height = CGDisplayBounds(CGMainDisplayID()).height
     let button: CGMouseButton = [.rightMouseDown, .rightMouseUp, .rightMouseDragged].contains(type) ? .right : .left
-    CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: CGPoint(x: point.x, y: height - point.y),
-      mouseButton: button)?.post(tap: .cghidEventTap)
+    let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: CGPoint(x: point.x, y: height - point.y),
+      mouseButton: button)
+    event?.flags = flags
+    event?.post(tap: .cghidEventTap)
     if type == .leftMouseDown || type == .rightMouseDown {
       pressedPoint = point
       pressedButton = button

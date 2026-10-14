@@ -17,6 +17,18 @@ struct AppServices {
   }
 }
 
+extension APIKeyStore {
+  /// How each request reads the key: without letting macOS ask for a password, and with a Keychain
+  /// failure reported as the conversation's error.
+  func readForRequest() throws -> String? {
+    do {
+      return try readWithoutPrompt()
+    } catch let error as KeychainError {
+      throw AnthropicError("keychain", error.message)
+    }
+  }
+}
+
 /// The menu bar app: its icon and menu, the global shortcut, snips, Settings and notices.
 final class AppDelegate: NSObject, NSApplicationDelegate {
   private let services: AppServices
@@ -38,13 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // The key is read for each request, so a key saved in Settings applies to open conversations.
     // A request never lets macOS ask for your password; Settings, which you open yourself, may.
     let keyStore = services.keyStore
-    let controller = SessionController(answers: services.answers, apiKey: {
-      do {
-        return try keyStore.readWithoutPrompt()
-      } catch let error as KeychainError {
-        throw AnthropicError("keychain", error.message)
-      }
-    })
+    let controller = SessionController(answers: services.answers, apiKey: { try keyStore.readForRequest() })
     snips = SnipWindows(controller: controller, showNotice: { [notices] in notices.show($0, action: $1) })
     hotkey.onPress = { [weak self] in self?.snip() }
     shortcutAvailable = hotkey.register()

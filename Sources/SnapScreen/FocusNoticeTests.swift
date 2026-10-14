@@ -87,6 +87,10 @@ func runNoticeFocusTests(using driver: FocusTestDriver) async throws {
       session?.phase == .ended && snips.sessions.isEmpty,
       "the capture failure has the expected message, no action and no capture windows")
     try await driver.probe("with the capture failure notice visible")
+    if expectedFailure {
+      try driver.require(!view.messageLabel.isSelectable, "the notice's message isn't selectable text")
+      try await driver.checkNoNativeMenu(on: view.messageLabel, "the notice's message")
+    }
     try await driver.click(view.closeButton)
     try await driver.wait("the capture failure close button dismisses its notice") { notices.panel == nil }
     try driver.require(!panel.isVisible && clock.pendingCount == 0,

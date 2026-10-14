@@ -8,6 +8,8 @@ import SnapScreenCore
 private enum FocusFailureFixture: String, CaseIterable {
   case authentication, rateLimit, server, provider, streamError, network
   case malformedStream, incompleteStream, refusal, headerTimeout, bodyTimeout, missingKey, keychain
+  /// The real Keychain store reading from a locked keychain, where macOS would ask to unlock it.
+  case lockedKeychain
 
   var failure: AnthropicError {
     switch self {
@@ -26,13 +28,13 @@ private enum FocusFailureFixture: String, CaseIterable {
       return AnthropicError("timeout", "Request timed out. Please try again.")
     case .missingKey:
       return AnthropicError("no_api_key", "Add your Anthropic API key in SnapScreen Settings, then Retry.")
-    case .keychain:
+    case .keychain, .lockedKeychain:
       return AnthropicError("keychain",
         KeychainError(operation: .readWithoutPrompt, status: errSecInteractionNotAllowed).message)
     }
   }
 
-  var failsBeforeRequest: Bool { self == .missingKey || self == .keychain }
+  var failsBeforeRequest: Bool { self == .missingKey || self == .keychain || self == .lockedKeychain }
   var hasPartialAnswer: Bool { self == .refusal || self == .bodyTimeout }
 }
 
@@ -77,7 +79,7 @@ private final class FocusFailureAPI: HTTPTransport, @unchecked Sendable {
       continuation.yield(try Self.text(Self.partialAnswer))
       return HTTPResponse(status: 200, headers: ["content-type": "text/event-stream"],
         body: body, cancel: { [weak self] in self?.cancelPending() })
-    case .missingKey, .keychain:
+    case .missingKey, .keychain, .lockedKeychain:
       preconditionFailure("key failures occur before transport.send")
     }
   }
@@ -168,16 +170,128 @@ private struct FocusFailureTestError: Error, CustomStringConvertible {
 
 @MainActor
 private final class FocusFailureKeyAccess {
-  var recovered = false
+  /// Recovery unlocks the locked keychain, as Settings would after asking for its password.
+  var recovered = false { didSet { if recovered { _ = lockedKeychain?.keychain.unlock() } } }
   private(set) var reads = 0
+  /// The real store and its locked temporary keychain, for `lockedKeychain`.
+  let lockedKeychain: (keychain: TemporaryKeychain, store: KeychainStore)?
+
+  init(for fixture: FocusFailureFixture) throws {
+    guard fixture == .lockedKeychain else {
+      lockedKeychain = nil
+      return
+    }
+    let keychain = try TemporaryKeychain()
+    let store = KeychainStore(service: "com.snapscreen.app.focus-test", account: UUID().uuidString,
+      keychains: [keychain.reference])
+    try store.save("sk-ant-focus-fixture")
+    guard keychain.lock() else { throw FocusFailureTestError(description: "the temporary keychain locks") }
+    lockedKeychain = (keychain, store)
+  }
 
   func read(for fixture: FocusFailureFixture) throws -> String? {
     reads += 1
+    if let store = lockedKeychain?.store { return try store.readForRequest() }
     if !recovered {
       if fixture == .missingKey { return nil }
       if fixture == .keychain { throw fixture.failure }
     }
     return "sk-ant-focus-fixture"
+  }
+}
+
+/// A keychain file of the test's own, outside the user's keychain list, that the test can lock and
+/// unlock with its own password. The SecKeychain calls are deprecated, so they're looked up.
+final class TemporaryKeychain {
+  private typealias Create = @convention(c) (UnsafePointer<CChar>, UInt32, UnsafeRawPointer?, DarwinBoolean,
+    UnsafeRawPointer?, UnsafeMutablePointer<UnsafeRawPointer?>) -> OSStatus
+  private typealias Unlock = @convention(c) (UnsafeRawPointer, UInt32, UnsafeRawPointer?, DarwinBoolean) -> OSStatus
+  private typealias Change = @convention(c) (UnsafeRawPointer) -> OSStatus
+  private static let security = dlopen("/System/Library/Frameworks/Security.framework/Security", RTLD_LAZY)
+
+  let reference: SecKeychain
+  private let password = Array(UUID().uuidString.utf8)
+
+  init() throws {
+    guard let security = Self.security, let create = dlsym(security, "SecKeychainCreate") else {
+      throw FocusFailureTestError(description: "SecKeychainCreate is available")
+    }
+    let path = NSTemporaryDirectory() + "snapscreen-focus-\(UUID().uuidString).keychain-db"
+    var keychain: UnsafeRawPointer?
+    let status = password.withUnsafeBytes {
+      unsafeBitCast(create, to: Create.self)(path, UInt32($0.count), $0.baseAddress, false, nil, &keychain)
+    }
+    guard status == errSecSuccess, let keychain else {
+      throw FocusFailureTestError(description: "a temporary keychain is created: \(status)")
+    }
+    reference = Unmanaged<SecKeychain>.fromOpaque(keychain).takeRetainedValue()
+  }
+
+  private func call(_ name: String) -> OSStatus {
+    guard let security = Self.security, let function = dlsym(security, name) else { return errSecUnimplemented }
+    return unsafeBitCast(function, to: Change.self)(Unmanaged.passUnretained(reference).toOpaque())
+  }
+
+  func lock() -> Bool { call("SecKeychainLock") == errSecSuccess }
+
+  func unlock() -> Bool {
+    guard let security = Self.security, let function = dlsym(security, "SecKeychainUnlock") else { return false }
+    return password.withUnsafeBytes {
+      unsafeBitCast(function, to: Unlock.self)(Unmanaged.passUnretained(reference).toOpaque(), UInt32($0.count),
+        $0.baseAddress, true)
+    } == errSecSuccess
+  }
+
+  /// Removes the file and any item in it.
+  func delete() { _ = call("SecKeychainDelete") }
+}
+
+/// Fails the run, after cancelling it, if a password dialog appears, rather than letting it take the
+/// keyboard. It polls WindowServer off the main thread, which a dialog's read would block, and gives
+/// up after half a minute in case a read blocks without one.
+final class PasswordDialogWatchdog: @unchecked Sendable {
+  private let lock = NSLock()
+  private var running = true
+
+  init() {
+    let started = Date()
+    Thread.detachNewThread { [self] in
+      while lock.withLock({ running }) {
+        let dialogs = (CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? [])
+          .filter { $0[kCGWindowOwnerName as String] as? String == "SecurityAgent" }
+        if !dialogs.isEmpty || Date().timeIntervalSince(started) > 30 {
+          let cancelled = dialogs.isEmpty ? false : Self.cancelDialog()
+          let mode = CommandLine.arguments.contains("--focus-test") ? "focus" : "live"
+          FileHandle.standardError.write(Data(("SnapScreen \(mode) test failed: " + (dialogs.isEmpty ?
+            "a Keychain read was still blocked after 30 seconds\n" :
+            "a Keychain password dialog appeared (cancelled: \(cancelled))\n")).utf8))
+          exit(1)
+        }
+        usleep(50_000)
+      }
+    }
+  }
+
+  func stop() { lock.withLock { running = false } }
+
+  /// Presses the dialog's own Cancel or Deny button, which refuses without entering anything.
+  private static func cancelDialog() -> Bool {
+    guard AXIsProcessTrusted(),
+      let agent = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.SecurityAgent").first
+    else { return false }
+    var queue = [AXUIElementCreateApplication(agent.processIdentifier)]
+    while !queue.isEmpty {
+      let element = queue.removeFirst()
+      var title: AnyObject?
+      AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &title)
+      if ["Cancel", "Deny"].contains(title as? String ?? "") {
+        return AXUIElementPerformAction(element, kAXPressAction as CFString) == .success
+      }
+      var children: AnyObject?
+      AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
+      queue += children as? [AXUIElement] ?? []
+    }
+    return false
   }
 }
 
@@ -195,7 +309,19 @@ func runFailureFocusTests(using driver: FocusTestDriver) async throws {
 private func checkRequestFailure(_ fixture: FocusFailureFixture, retry: Bool = true,
   using driver: FocusTestDriver) async throws {
   let api = FocusFailureAPI(fixture)
-  let key = FocusFailureKeyAccess()
+  let key = try FocusFailureKeyAccess(for: fixture)
+  // A locked keychain must fail the read before macOS can ask for its password.
+  let watchdog = key.lockedKeychain.map { _ in PasswordDialogWatchdog() }
+  defer {
+    watchdog?.stop()
+    key.lockedKeychain?.keychain.delete()
+  }
+  if let locked = key.lockedKeychain {
+    let item: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: locked.store.service, kSecAttrAccount as String: locked.store.account,
+      kSecMatchSearchList as String: [locked.keychain.reference]]
+    try driver.require(KeychainLock.state(of: item) == .locked, "the key's temporary keychain is locked before the snip")
+  }
   let controller = SessionController(answers: AnthropicClient(transport: api),
     apiKey: { try key.read(for: fixture) }, settings: { .defaults })
   let observer = FocusFailureWindows(controller: controller)
@@ -330,6 +456,8 @@ private func checkSelectionTimeout(whileCropping: Bool, using driver: FocusTestD
       "expiry during cropping releases the thread and leaves only the session-ended notice")
     try driver.checkPanel(panel, "session-ended notice after cropping timeout")
     try await driver.probe("with the session-ended notice after cropping timeout")
+    try driver.require(!ended.messageLabel.isSelectable, "the Session ended message isn't selectable text")
+    try await driver.checkNoNativeMenu(on: ended.messageLabel, "the Session ended message")
     hooks.releaseCrop()
     try await driver.wait("the cancelled crop finishes after expiry") { hooks.hasFinishedCrop }
     try await driver.probe("after the expired crop completes")
