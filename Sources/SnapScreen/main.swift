@@ -35,6 +35,12 @@ guard let bundleIdentifier = Bundle.main.bundleIdentifier else {
 if NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
   .contains(where: { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }) {
   fputs("SnapScreen is already running.\n", stderr)
+  #if SNAPSCREEN_TEST_HOOKS
+  // A skipped test is a failure, even though reopening the ordinary app is successful.
+  if CommandLine.arguments.contains("--live-test") || CommandLine.arguments.contains("--focus-test") {
+    exit(1)
+  }
+  #endif
   exit(0)
 }
 

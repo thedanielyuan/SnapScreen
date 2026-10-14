@@ -7,6 +7,7 @@ struct AppServices {
   var keyStore: APIKeyStore = KeychainStore()
   var answers: any AnswerClient = AnthropicClient()
   var screenRecordingGranted: () -> Bool = { ScreenRecordingAccess.isGranted }
+  var openScreenRecordingSettings: () -> Void = { ScreenRecordingAccess.openSystemSettings() }
   var capture: @Sendable (CGDirectDisplayID) async throws -> FrozenScreen = {
     try await ScreenCapturer.capture(displayID: $0)
   }
@@ -16,10 +17,22 @@ struct AppServices {
   }
 }
 
+extension APIKeyStore {
+  /// How each request reads the key: without letting macOS ask for a password, and with a Keychain
+  /// failure reported as the conversation's error.
+  func readForRequest() throws -> String? {
+    do {
+      return try readWithoutPrompt()
+    } catch let error as KeychainError {
+      throw AnthropicError("keychain", error.message)
+    }
+  }
+}
+
 /// The menu bar app: its icon and menu, the global shortcut, snips, Settings and notices.
 final class AppDelegate: NSObject, NSApplicationDelegate {
   private let services: AppServices
-  private let notices = NoticeCenter()
+  private let notices: NoticeCenter
   private let hotkey = Hotkey(.snip)
   private var shortcutAvailable = false
   private var statusItem: NSStatusItem?
@@ -27,8 +40,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var settings: SettingsWindowController?
   private var snips: SnipWindows?
 
-  init(services: AppServices = AppServices()) {
+  init(services: AppServices = AppServices(), notices: NoticeCenter = NoticeCenter()) {
     self.services = services
+    self.notices = notices
   }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
@@ -36,13 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // The key is read for each request, so a key saved in Settings applies to open conversations.
     // A request never lets macOS ask for your password; Settings, which you open yourself, may.
     let keyStore = services.keyStore
-    let controller = SessionController(answers: services.answers, apiKey: {
-      do {
-        return try keyStore.readWithoutPrompt()
-      } catch let error as KeychainError {
-        throw AnthropicError("keychain", error.message)
-      }
-    })
+    let controller = SessionController(answers: services.answers, apiKey: { try keyStore.readForRequest() })
     snips = SnipWindows(controller: controller, showNotice: { [notices] in notices.show($0, action: $1) })
     hotkey.onPress = { [weak self] in self?.snip() }
     shortcutAvailable = hotkey.register()
@@ -92,7 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     statusMenu.dismiss()
     guard services.screenRecordingGranted() else {
       notices.show("SnapScreen needs Screen Recording permission to snip.",
-        action: NoticeAction(title: "Open System Settings") { ScreenRecordingAccess.openSystemSettings() })
+        action: NoticeAction(title: "Open System Settings", perform: services.openScreenRecordingSettings))
       return
     }
     // The display under the pointer, as the shortcut or the menu leaves it.

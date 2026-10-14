@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>SnapScreen focus recorder</title>
+<style>
+  body { margin: 32px; font: 18px system-ui; color: white; background: #172239; }
+  button { padding: 10px; margin: 0 12px 18px 0; font: inherit; }
+  textarea { display: block; width: 420px; height: 100px; font: 22px monospace; }
+  textarea:focus { outline: 3px solid #8bb9ff; }
+  pre { white-space: pre-wrap; }
+</style>
+<h1>SnapScreen focus recorder</h1>
+<p>Local fixture only. No network requests, storage or user content.</p>
+<p>Start measurement, then run the live test with this browser in front. Repeat in fullscreen.
+  Use the address bar and a temporary tab as positive controls before measuring.</p>
+<button id="reset">Start / reset measurement</button>
+<button id="control">Positive control: move field focus</button>
+<textarea id="field" aria-label="Focus probe"></textarea>
+<pre id="report" aria-label="Focus report"></pre>
+<script>
+  const field = document.getElementById('field');
+  const report = document.getElementById('report');
+  const events = [];
+  let started = performance.now();
+  let startedAt = new Date().toISOString();
+  let resetTimer;
+  const record = type => events.push({ type, at: new Date().toISOString(),
+    ms: Math.round(performance.now() - started) });
+  window.addEventListener('blur', () => record('window blur'));
+  window.addEventListener('focus', () => record('window focus'));
+  field.addEventListener('blur', () => record('field blur'));
+  field.addEventListener('focus', () => record('field focus'));
+  field.addEventListener('keydown', event => record(`key ${event.key}`));
+  field.addEventListener('pointerdown', () => record('field pointerdown'));
+  document.addEventListener('visibilitychange', () => record(`visibility ${document.visibilityState}`));
+  document.getElementById('reset').addEventListener('click', () => {
+    clearTimeout(resetTimer);
+    field.value = '';
+    field.focus();
+    resetTimer = setTimeout(() => {
+      events.length = 0;
+      started = performance.now();
+      startedAt = new Date().toISOString();
+    }, 150);
+  });
+  setInterval(() => {
+    report.textContent = JSON.stringify({
+      focused: document.hasFocus(), activeElement: document.activeElement.id,
+      visibility: document.visibilityState, startedAt,
+      counts: Object.fromEntries(['window blur', 'window focus', 'field blur', 'field focus',
+        'visibility hidden', 'visibility visible'].map(type =>
+        [type, events.filter(event => event.type === type).length])),
+      text: field.value, events
+    }, null, 2);
+  }, 100);
+</script>
+</html>

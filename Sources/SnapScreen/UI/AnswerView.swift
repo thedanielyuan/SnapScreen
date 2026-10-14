@@ -96,6 +96,10 @@ class ReadOnlyTextView: NSTextView {
 
   override func rightMouseDown(with event: NSEvent) { showContextMenu(for: event) }
 
+  // A drag of the selection runs a dragging session, which takes the foreground window's key
+  // status until it ends. Copy and Select All do what a drag would.
+  override func dragSelection(with event: NSEvent, offset mouseOffset: NSSize, slideBack: Bool) -> Bool { false }
+
   override func mouseDown(with event: NSEvent) {
     if event.modifierFlags.contains(.control) { showContextMenu(for: event) }
     else { super.mouseDown(with: event) }

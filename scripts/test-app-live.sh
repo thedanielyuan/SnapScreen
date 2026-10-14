@@ -16,22 +16,26 @@
 set -eu
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-case ${1-} in
-  '') mode=live ;;
-  --focus) mode=focus; shift ;;
-  *) echo "usage: $0 [--focus [--fullscreen]]" >&2; exit 2 ;;
-esac
-case ${1-} in
-  '' | --fullscreen) ;;
-  *) echo "usage: $0 [--focus [--fullscreen]]" >&2; exit 2 ;;
-esac
-if [ "$#" -gt 1 ]; then
+mode=live
+result_mode=live
+if [ "$#" -gt 0 ]; then
+  if [ "$1" != --focus ] || [ "$#" -gt 2 ]; then
+    echo "usage: $0 [--focus [--fullscreen]]" >&2
+    exit 2
+  fi
+  mode=focus
+  result_mode=focus
+  shift
+fi
+if [ "$#" -gt 0 ] && [ "$1" != --fullscreen ]; then
   echo "usage: $0 [--focus [--fullscreen]]" >&2
   exit 2
 fi
+if [ "$#" -gt 0 ]; then result_mode='focus fullscreen'; fi
+"$root/scripts/test-live-runner.sh"
 binary=$("$root/scripts/build-app.sh" --test-hooks)
 if [ "$mode" = live ]; then
-  "$binary" --live-test
+  "$root/scripts/run-verified-test.sh" "$result_mode" "$binary" --live-test
 else
   # A different ID prevents the helper from being mistaken for an already-running test app.
   # Its only interprocess interface is compiled under SNAPSCREEN_TEST_HOOKS.
@@ -51,5 +55,5 @@ else
   /usr/libexec/PlistBuddy -c 'Set :CFBundleName SnapScreen Focus App' "$shell/Contents/Info.plist"
   codesign --force --sign - "$shell" >&2
   SNAPSCREEN_FOCUS_TARGET="$helper/Contents/MacOS/SnapScreen" SNAPSCREEN_FOCUS_APP="$shell" \
-    "$binary" --focus-test "$@"
+    "$root/scripts/run-verified-test.sh" "$result_mode" "$binary" --focus-test "$@"
 fi

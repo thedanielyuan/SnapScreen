@@ -48,15 +48,25 @@ struct KeychainError: Error, Equatable {
 final class KeychainStore: APIKeyStore {
   let service: String
   let account: String
+  /// Keychains to use instead of the user's, for the focus test's temporary keychain.
+  private let keychains: [SecKeychain]?
+  /// Whether the item's keychain is unlocked, replaceable so the self-test needn't lock one.
+  private let lockState: ([String: Any]) -> KeychainLock.State
 
-  init(service: String = "com.snapscreen.app", account: String = "anthropic-api-key") {
+  init(service: String = "com.snapscreen.app", account: String = "anthropic-api-key",
+    keychains: [SecKeychain]? = nil,
+    lockState: @escaping ([String: Any]) -> KeychainLock.State = { KeychainLock.state(of: $0) }) {
     self.service = service
     self.account = account
+    self.keychains = keychains
+    self.lockState = lockState
   }
 
   private var query: [String: Any] {
-    [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
-     kSecAttrAccount as String: account]
+    var query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+      kSecAttrAccount as String: account]
+    if let keychains { query[kSecMatchSearchList as String] = keychains }
+    return query
   }
 
   var hasKey: Bool {
@@ -76,7 +86,15 @@ final class KeychainStore: APIKeyStore {
     item[kSecMatchLimit as String] = kSecMatchLimitOne
     var result: CFTypeRef?
     let status = try prompting ? SecItemCopyMatching(item as CFDictionary, &result)
-      : KeychainPrompts.disallowed { SecItemCopyMatching(item as CFDictionary, &result) }
+      : KeychainPrompts.disallowed { () -> OSStatus in
+        // Turning prompts off doesn't stop macOS from asking to unlock a locked keychain, so the
+        // key is read only from a keychain that's known to be unlocked.
+        switch lockState(query) {
+        case .unlocked: return SecItemCopyMatching(item as CFDictionary, &result)
+        case .missing: return errSecItemNotFound
+        case .locked, .unknown: return errSecInteractionNotAllowed
+        }
+      }
     let operation: KeychainError.Operation = prompting ? .read : .readWithoutPrompt
     if status == errSecItemNotFound { return nil }
     guard status == errSecSuccess else { throw KeychainError(operation: operation, status: status) }
@@ -92,6 +110,10 @@ final class KeychainStore: APIKeyStore {
     var item = query
     item[kSecValueData as String] = data
     item[kSecAttrLabel as String] = "SnapScreen API key"
+    if let keychain = keychains?.first {
+      item.removeValue(forKey: kSecMatchSearchList as String)
+      item[kSecUseKeychain as String] = keychain
+    }
     let added = SecItemAdd(item as CFDictionary, nil)
     guard added == errSecSuccess else { throw KeychainError(operation: .save, status: added) }
   }
@@ -106,9 +128,10 @@ final class KeychainStore: APIKeyStore {
 
 /// Whether the login keychain may ask for your password, which it does when an item doesn't trust
 /// the app reading it or the keychain is locked. Neither `kSecUseAuthenticationUIFail` nor an
-/// `LAContext` stops it from asking there; only SecKeychainSetUserInteractionAllowed, deprecated
-/// with the rest of the SecKeychain API, does, so it's looked up at run time. A nonprompting read
-/// fails if that control is unavailable or can't disable prompts.
+/// `LAContext` stops it from asking there; SecKeychainSetUserInteractionAllowed, deprecated with
+/// the rest of the SecKeychain API, stops it for an item that doesn't trust the app, so it's looked
+/// up at run time. It doesn't stop the unlock dialog, which `KeychainLock` avoids. A nonprompting
+/// read fails if that control is unavailable or can't disable prompts.
 enum KeychainPrompts {
   private typealias GetAllowed = @convention(c) (UnsafeMutablePointer<DarwinBoolean>) -> OSStatus
   private typealias SetAllowed = @convention(c) (DarwinBoolean) -> OSStatus
@@ -149,5 +172,58 @@ enum KeychainPrompts {
     }
     defer { _ = control.setAllowed(saved) }
     return body()
+  }
+}
+
+/// Whether the keychain holding an item is unlocked. On macOS 27, a read with prompts turned off
+/// still shows the dialog that unlocks a locked keychain, so a nonprompting read checks this first.
+/// Finding the item reads only its attributes, and reading the lock status needs no password, so
+/// neither asks. Like the prompt control, the SecKeychain calls are looked up at run time.
+enum KeychainLock {
+  enum State: Equatable { case unlocked, locked, missing, unknown }
+
+  /// Kept separate from the runtime symbols so the self-test can check each state without locking
+  /// a keychain.
+  struct Inspection {
+    /// The keychain that holds an item.
+    let keychain: (AnyObject) -> AnyObject?
+    /// A keychain's status flags, or nil when they can't be read.
+    let status: (AnyObject) -> UInt32?
+  }
+
+  private typealias CopyKeychain = @convention(c) (UnsafeRawPointer, UnsafeMutablePointer<UnsafeRawPointer?>) -> OSStatus
+  private typealias GetStatus = @convention(c) (UnsafeRawPointer, UnsafeMutablePointer<UInt32>) -> OSStatus
+  /// SecKeychainStatus's kSecUnlockStateStatus.
+  private static let unlockedFlag: UInt32 = 1
+
+  private static let inspection: Inspection? = {
+    guard let security = dlopen("/System/Library/Frameworks/Security.framework/Security", RTLD_LAZY),
+      let copy = dlsym(security, "SecKeychainItemCopyKeychain"),
+      let get = dlsym(security, "SecKeychainGetStatus") else { return nil }
+    let copyKeychain = unsafeBitCast(copy, to: CopyKeychain.self)
+    let getStatus = unsafeBitCast(get, to: GetStatus.self)
+    return Inspection(keychain: { item in
+      var keychain: UnsafeRawPointer?
+      guard copyKeychain(Unmanaged.passUnretained(item).toOpaque(), &keychain) == errSecSuccess,
+        let keychain else { return nil }
+      return Unmanaged<AnyObject>.fromOpaque(keychain).takeRetainedValue()
+    }, status: { keychain in
+      var status: UInt32 = 0
+      return getStatus(Unmanaged.passUnretained(keychain).toOpaque(), &status) == errSecSuccess ? status : nil
+    })
+  }()
+
+  /// `query` finds the item as a read would. Anything that can't be confirmed is `unknown`, which
+  /// a nonprompting read treats as locked.
+  static func state(of query: [String: Any], using inspection: Inspection? = inspection) -> State {
+    var item = query
+    item[kSecReturnRef as String] = true
+    item[kSecMatchLimit as String] = kSecMatchLimitOne
+    var reference: CFTypeRef?
+    let found = SecItemCopyMatching(item as CFDictionary, &reference)
+    if found == errSecItemNotFound { return .missing }
+    guard found == errSecSuccess, let reference, let inspection, let keychain = inspection.keychain(reference),
+      let status = inspection.status(keychain) else { return .unknown }
+    return status & unlockedFlag != 0 ? .unlocked : .locked
   }
 }
