@@ -1,14 +1,15 @@
 # Focus preservation testing requirement
 
-Requirement, updated 14 October 2026. The security section of `AGENTS.md` is the contract; this
+Requirement, updated 15 October 2026. The security section of `AGENTS.md` is the contract; this
 document is how its focus clauses are verified. Change the two together. The tables identify
 checks implemented in the repository, not a record that every listed environment has passed.
 
 Section 9 records the passive-menu verification, the later error, timeout, notice and runner
-verification, and the gap probes and their fixes, all on 14 October 2026, on macOS 27.0.1
-(26A434). The latest automated focus suites pass; the Chrome observations include an unexplained
-first fullscreen blur followed by four clean runs. The remaining manual checks in section 4 are
-unverified.
+verification, and the gap probes and their fixes, all on 14 October 2026, and the real-input
+Chrome target on 15 October 2026, on macOS 27.0.1 (26A434). The latest automated focus suites
+pass, including every real-input stage in Google Chrome 155, in a normal window and a fullscreen
+Space. The earlier passive Chrome observations included an unexplained first fullscreen blur; the
+real-input Chrome runs saw none. The remaining manual checks in section 4 are unverified.
 
 ## 1. Requirement
 
@@ -68,15 +69,27 @@ than a sample.
   `didResignKeyNotification`. Failures are counted by reason: `inactiveSamples`, `nonKeySamples`,
   `responderSamples`, `resignActiveEvents` and `resignKeyEvents`. Its fullscreen style and count of
   fullscreen exits are checked throughout, including intentional Settings and handback transitions.
+  With `--chrome`, `ChromeFocusTarget` observes an isolated Google Chrome from outside instead:
+  Chrome's frontmost state through `NSWorkspace`, and its focused window and focused element
+  through Accessibility, sampled at 10 ms, with the `AXApplicationDeactivated`,
+  `AXFocusedWindowChanged` and `AXFocusedUIElementChanged` notifications. It counts the same
+  reasons, plus `responderEvents`, and reads `AXFullScreen`. Accessibility can't see a native
+  menu from another process take Chrome's key window, as `NSMenu` tracking once did; a probe typed
+  while one is open is lost, which is how the probes catch it.
 - **C, the page.** `document.hasFocus()`, `activeElement`, `blurCount`, `visibilityState`,
   `hiddenCount`, the field's text and pointer-event counts, read on demand. Window and field
-  blur events are counted separately when checking an intentional focus transition.
+  blur events are counted separately when checking an intentional focus transition. Chrome's
+  page, `focus-recorder.html?automated`, writes its state into its title every 25 ms and on each
+  event, and the observer reads the title through Accessibility, with no debugger attached.
 - **D, WindowServer.** `CGWindowListCopyWindowInfo` ordering for R8, and
   `didActivateApplicationNotification` with timestamps for R1 and R12.
 
 **Positive control for `--focus`.** Before anything is measured, the target opens a key window of its own and
-confirms the page reports `!document.hasFocus()` and a blur. A run whose positive control fails
-is invalid, whatever else it reports.
+confirms the page reports `!document.hasFocus()` and a blur. With `--chrome`, the observer posts
+Command-L, which must blur the window and the field and move Chrome's focused element; opens and
+closes a temporary tab, which must hide and show the page; and types while a native menu from its
+own process is open, which must not reach the page. A run whose positive control fails is
+invalid, whatever else it reports.
 
 **Probe for `--focus`.** At every stage a real `x` keystroke is posted through WindowServer, and the field must
 then hold exactly the expected string. This is R5, and the strongest single check of R3, since a
@@ -97,14 +110,15 @@ There is no tolerance or averaging for a passive interaction.
 In `--focus`, input is posted with `CGEvent` to `.cghidEventTap`, so the pointer, the hot key and
 the keystrokes pass through WindowServer as a person's do. The ordinary CI live run drives views
 inside SnapScreen's process and never posts desktop input. Capture and the API are fixtures: no
-run reads the user's key, captures their display or contacts Anthropic. The additional Chrome
-protocol in section 6 observes a real browser during the ordinary live run; it has different
-coverage from the `--focus` target.
+run reads the user's key, captures their display or contacts Anthropic. `--chrome` runs the same
+stages with Chrome as the foreground app (section 6). The recorder protocol in section 6 observes
+other browsers during the ordinary live run, which has different coverage.
 
 ## 3. Verification matrix
 
 Each row is a stage of operation. `self` is `--self-test`; `CI` is `scripts/test-app-live.sh`,
-which the `verify` job runs; `focus` is `--focus`; `full` is `--focus --fullscreen`.
+which the `verify` job runs; `focus` is `--focus` and `--focus --chrome`; `full` is
+`--focus --fullscreen` and `--focus --chrome --fullscreen`.
 
 | # | Stage | Observers | Covered by |
 | --- | --- | --- | --- |
@@ -160,7 +174,7 @@ Environments covered by the automated runs:
 
 | Variable | Covered | Not covered |
 | --- | --- | --- |
-| Target | An isolated `WKWebView` app with a focused `textarea`; section 6 adds a repeatable Chrome recorder protocol around the ordinary live suite | Chrome's full real-input scenario matrix; Safari, Edge, Firefox and other native apps |
+| Target | An isolated `WKWebView` app with a focused `textarea`; an isolated Google Chrome instance with a temporary profile and no debugger or extension, showing the recorder (`--chrome`) | Chrome with the user's own profile and extensions; Safari, Edge, Firefox and other native apps |
 | Space | Normal window; fullscreen Space (`full`) | Stage Manager; a Space switch mid-snip |
 | Display | The display under the pointer, 1 display in CI, 2× and 1× locally; `focus` once with the pointer on an external display at a negative origin (section 9) | Display removed mid-snip |
 | Capture | Fixture image; real ScreenCaptureKit in the production app once (section 9) | macOS's capture alert |
@@ -173,7 +187,7 @@ Each gap must be closed by the method given, with the pass criterion of section 
 
 | Gap | Required verification | Pass criterion |
 | --- | --- | --- |
-| Real browsers and native targets | The Chrome recorder protocol and manual interaction round in section 6, with a frontmost-app observer for native apps | No blur, focus or visibility change beyond the accepted exceptions; every typed character arrives |
+| Other browsers and native targets | The recorder protocol and manual interaction round in section 6, with a frontmost-app observer for native apps | No blur, focus or visibility change beyond the accepted exceptions; every typed character arrives |
 | Multiple displays | Run `focus` with the pointer, and so the target, on each display, including one with a negative origin | The overlay covers only that display; the conversation opens on it; observers clean |
 | Display removed while the overlay or conversation is up | Manual: unplug the external display mid-snip | The session closes without SnapScreen activating |
 | The capture alert | The manual round, on a build with Screen Recording granted, until macOS shows the alert | The alert is the only focus loss; repeat the run |
@@ -217,6 +231,14 @@ scripts/test-app-live.sh --focus --fullscreen
 ```
 
 ```bash
+scripts/test-app-live.sh --focus --chrome
+```
+
+```bash
+scripts/test-app-live.sh --focus --chrome --fullscreen
+```
+
+```bash
 open build/SnapScreen.app
 ```
 
@@ -226,66 +248,95 @@ SnapScreen copy holding ⌥⇧S; and no earlier test-hooks copy running. If the 
 `SnapScreen is already running.`, the duplicate live/focus launch fails with a nonzero exit and
 nothing was tested: stop that copy, whose binary is under `build/test-hooks/`, not the user's, and
 rerun. Keep hands off the keyboard and pointer during a run; the test refuses to post input unless
-the target is in front.
+the target is in front. `--chrome` also needs Google Chrome installed. The user's own Chrome may
+stay open: the test runs a separate instance with a temporary profile, which the script deletes
+once anything using it has stopped.
 
 Results require exit 0 and the exact completion line for the requested mode:
-`SnapScreen test completed: live`, `SnapScreen test completed: focus`, or
-`SnapScreen test completed: focus fullscreen`. `run-verified-test.sh` rejects missing or mismatched
-markers and explicit failure output, even if the test process exits 0. The human-readable
-`passed` line names the stages and check count. `test-live-runner.sh` exercises the runner's false
-success cases on every invocation of the live script. A failed focus check reports the target's
-`blurCount`, `hiddenCount`, `text`, `nativeFailures` and `nativeFailureReasons`. A failure in
-`focus` with a clean CI run points at WindowServer-level behavior; one in CI points at panel
-configuration or window ordering.
+`SnapScreen test completed: live`, `SnapScreen test completed: focus`,
+`SnapScreen test completed: focus fullscreen`, `SnapScreen test completed: focus chrome`, or
+`SnapScreen test completed: focus chrome fullscreen`. `run-verified-test.sh` rejects missing or
+mismatched markers and explicit failure output, even if the test process exits 0. The
+human-readable `passed` line names the stages and check count. `test-live-runner.sh` exercises
+the runner's false success cases on every invocation of the live script. A failed focus check
+reports the target's `blurCount`, `hiddenCount`, `text`, `nativeFailures` and
+`nativeFailureReasons`. A failure in `focus` with a clean CI run points at WindowServer-level
+behavior; one in CI points at panel configuration or window ordering.
 
-## 6. Chrome recorder and manual round for real browsers and native apps
+## 6. Real browsers and the manual round
 
-### Repeatable Chrome recorder protocol
+### Automated Chrome target
 
-Use `scripts/fixtures/focus-recorder.html` in the installed Chrome application. It records window
-and field focus events, visibility transitions, keystrokes and pointer presses in memory, with
-no network requests or storage. Open the file as a normal local tab, using Chrome's native UI.
-Do not attach an automation debugger or enable DevTools focus emulation: either changes the
-conditions this protocol is intended to observe.
+`--focus --chrome` runs every `focus` stage, and `--focus --chrome --fullscreen` every `full`
+stage, with an isolated instance of the installed Google Chrome as the foreground app.
+`ChromeFocusTarget` launches it through LaunchServices with a temporary `--user-data-dir`, which
+`test-app-live.sh` deletes after stopping anything still using it, and with switches that skip
+first-run screens, the Keychain, sync, extensions and background downloads. It attaches no
+debugger, extension or automation switch, and none of the switches that change background
+throttling or occlusion. Chrome opens `focus-recorder.html?automated`, which puts its field where
+the `WKWebView` target's is and writes the page's state into its title. The observer places the
+window as the `WKWebView` target's, or in a fullscreen Space through `AXFullScreen`, and clicks
+the field if it doesn't have the keyboard.
 
-1. In a normal Chrome window, click **Start / reset measurement**. Wait at least 150 ms for the
+How it differs from the `WKWebView` target:
+
+- Chrome is observed from outside its process: its focused window and element through
+  Accessibility rather than `isKeyWindow` and first-responder identity. A native menu from
+  another process takes Chrome's key window without either noticing; the positive control and
+  every probe typed with a menu open cover that.
+- The app shell's LaunchServices launch and reopening come from the background observer rather
+  than the foreground app, and a script's `activate` replaces the target yielding activation
+  (S15).
+- In a fullscreen Space, Chrome's window title is empty while the address bar has the keyboard,
+  so its positive control reads the page's blurs once the field has the keyboard again.
+
+### Recorder protocol for other browsers
+
+Use `scripts/fixtures/focus-recorder.html` in another installed browser, such as Safari or Edge.
+It records window and field focus events, visibility transitions, keystrokes and pointer presses
+in memory, with no network requests or storage. Open the file as a normal local tab, using the
+browser's native UI. Do not attach an automation debugger or enable DevTools focus emulation:
+either changes the conditions this protocol is intended to observe.
+
+1. In a normal browser window, click **Start / reset measurement**. Wait at least 150 ms for the
    reset to finish. Confirm the visible report reads `focused: true`, `activeElement: "field"`,
    `visibility: "visible"`, with an empty event list.
-2. Verify the recorder before testing SnapScreen. Focus Chrome's address bar with Command-L and
-   return to the field; the report must record the loss and restoration of page/field focus.
+2. Verify the recorder before testing SnapScreen. Focus the browser's address bar with Command-L
+   and return to the field; the report must record the loss and restoration of page/field focus.
    Switch to a temporary tab and back; the report must include `visibility hidden` and
    `visibility visible`. The **Positive control: move field focus** button provides an additional
    field-blur check. If any expected event is absent, the recorder run is invalid.
-3. Run the ordinary `scripts/test-app-live.sh` with Chrome kept in front and its recorder field
-   focused. A tool runner can start it without activating a Terminal window. For a manual run,
-   enter `sleep 10 && scripts/test-app-live.sh` in Terminal, return to Chrome and reset the
-   recorder within the delay. Leave Chrome untouched while the suite runs through the real
-   windows, including S21–S28. The test's capture, API, errors and clocks remain fixtures.
+3. Run the ordinary `scripts/test-app-live.sh` with the browser kept in front and its recorder
+   field focused. A tool runner can start it without activating a Terminal window. For a manual
+   run, enter `sleep 10 && scripts/test-app-live.sh` in Terminal, return to the browser and reset
+   the recorder within the delay. Leave the browser untouched while the suite runs through the
+   real windows, including S21–S28. The test's capture, API, errors and clocks remain fixtures.
 4. Once the test windows have all closed, inspect and preserve the visible recorder report before
    bringing Terminal forward. Require no window/field blur or focus events and no visibility
    transitions since reset, with the field still focused. Then inspect the runner output and
    require exit 0 and `SnapScreen test completed: live`. A clean page alone does not prove that
    any SnapScreen test ran.
-5. Put Chrome into its actual fullscreen Space through its native window control and repeat the
-   positive controls, reset and ordinary live suite. Require the same clean report and runner
-   marker, and confirm Chrome remains fullscreen. Restore the original Chrome window state and
+5. Put the browser into its actual fullscreen Space through its native window control and repeat
+   the positive controls, reset and ordinary live suite. Require the same clean report and runner
+   marker, and confirm the browser remains fullscreen. Restore its original window state and
    close only the fixture tabs created for this protocol.
 
-These Chrome runs measure the real browser's focus and visibility during production panel
-presentation, replacement, error, timeout and notice handling. The ordinary live driver sends
-selection and hover events to SnapScreen's views and invokes button actions inside its process;
-it does not send real mouse events through WindowServer or type into Chrome. Therefore it does
-not establish Chrome-specific delivery of input to passive controls or continued typing while
-menus are open. The automated `--focus` and `--focus --fullscreen` runs provide those real
-`CGEvent` and typing checks against the isolated `WKWebView` target. Record Chrome and WKWebView
-results separately, with browser/macOS versions, window mode and recorder positive controls.
+These runs measure the real browser's focus and visibility during production panel presentation,
+replacement, error, timeout and notice handling. The ordinary live driver sends selection and
+hover events to SnapScreen's views and invokes button actions inside its process; it does not
+send real mouse events through WindowServer or type into the browser. Therefore it does not
+establish delivery of input to passive controls or continued typing while menus are open, which
+the `--focus` runs check in the `WKWebView` target and in Chrome. Record each browser's results
+separately, with browser and macOS versions, window mode and recorder positive controls.
 
 ### Manual interaction round
 
-The tester sets the window state; the user performs the actions. A browser step uses a page like
-the recorder above, with a focused `textarea` and listeners for `focus`, `blur`, `visibilitychange`,
-`keydown` and pointer events. A native step uses an observer process that logs the frontmost app
-and the target's AX focused window at 10 ms. Keep the terminal out of front.
+The tester sets the window state; the user performs the actions. Steps 1 to 5 repeat in the
+production app, with real capture, what `--focus --chrome` automates. A browser step uses a page
+like the recorder above, with a focused `textarea` and listeners for `focus`, `blur`,
+`visibilitychange`, `keydown` and pointer events. A native step uses an observer process that
+logs the frontmost app and the target's AX focused window at 10 ms. Keep the terminal out of
+front.
 
 1. Chrome, normal window, the page's field focused. Press ⌥⇧S, drag a region, release, and
    type a few characters while the answer streams.
@@ -441,3 +492,43 @@ suite failed at S29 with the native menu it opened, so that check detects the re
 guards. S30 and S31 repeat the conditions under which the probes caught their leaks, but weren't
 run against the unfixed code.
 
+
+### Real-input Chrome target
+
+On 15 October 2026, branch `test/chrome-focus-target`, based on `8cfc4cd`, on macOS 27.0.1
+(26A434) with Google Chrome 155.0.8059.79. Each run exited 0 with its exact completion marker:
+
+| Command | Result |
+| --- | --- |
+| `swift build` | Passed |
+| `swift test` | Passed: 79 core tests |
+| `scripts/build-app.sh` | Passed |
+| Production `--self-test` | Passed: 335 checks |
+| `scripts/test-app-live.sh` | Passed: 609 checks; runner regressions 34 checks |
+| `scripts/test-app-live.sh --focus --chrome` | Passed: 1,547 checks |
+| `scripts/test-app-live.sh --focus --chrome --fullscreen` | Passed: 1,495 checks |
+| `scripts/test-app-live.sh --focus` | Passed: 1,389 checks |
+| `scripts/test-app-live.sh --focus --fullscreen` | Passed: 1,321 checks |
+
+The `WKWebView` runs used the final `LiveTest.swift`, before a last tidy of `ChromeFocusTarget`,
+which they don't run; the Chrome runs above are of the final code, and earlier Chrome runs of the
+untidied target had also passed (1,531 and 1,513 checks). In both Chrome modes every positive
+control passed: Command-L blurred the window and the field and moved Chrome's focused element to
+the address bar, a temporary tab hid and showed the page, and an `x` typed while a native menu
+from the observer was open never reached the page. At every stage the page kept focus and
+visibility and received every probe character, the outside click reached the field, and Chrome
+stayed frontmost with the recorder's window and field focused, apart from the bounded Settings
+and handback round trips. Chrome stayed in its fullscreen Space throughout the fullscreen runs.
+
+Building the target found four things about Chrome, each handled in `ChromeFocusTarget`: Chrome
+builds a page's accessibility tree only once a client reads its application role; Accessibility
+can't see a native menu from another process take Chrome's key window; on the built-in display,
+Chrome's fullscreen window sits below the camera housing, so it doesn't fill the display's frame;
+and in a fullscreen Space the window's title is empty while the address bar has the keyboard.
+Until those were handled, development runs stopped at the target's start or its positive
+controls, before any SnapScreen stage; no SnapScreen stage failed in any Chrome run. After every
+run no process was using the temporary profile, and the profile was gone. The user's own Chrome
+stayed open throughout.
+
+Not covered: Chrome with the user's own profile and extensions, other Chrome versions, Safari,
+Edge and Firefox.

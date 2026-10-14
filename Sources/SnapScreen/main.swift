@@ -47,7 +47,9 @@ if NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifi
 #if SNAPSCREEN_TEST_HOOKS
 // scripts/test-app-live.sh runs the live test in the test-hooks build, which has its own bundle ID.
 let delegate: NSApplicationDelegate
-if CommandLine.arguments.contains("--focus-target") {
+if CommandLine.arguments.contains("--focus-target") && CommandLine.arguments.contains("--chrome") {
+  delegate = MainActor.assumeIsolated { ChromeFocusTarget() }
+} else if CommandLine.arguments.contains("--focus-target") {
   delegate = MainActor.assumeIsolated { LiveFocusTarget() }
 } else if CommandLine.arguments.contains("--focus-test") {
   delegate = MainActor.assumeIsolated { LiveFocusTest() }

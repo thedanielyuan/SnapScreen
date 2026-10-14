@@ -15,15 +15,18 @@ swift test                                                   # core tests and fi
 scripts/build-app.sh                                         # → build/SnapScreen.app, signed
 build/SnapScreen.app/Contents/MacOS/SnapScreen --self-test   # the app's own checks
 scripts/test-app-live.sh                                     # snips through real windows
+scripts/test-app-live.sh --focus --chrome                    # real input, against Google Chrome
 swift test --filter AnthropicClientTests                     # one suite
 open build/SnapScreen.app                                    # run the menu bar app
 ```
 
 Before finishing any change, run `swift build` through `scripts/test-app-live.sh` in order, as
 CI's `verify` job does; the live test's windows show for a few seconds. After changing activation,
-panels, notices, the menu or Settings, also run `scripts/test-app-live.sh --focus` and
-`--focus --fullscreen`: each posts real input throughout the run, so ask the user first, and quit
-the running app (`pkill -x SnapScreen`) beforehand.
+panels, notices, the menu or Settings, also run `scripts/test-app-live.sh --focus`,
+`--focus --fullscreen`, `--focus --chrome` and `--focus --chrome --fullscreen`: each posts real
+input throughout the run, so ask the user first, and quit the running app (`pkill -x SnapScreen`)
+beforehand. The Chrome runs use their own Chrome instance and temporary profile, so the user's
+Chrome can stay open.
 
 ## Conventions
 
@@ -135,9 +138,10 @@ how data is handled. Never add a privacy section to `README.md`.
 - If `test-app-live.sh` prints `SnapScreen is already running.`, a test-hooks copy is still open
   and the duplicate test launch fails with a nonzero exit: stop that copy, not the user's, and
   rerun. The runner requires exit 0 and the exact requested completion marker,
-  `SnapScreen test completed: live`, `SnapScreen test completed: focus`, or
-  `SnapScreen test completed: focus fullscreen`; a generic `passed` line does not verify a run.
-  Its false-success regression checks run on each invocation.
+  `SnapScreen test completed: live`, `SnapScreen test completed: focus`,
+  `SnapScreen test completed: focus fullscreen`, `SnapScreen test completed: focus chrome` or
+  `SnapScreen test completed: focus chrome fullscreen`; a generic `passed` line does not verify a
+  run. Its false-success regression checks run on each invocation.
 - `--self-test` uses its own Keychain service, `com.snapscreen.app.self-test`, never the real
   key's.
 - Known limitations, accepted in Phase 4: the shortcut's modifier keys reach the app beneath, and
