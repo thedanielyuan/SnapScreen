@@ -6,8 +6,11 @@ set -eu
 
 mode=${1-}
 case "$mode" in
-  live | focus | 'focus fullscreen') shift ;;
-  *) echo "usage: $0 <live|focus|focus fullscreen> command [arguments...]" >&2; exit 2 ;;
+  live | focus | 'focus fullscreen' | 'focus chrome' | 'focus chrome fullscreen') shift ;;
+  *)
+    echo "usage: $0 <live|focus|focus fullscreen|focus chrome|focus chrome fullscreen> command [arguments...]" >&2
+    exit 2
+    ;;
 esac
 if [ "$#" -eq 0 ]; then
   echo "error: no test command supplied" >&2

@@ -8,6 +8,9 @@
   textarea { display: block; width: 420px; height: 100px; font: 22px monospace; }
   textarea:focus { outline: 3px solid #8bb9ff; }
   pre { white-space: pre-wrap; }
+  /* Where the WKWebView target puts its field: centered 150 by 85 points from the bottom left. */
+  .automated textarea { position: fixed; left: 40px; bottom: 40px; width: 220px; height: 90px;
+    box-sizing: border-box; margin: 0; font: 24px -apple-system; }
 </style>
 <h1>SnapScreen focus recorder</h1>
 <p>Local fixture only. No network requests, storage or user content.</p>
@@ -24,13 +27,28 @@
   let started = performance.now();
   let startedAt = new Date().toISOString();
   let resetTimer;
-  const record = type => events.push({ type, at: new Date().toISOString(),
-    ms: Math.round(performance.now() - started) });
+  // `?automated` is for scripts/test-app-live.sh --focus --chrome, which reads the page through
+  // Accessibility, as no debugger is attached: the title carries totals since the page loaded.
+  const automated = new URLSearchParams(location.search).has('automated');
+  const totals = {};
+  const mirror = () => {
+    if (!automated) return;
+    document.title = 'SnapScreen focus recorder ' + JSON.stringify({ time: Date.now(),
+      focused: document.hasFocus(), activeElement: document.activeElement === field,
+      visible: document.visibilityState === 'visible', totals, text: field.value });
+  };
+  const record = type => {
+    events.push({ type, at: new Date().toISOString(), ms: Math.round(performance.now() - started) });
+    const total = type.startsWith('key ') ? 'key' : type;
+    totals[total] = (totals[total] || 0) + 1;
+    mirror();
+  };
   window.addEventListener('blur', () => record('window blur'));
   window.addEventListener('focus', () => record('window focus'));
   field.addEventListener('blur', () => record('field blur'));
   field.addEventListener('focus', () => record('field focus'));
   field.addEventListener('keydown', event => record(`key ${event.key}`));
+  field.addEventListener('input', mirror);
   field.addEventListener('pointerdown', () => record('field pointerdown'));
   document.addEventListener('visibilitychange', () => record(`visibility ${document.visibilityState}`));
   document.getElementById('reset').addEventListener('click', () => {
@@ -43,7 +61,8 @@
       startedAt = new Date().toISOString();
     }, 150);
   });
-  setInterval(() => {
+  // The automated run reads only the title, so its page skips this growing report.
+  if (!automated) setInterval(() => {
     report.textContent = JSON.stringify({
       focused: document.hasFocus(), activeElement: document.activeElement.id,
       visibility: document.visibilityState, startedAt,
@@ -53,5 +72,10 @@
       text: field.value, events
     }, null, 2);
   }, 100);
+  if (automated) {
+    document.documentElement.classList.add('automated');
+    field.focus();
+    setInterval(mirror, 25);
+  }
 </script>
 </html>

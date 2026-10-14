@@ -508,13 +508,19 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
 }
 
 /// An opt-in WindowServer test. Unlike `LiveTest`, it posts the real shortcut and mouse events,
-/// and types into a local webpage in a separate app to prove that keyboard focus stayed there.
-/// Only the capture and API are fixtures. Event posting needs an existing macOS approval.
+/// and types into a local webpage in a separate app to prove that keyboard focus stayed there:
+/// `LiveFocusTarget`'s WKWebView, or with `--chrome` an isolated Google Chrome that
+/// `ChromeFocusTarget` observes. Only the capture and API are fixtures. Event posting needs an
+/// existing macOS approval.
 @MainActor
 final class LiveFocusTest: NSObject, NSApplicationDelegate {
   private let hotkey = Hotkey(.snip)
   private let api = ScriptedAPI(fixedAnswer: ScriptedAPI.firstAnswer)
+  private let chrome = CommandLine.arguments.contains("--chrome")
+  /// The target process, which reports on the foreground app: itself, or the test's Chrome.
   private let target = Process()
+  /// The app that must stay in front, which the target reports once it's ready.
+  private var foregroundPID: pid_t = 0
   private let commands = Pipe()
   private let reports = Pipe()
   private let pasteboard = NSPasteboard(name: NSPasteboard.Name("com.snapscreen.app.focus-test.\(UUID().uuidString)"))
@@ -555,8 +561,8 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
     checks += 1
   }
 
-  private func waitFor(_ message: String, _ predicate: () -> Bool) async throws {
-    let deadline = Date().addingTimeInterval(15)
+  private func waitFor(_ message: String, timeout: TimeInterval = 15, _ predicate: () -> Bool) async throws {
+    let deadline = Date().addingTimeInterval(timeout)
     while !predicate() {
       try require(target.isRunning, "the isolated focus target stays open")
       guard Date() < deadline else { throw Failure(description: message) }
@@ -575,7 +581,8 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
     }
     previousApp = NSWorkspace.shared.frontmostApplication
     target.executableURL = URL(fileURLWithPath: path)
-    target.arguments = ["--focus-target"] + (CommandLine.arguments.contains("--fullscreen") ? ["--fullscreen"] : [])
+    target.arguments = ["--focus-target"] + (chrome ? ["--chrome"] : []) +
+      (CommandLine.arguments.contains("--fullscreen") ? ["--fullscreen"] : [])
     target.standardInput = commands
     target.standardOutput = reports
     reports.fileHandleForReading.readabilityHandler = { [weak self] handle in
@@ -585,18 +592,26 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
     }
     try target.run()
     // If macOS refused the target's own activation, LaunchServices activates it, as a click would.
-    try await Task.sleep(for: .seconds(1))
-    if NSWorkspace.shared.frontmostApplication?.processIdentifier != target.processIdentifier {
-      let activate = Process()
-      activate.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-      activate.arguments = ["-e", "tell application id \"com.snapscreen.app.test-hooks.focus-target\" to activate"]
-      try activate.run()
-      activate.waitUntilExit()
+    // Chrome comes to the front as it launches.
+    if !chrome {
+      try await Task.sleep(for: .seconds(1))
+      if NSWorkspace.shared.frontmostApplication?.processIdentifier != target.processIdentifier {
+        let activate = Process()
+        activate.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        activate.arguments = ["-e", "tell application id \"com.snapscreen.app.test-hooks.focus-target\" to activate"]
+        try activate.run()
+        activate.waitUntilExit()
+      }
     }
-    try await waitFor("the local webpage becomes ready") { self.messages.contains { $0["ready"] as? Bool == true } }
+    try await waitFor("the local webpage becomes ready", timeout: chrome ? 90 : 15) {
+      self.messages.contains { $0["ready"] as? Bool == true || $0["error"] != nil }
+    }
     let ready = messages.removeFirst()
+    if let error = ready["error"] { throw Failure(description: "the focus target can't start: \(error)") }
+    foregroundPID = pid_t(ready["pid"] as? Int ?? 0)
+    try require(foregroundPID > 0, "the target reports the app that must stay in front: \(ready)")
     try require(ready["positiveControl"] as? Bool == true,
-      "the webpage's focus observer detects an intentional key-window change before measurement")
+      "the target's focus observers detect deliberate focus changes before measurement: \(ready)")
     // The positive control restores focus asynchronously. Start transition counts only
     // after that setup has finished and its original responder is confirmed.
     messages.removeAll()
@@ -619,7 +634,7 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
       MainActor.assumeIsolated {
         guard let self else { return }
         if NSApp.isActive || NSApp.keyWindow != nil || NSApp.mainWindow != nil ||
-          NSWorkspace.shared.frontmostApplication?.processIdentifier != self.target.processIdentifier {
+          NSWorkspace.shared.frontmostApplication?.processIdentifier != self.foregroundPID {
           self.nativeFailures += 1
         }
       }
@@ -687,7 +702,7 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
     settings.close()
     ForegroundFocus.returnToPreviousApp(ignoring: settings)
     try await waitFor("closing Settings returns to the original app with an answer still open") {
-      NSWorkspace.shared.frontmostApplication?.processIdentifier == self.target.processIdentifier && !NSApp.isActive
+      NSWorkspace.shared.frontmostApplication?.processIdentifier == self.foregroundPID && !NSApp.isActive
     }
     // Reset only after confirming Settings returned focus. The helper separately verifies that
     // its key window, original responder and webpage focus have all actually been restored.
@@ -701,7 +716,7 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
       MainActor.assumeIsolated {
         guard let self else { return }
         if NSApp.isActive || NSApp.keyWindow != nil || NSApp.mainWindow != nil ||
-          NSWorkspace.shared.frontmostApplication?.processIdentifier != self.target.processIdentifier {
+          NSWorkspace.shared.frontmostApplication?.processIdentifier != self.foregroundPID {
           self.nativeFailures += 1
         }
       }
@@ -811,15 +826,17 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
     try await runNoticeFocusTests(using: failureDriver)
     try await probe("after errors, timeouts and notices")
     try await runAppShell(at: field, on: screen)
+    let fullscreen = CommandLine.arguments.contains("--fullscreen")
     print("SnapScreen focus test passed (test hooks build): \(checks) checks, actual ⌥⇧S, pointer selection, " +
       "Stop, Retry, Settings return, Copy, preview, text selection, context menu typing and Copy, move, resize, " +
       "outside click delivery, replacement, conversation close, errors, timeouts and notices; " +
       "then the real app shell launched through " +
       "LaunchServices, its notice, an activation it handed back, " +
-      (CommandLine.arguments.contains("--fullscreen") ? "a conversation open through Settings" :
-        "its menu's Snip, Close All, Settings and Quit,") + " and reopening; webpage focus and typed input preserved" +
-      (CommandLine.arguments.contains("--fullscreen") ? " in a fullscreen Space" : "") + ". Capture and API used fixtures.")
-    print("SnapScreen test completed: focus" + (CommandLine.arguments.contains("--fullscreen") ? " fullscreen" : ""))
+      (fullscreen ? "a conversation open through Settings" : "its menu's Snip, Close All, Settings and Quit,") +
+      " and reopening; webpage focus and typed input preserved" +
+      (chrome ? " in \(ready["browser"] ?? "Chrome")" : "") + (fullscreen ? " in a fullscreen Space" : "") +
+      ". Capture and API used fixtures.")
+    print("SnapScreen test completed: focus" + (chrome ? " chrome" : "") + (fullscreen ? " fullscreen" : ""))
   }
 
   private func receive(_ data: Data) {
@@ -1004,7 +1021,7 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
   private func drag(from start: NSPoint, to end: NSPoint, hold: Duration = .zero, steps: Int = 4) async throws {
     try postPointer(.mouseMoved, at: start)
     try postPointer(.leftMouseDown, at: start)
-    let expectedPID = target.processIdentifier
+    let expectedPID = foregroundPID
     let height = CGDisplayBounds(CGMainDisplayID()).height
     let preserved = await Task.detached {
       var point = start
@@ -1074,7 +1091,7 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
 
   private func requireInputTarget() throws {
     try require(target.isRunning && nativeFailures == 0 && !NSApp.isActive &&
-      NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier,
+      NSWorkspace.shared.frontmostApplication?.processIdentifier == foregroundPID,
       "focus must remain on the isolated target before posting any input")
   }
 
@@ -1130,7 +1147,7 @@ extension LiveFocusTest {
       MainActor.assumeIsolated {
         guard let self else { return }
         if NSApp.isActive || (self.front == .target &&
-          NSWorkspace.shared.frontmostApplication?.processIdentifier != self.target.processIdentifier) {
+          NSWorkspace.shared.frontmostApplication?.processIdentifier != self.foregroundPID) {
           self.nativeFailures += 1
         }
       }
@@ -1172,7 +1189,7 @@ extension LiveFocusTest {
     var held: TimeInterval?
     try await waitFor("SnapScreen is activated, then hands activation back") {
       guard let up = self.activations.firstIndex(where: { $0.pid == pid }),
-        let back = self.activations[up...].first(where: { $0.pid == self.target.processIdentifier }) else { return false }
+        let back = self.activations[up...].first(where: { $0.pid == self.foregroundPID }) else { return false }
       held = back.time.timeIntervalSince(self.activations[up].time)
       return true
     }
@@ -1286,7 +1303,7 @@ extension LiveFocusTest {
       let point = axCenter(button) else { throw Failure(description: "Settings has a close button") }
     try await click(at: point, frontmost: pid)
     try await waitFor("closing Settings gives the keyboard back to the original app") {
-      NSWorkspace.shared.frontmostApplication?.processIdentifier == self.target.processIdentifier
+      NSWorkspace.shared.frontmostApplication?.processIdentifier == self.foregroundPID
     }
     front = .target
   }
@@ -1295,7 +1312,7 @@ extension LiveFocusTest {
   /// something took it on purpose, that the page never blurred or hid since the last check.
   private func settle(_ stage: String, blurAllowed: Bool) async throws {
     try await waitFor("the original app is in front \(stage)") {
-      NSWorkspace.shared.frontmostApplication?.processIdentifier == self.target.processIdentifier
+      NSWorkspace.shared.frontmostApplication?.processIdentifier == self.foregroundPID
     }
     try await Task.sleep(for: .milliseconds(200))
     messages.removeAll()
@@ -1517,7 +1534,8 @@ final class LiveFocusTarget: NSObject, NSApplicationDelegate, NSWindowDelegate, 
       self.monitor = monitor
       // The HTML field sits 40 points above the content's bottom edge, in either Space mode.
       let field = self.window.convertPoint(toScreen: NSPoint(x: 150, y: 85))
-      self.report(["ready": true, "window": self.window.windowNumber, "x": field.x, "y": field.y,
+      self.report(["ready": true, "pid": Int(ProcessInfo.processInfo.processIdentifier),
+        "window": self.window.windowNumber, "x": field.x, "y": field.y,
         "positiveControl": self.positiveControl])
     }
   }
@@ -1528,7 +1546,7 @@ final class LiveFocusTarget: NSObject, NSApplicationDelegate, NSWindowDelegate, 
       let command = String(decoding: pending.prefix(upTo: newline), as: UTF8.self).split(separator: " ")
       pending.removeSubrange(...newline)
       switch command.first {
-      case "launch": launchAppShell()
+      case "launch": Self.openAppShell { [weak self] in self?.report($0) }
       case "yield": yieldActivation(to: command.dropFirst().first.flatMap { pid_t($0) })
       default: reportState(reset: command.first == "reset")
       }
@@ -1568,17 +1586,18 @@ final class LiveFocusTarget: NSObject, NSApplicationDelegate, NSWindowDelegate, 
   }
 
   /// Opens the app shell copy through LaunchServices, which activates it as Finder, Spotlight and
-  /// login items do. Once it's running, opening it again reopens it instead.
-  private func launchAppShell() {
+  /// login items do. Once it's running, opening it again reopens it instead. `ChromeFocusTarget`
+  /// opens it the same way, though from the background.
+  static func openAppShell(then report: @escaping @MainActor ([String: Any]) -> Void) {
     guard let path = ProcessInfo.processInfo.environment["SNAPSCREEN_FOCUS_APP"] else {
       return report(["launched": 0])
     }
     let configuration = NSWorkspace.OpenConfiguration()
     configuration.arguments = ["--focus-app"]
     configuration.addsToRecentItems = false
-    NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: path), configuration: configuration) { [weak self] app, _ in
+    NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: path), configuration: configuration) { app, _ in
       let pid = Int(app?.processIdentifier ?? 0)
-      Task { @MainActor in self?.report(["launched": pid]) }
+      Task { @MainActor in report(["launched": pid]) }
     }
   }
 

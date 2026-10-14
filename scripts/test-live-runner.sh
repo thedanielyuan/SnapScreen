@@ -42,6 +42,13 @@ expect_result 0 'focus fullscreen' 'SnapScreen test completed: focus fullscreen'
 expect_result 1 live 'SnapScreen test completed: focus' 0 'without its completion marker'
 expect_result 1 focus 'SnapScreen test completed: focus fullscreen' 0 'without its completion marker'
 expect_result 1 'focus fullscreen' 'SnapScreen test completed: focus' 0 'without its completion marker'
+expect_result 0 'focus chrome' 'SnapScreen test completed: focus chrome' 0 'SnapScreen test completed: focus chrome'
+expect_result 0 'focus chrome fullscreen' 'SnapScreen test completed: focus chrome fullscreen' 0 \
+  'SnapScreen test completed: focus chrome fullscreen'
+expect_result 1 'focus chrome' 'SnapScreen test completed: focus' 0 'without its completion marker'
+expect_result 1 focus 'SnapScreen test completed: focus chrome' 0 'without its completion marker'
+expect_result 1 'focus chrome fullscreen' 'SnapScreen test completed: focus fullscreen' 0 'without its completion marker'
+expect_result 1 'focus chrome fullscreen' 'SnapScreen test completed: focus chrome' 0 'without its completion marker'
 expect_result 1 live 'prefix SnapScreen test completed: live suffix' 0 'without its completion marker'
 expect_result 7 live 'fixture diagnostic' 7 'fixture diagnostic'
 expect_result 9 focus 'SnapScreen test completed: focus' 9 'SnapScreen test completed: focus'
@@ -49,6 +56,8 @@ expect_result 1 live 'SnapScreen live test failed: fixture failure
 SnapScreen test completed: live' 0 'reported failure despite exiting successfully'
 expect_result 1 focus 'SnapScreen focus test failed: fixture failure
 SnapScreen test completed: focus' 0 'reported failure despite exiting successfully'
+expect_result 1 'focus chrome' 'SnapScreen focus test failed: fixture failure
+SnapScreen test completed: focus chrome' 0 'reported failure despite exiting successfully'
 
 actual=0
 "$root/scripts/run-verified-test.sh" live /bin/sh -c 'echo "stderr diagnostic" >&2; exit 5' \
@@ -82,4 +91,10 @@ expect_invalid_arguments --focus --focus
 expect_invalid_arguments ''
 expect_invalid_arguments '' --fullscreen
 expect_invalid_arguments --focus ''
+expect_invalid_arguments --chrome
+expect_invalid_arguments --chrome --focus
+expect_invalid_arguments --focus --fullscreen --chrome
+expect_invalid_arguments --focus --chrome --chrome
+expect_invalid_arguments --focus --chrome --fullscreen --extra
+expect_invalid_arguments --focus --chrome ''
 printf 'SnapScreen live runner tests: %s checks passed\n' "$checks"
