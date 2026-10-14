@@ -22,8 +22,8 @@ open build/SnapScreen.app                                    # run the menu bar 
 Before finishing any change, run `swift build` through `scripts/test-app-live.sh` in order, as
 CI's `verify` job does; the live test's windows show for a few seconds. After changing activation,
 panels, notices, the menu or Settings, also run `scripts/test-app-live.sh --focus` and
-`--focus --fullscreen`: each posts real input for about 20 seconds, so ask the user first, and
-quit the running app (`pkill -x SnapScreen`) beforehand.
+`--focus --fullscreen`: each posts real input throughout the run, so ask the user first, and quit
+the running app (`pkill -x SnapScreen`) beforehand.
 
 ## Conventions
 
@@ -59,12 +59,18 @@ how data is handled. Never add a privacy section to `README.md`.
 - Screen Recording is the only permission: the shortcut is a Carbon hot key (`Hotkey`), which
   needs no Accessibility or Input Monitoring. Check access with `CGPreflightScreenCaptureAccess`,
   which never prompts; only the Open System Settings button requests it.
-- Every capture-flow window (overlay, conversation, preview, notice, pointer shield) is a
-  `PassivePanel` (`UI/Panels.swift`): non-activating, shown with `orderFront(nil)`, and never key
-  or main, even while closing. Never activate the app or request keyboard focus in this flow.
+- The capture-flow windows (overlay, conversation, preview, notice, pointer shield), status menu
+  and read-only text context menus all use `PassivePanel` (`UI/Panels.swift`): non-activating,
+  shown with `orderFront(nil)`, and never key or main, even while closing. Never activate the app
+  or request keyboard focus in this flow.
   Selection and dismissal use the pointer, with no keyboard selection or Escape/Command-W, and a
   snip gets one answer, with no follow-ups or other text input. Keep Stop, Retry, Copy and close
   usable without focus.
+- Menus use `PassiveMenu`, not native `NSMenu` tracking, which can take the foreground window's
+  key status and typed input. Their global and local mouse monitors run only while a menu is
+  visible, read only the pointer event needed to dismiss it, and never consume an outside click.
+  Menus take no keyboard input; typing stays in the foreground app. Answer and error text context
+  menus offer only Copy and Select All, and only Copy writes the clipboard.
 - Only Settings, opened explicitly, keeps the app active: `applicationDidBecomeActive` hands any
   other activation back after `AppDelegate.handbackDelay`, and closing Settings hands focus back
   (`ForegroundFocus`). A missing key shows a passive notice instead of opening Settings.

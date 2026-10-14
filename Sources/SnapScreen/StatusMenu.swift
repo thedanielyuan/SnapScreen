@@ -2,21 +2,17 @@ import AppKit
 
 /// The menu bar icon and its menu: Snip, Close All Conversations, Settings… and Quit.
 enum StatusMenu {
-  /// `shortcut` is nil when another app has the combination, so the menu doesn't promise it. The
-  /// target enables Close All Conversations only while one is open.
-  static func make(target: AnyObject, snip: Selector, closeAll: Selector, settings: Selector,
-    shortcut: Hotkey.Combination?) -> NSMenu {
-    let menu = NSMenu(title: "SnapScreen")
-    let snipItem = menu.addItem(withTitle: "Snip", action: snip, keyEquivalent: shortcut?.menuKey ?? "")
-    snipItem.keyEquivalentModifierMask = shortcut?.menuModifiers ?? []
-    snipItem.target = target
-    let closeAllItem = menu.addItem(withTitle: "Close All Conversations", action: closeAll, keyEquivalent: "")
-    closeAllItem.target = target
-    let settingsItem = menu.addItem(withTitle: "Settings…", action: settings, keyEquivalent: ",")
-    settingsItem.target = target
-    menu.addItem(.separator())
-    menu.addItem(withTitle: "Quit SnapScreen", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-    return menu
+  /// `shortcut` is nil when another app has the combination, so the menu doesn't promise it.
+  /// Its hint describes the Carbon hot key; the menu itself never takes keyboard input.
+  static func make(snip: @escaping () -> Void, closeAll: @escaping () -> Void,
+    settings: @escaping () -> Void, quit: @escaping () -> Void, canCloseAll: Bool,
+    shortcut: Hotkey.Combination?) -> [PassiveMenuItem] {
+    [
+      PassiveMenuItem(title: "Snip", hint: shortcut?.display, action: snip),
+      PassiveMenuItem(title: "Close All Conversations", isEnabled: canCloseAll, action: closeAll),
+      PassiveMenuItem(title: "Settings…", action: settings),
+      PassiveMenuItem(title: "Quit SnapScreen", separatorBefore: true, action: quit),
+    ]
   }
 
   static var icon: NSImage? {

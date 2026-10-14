@@ -44,31 +44,54 @@ func runAppShellTests() throws -> Int {
   try check(second.register(), "an unregistered shortcut is free again")
   second.unregister()
 
-  final class MenuTarget: NSObject {
-    var snips = 0
-    var closes = 0
-    var settings = 0
-    @objc func snip() { snips += 1 }
-    @objc func closeAll() { closes += 1 }
-    @objc func showSettings() { settings += 1 }
+  let menu = PassiveMenu(present: { _ in })
+  var menuActions: [String] = []
+  var dismissedBeforeAction = true
+  func menuAction(_ name: String) {
+    dismissedBeforeAction = dismissedBeforeAction && menu.panel == nil
+    menuActions.append(name)
   }
-  let target = MenuTarget()
-  let menu = StatusMenu.make(target: target, snip: #selector(MenuTarget.snip), closeAll: #selector(MenuTarget.closeAll),
-    settings: #selector(MenuTarget.showSettings), shortcut: .snip)
-  try check(menu.items.map(\.title) == ["Snip", "Close All Conversations", "Settings…", "", "Quit SnapScreen"] &&
-    menu.items[3].isSeparatorItem, "the menu has Snip, Close All Conversations, Settings… and Quit")
-  try check(menu.items[0].keyEquivalent == "s" && menu.items[0].keyEquivalentModifierMask == [.option, .shift],
-    "Snip shows its shortcut")
-  try check(menu.items[4].action == #selector(NSApplication.terminate(_:)) && menu.items[4].keyEquivalent == "q",
-    "Quit terminates the app")
-  menu.performActionForItem(at: 0)
-  menu.performActionForItem(at: 1)
-  menu.performActionForItem(at: 2)
-  try check(target.snips == 1 && target.closes == 1 && target.settings == 1,
-    "Snip, Close All Conversations and Settings… reach the app")
-  let taken = StatusMenu.make(target: target, snip: #selector(MenuTarget.snip), closeAll: #selector(MenuTarget.closeAll),
-    settings: #selector(MenuTarget.showSettings), shortcut: nil)
-  try check(taken.items[0].keyEquivalent.isEmpty, "a shortcut another app has isn't shown")
+  let items = StatusMenu.make(snip: { menuAction("snip") }, closeAll: { menuAction("close") },
+    settings: { menuAction("settings") }, quit: { menuAction("quit") }, canCloseAll: true, shortcut: .snip)
+  try check(items.map(\.title) == ["Snip", "Close All Conversations", "Settings…", "Quit SnapScreen"] &&
+    items[3].separatorBefore, "the menu has Snip, Close All Conversations, Settings… and Quit")
+  try check(items[0].hint == "⌥⇧S", "Snip shows its Carbon shortcut without taking keyboard input")
+  menu.show(items, at: NSPoint(x: 100, y: 500))
+  let menuPanel = menu.panel!
+  let menuContent = menuPanel.contentView as! PassiveMenuView
+  try check(hasPassivePanelConfiguration(menuPanel) && menuPanel.level == .popUpMenu,
+    "pointer menus use passive panels without native menu tracking")
+  try check(menuContent.buttons.allSatisfy {
+    $0.acceptsFirstMouse(for: nil) && !$0.acceptsFirstResponder && !$0.canBecomeKeyView
+  }, "menu commands act on the first click without accepting the keyboard")
+  menuContent.buttons[0].updateTrackingAreas()
+  try check(menuContent.buttons[0].trackingAreas.contains { $0.options.contains(.activeAlways) },
+    "menu hover tracking works while the original app stays active")
+  for index in items.indices {
+    menu.show(items, at: NSPoint(x: 100, y: 500))
+    (menu.panel?.contentView as? PassiveMenuView)?.buttons[index].performClick(nil)
+  }
+  try check(menuActions == ["snip", "close", "settings", "quit"] && dismissedBeforeAction,
+    "every menu command dismisses its panel before dispatching to the app")
+  menuContent.buttons[0].performClick(nil)
+  try check(menuActions.count == 4, "dismissed menu rows release their actions immediately")
+  let taken = StatusMenu.make(snip: {}, closeAll: { menuAction("disabled") }, settings: {}, quit: {},
+    canCloseAll: false, shortcut: nil)
+  try check(taken[0].hint == nil, "a shortcut another app has isn't shown")
+  let anchor = NSRect(x: 40, y: 700, width: 24, height: 24)
+  menu.show(taken, at: NSPoint(x: 100, y: 500), ignoringOutsideClicksIn: anchor)
+  let disabled = (menu.panel?.contentView as? PassiveMenuView)?.buttons[1]
+  disabled?.performClick(nil)
+  try check(disabled?.isEnabled == false && menuActions.count == 4 && menu.panel != nil,
+    "Close All Conversations cannot dispatch or dismiss the menu when none is open")
+  menu.clickedOutside(at: NSPoint(x: anchor.midX, y: anchor.midY))
+  try check(menu.panel != nil, "the menu bar button's frame is excluded so it can toggle its menu")
+  menu.clickedOutside(at: NSPoint(x: -10_000, y: -10_000))
+  try check(menu.panel == nil, "an outside press dismisses the menu")
+  let visible = NSRect(x: -1440, y: -120, width: 1440, height: 900)
+  let edgeFrame = PassiveMenu.frame(size: NSSize(width: 240, height: 120),
+    at: NSPoint(x: -10, y: -100), in: visible)
+  try check(visible.contains(edgeFrame), "a pointer menu stays inside a negative-origin display near its edge")
   try check(StatusMenu.icon?.isTemplate == true, "the menu bar icon adapts to the menu bar")
 
   try check(QuitRequest.isAccepted(nil), "Quit SnapScreen, which sends no Apple event, quits")
@@ -117,7 +140,7 @@ func runAppShellTests() throws -> Int {
   try check(hasPassivePanelConfiguration(panel) && panel.level == .floating,
     "a notice floats in every Space without activating SnapScreen or taking the keyboard")
   try check(notice.actionButton?.acceptsFirstMouse(for: nil) == true, "a notice's buttons act on the first click")
-  try check([NSApp.effectiveAppearance, menu.effectiveAppearance, panel.effectiveAppearance].allSatisfy {
+  try check([NSApp.effectiveAppearance, menuPanel.effectiveAppearance, panel.effectiveAppearance].allSatisfy {
     $0.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
   }, "SnapScreen's windows and menus are dark whatever the system's appearance")
 

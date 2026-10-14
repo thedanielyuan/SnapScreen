@@ -17,12 +17,13 @@ struct AppServices {
 }
 
 /// The menu bar app: its icon and menu, the global shortcut, snips, Settings and notices.
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
+final class AppDelegate: NSObject, NSApplicationDelegate {
   private let services: AppServices
   private let notices = NoticeCenter()
   private let hotkey = Hotkey(.snip)
   private var shortcutAvailable = false
   private var statusItem: NSStatusItem?
+  private let statusMenu = PassiveMenu()
   private var settings: SettingsWindowController?
   private var snips: SnipWindows?
 
@@ -48,8 +49,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     item.button?.image = StatusMenu.icon
     item.button?.toolTip = "SnapScreen"
-    item.menu = StatusMenu.make(target: self, snip: #selector(snip), closeAll: #selector(closeAllConversations),
-      settings: #selector(showSettings), shortcut: shortcutAvailable ? hotkey.combination : nil)
+    item.button?.target = self
+    item.button?.action = #selector(toggleStatusMenu)
+    item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
     statusItem = item
     if !shortcutAvailable {
       notices.show("Another app is using \(hotkey.combination.display), so choose Snip from SnapScreen's menu bar icon.")
@@ -87,6 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
   }
 
   @MainActor @objc func snip() {
+    statusMenu.dismiss()
     guard services.screenRecordingGranted() else {
       notices.show("SnapScreen needs Screen Recording permission to snip.",
         action: NoticeAction(title: "Open System Settings") { ScreenRecordingAccess.openSystemSettings() })
@@ -99,15 +102,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
   }
 
   @MainActor @objc func closeAllConversations() {
+    statusMenu.dismiss()
     snips?.closeAll()
   }
 
-  /// Close All Conversations is enabled only while there's one to close.
-  @MainActor func validateMenuItem(_ item: NSMenuItem) -> Bool {
-    item.action != #selector(closeAllConversations) || snips?.sessions.isEmpty == false
+  /// Native menu tracking takes the foreground window's keyboard. These pointer commands use
+  /// the same passive policy as a snip, including while the menu stays open.
+  @MainActor @objc private func toggleStatusMenu() {
+    if statusMenu.isVisible { statusMenu.dismiss(); return }
+    guard let button = statusItem?.button, let window = button.window else { return }
+    let anchor = window.convertToScreen(button.convert(button.bounds, to: nil))
+    let items = StatusMenu.make(snip: { [weak self] in self?.snip() },
+      closeAll: { [weak self] in self?.closeAllConversations() },
+      settings: { [weak self] in self?.showSettings() }, quit: { NSApp.terminate(nil) },
+      canCloseAll: snips?.sessions.isEmpty == false, shortcut: shortcutAvailable ? hotkey.combination : nil)
+    statusMenu.show(items, at: NSPoint(x: anchor.minX, y: anchor.minY - 4),
+      ignoringOutsideClicksIn: anchor)
   }
 
   @objc func showSettings() {
+    statusMenu.dismiss()
     if settings == nil {
       let controller = SettingsWindowController(services: services.settings(services.keyStore,
         shortcutAvailable ? hotkey.combination : nil))

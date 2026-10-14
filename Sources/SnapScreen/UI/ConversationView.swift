@@ -128,7 +128,7 @@ final class PendingView: NSView {
 
 /// A failed request, with Retry.
 final class FailureView: NSView {
-  let message = NSTextField(wrappingLabelWithString: "")
+  let message = ReadOnlyTextView(frame: .zero)
   private let icon = NSImageView()
   let retryButton: ActionButton
   override var isFlipped: Bool { true }
@@ -137,9 +137,8 @@ final class FailureView: NSView {
     retryButton = ActionButton(symbol: "arrow.clockwise", title: "Retry", label: "Retry", target: target, action: retry)
     super.init(frame: .zero)
     retryButton.tint = .labelColor
-    message.font = .systemFont(ofSize: 13)
+    message.configureReadOnly(font: .systemFont(ofSize: 13))
     message.textColor = .systemRed
-    message.isSelectable = true
     icon.image = Theme.symbol("exclamationmark.triangle.fill", size: 13, color: .systemRed)
     icon.setAccessibilityElement(false)
     [icon, message, retryButton].forEach(addSubview)
@@ -150,8 +149,7 @@ final class FailureView: NSView {
 
   func height(for width: CGFloat) -> CGFloat {
     let textWidth = max(40, width - 46)
-    let textHeight = ceil(message.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: textWidth,
-      height: .greatestFiniteMagnitude)).height ?? 18)
+    let textHeight = max(18, message.measuredHeight(for: textWidth))
     icon.frame = NSRect(x: 12, y: 11, width: 16, height: 16)
     message.frame = NSRect(x: 34, y: 10, width: textWidth, height: textHeight)
     var height = 10 + textHeight + 10
@@ -235,7 +233,7 @@ final class TurnView: NSView {
     } else if case .failed = newState {
       answer.render(answer.renderedText, final: true)
     }
-    if case .failed(let message) = newState { failure.message.stringValue = message }
+    if case .failed(let message) = newState { failure.message.string = message }
     pending.thinking = newState == .thinking
     if isPending && !wasPending { pending.since = Date() }
     updateVisibility()
@@ -244,7 +242,7 @@ final class TurnView: NSView {
 
   func restart() {
     answer.clear()
-    failure.message.stringValue = ""
+    failure.message.clearText()
     state = .waiting
     pending.thinking = false
     pending.since = Date()
@@ -308,7 +306,7 @@ final class TurnView: NSView {
 
   func clear() {
     answer.clear()
-    failure.message.stringValue = ""
+    failure.message.clearText()
     for button in [copyButton, retryButton, failure.retryButton] {
       button.cancelFeedback()
       button.target = nil

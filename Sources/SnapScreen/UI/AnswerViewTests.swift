@@ -47,8 +47,29 @@ func runAnswerViewTests() throws -> Int {
     .code("x", language: String(repeating: "a", count: 24), complete: true),
   ], "language label is bounded")
 
-  // Initialize AppKit without opening, ordering or activating a window. Never touch the clipboard.
+  // Initialize AppKit without opening, ordering or activating a window. Copy uses a private board.
   _ = NSApplication.shared
+  let previousPasteboard = Clipboard.pasteboard
+  let pasteboard = NSPasteboard(name: NSPasteboard.Name("com.snapscreen.self-test.\(UUID().uuidString)"))
+  Clipboard.pasteboard = pasteboard
+  defer { Clipboard.pasteboard = previousPasteboard; pasteboard.releaseGlobally() }
+  let selectable = ReadOnlyTextView(frame: .zero)
+  selectable.configureReadOnly(font: AnswerStyle.proseFont)
+  selectable.string = "one 😀 two"
+  selectable.setSelectedRange(NSRange(location: 4, length: 2))
+  let selectedActions = selectable.contextMenuItems()
+  selectedActions[0].action()
+  try check(pasteboard.string(forType: .string) == "😀",
+    "the passive Copy action copies only the selected UTF-16 range to the private pasteboard")
+  selectedActions[1].action()
+  try check(selectable.selectedRange() == NSRange(location: 0, length: 10),
+    "the passive Select All action selects text without needing a key window")
+  selectable.setSelectedRange(NSRange(location: 0, length: 0))
+  try check(!selectable.contextMenuItems()[0].isEnabled, "Copy is disabled without a selection")
+  selectable.string = ""
+  selectedActions[0].action()
+  try check(pasteboard.string(forType: .string) == "😀" && !selectable.contextMenuItems()[1].isEnabled,
+    "a cleared answer leaves nothing for an old Copy action or Select All")
   let view = AnswerView(frame: NSRect(x: 0, y: 0, width: 480, height: 240))
   view.render("**Literal** <b>text</b>\n```swift\nlet n = 1", final: false)
   try check(view.segmentViews.count == 2, "separate prose and code views")
