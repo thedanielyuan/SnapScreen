@@ -128,6 +128,7 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
   private var checks = 0
   private var foregroundProcessID: Int32?
   private var focusMonitor: Timer?
+  private var hoveredNotice: NoticePanelView?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     installEditingMenu(applicationName: "SnapScreen")
@@ -190,7 +191,7 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
 
   private func checkBackground(_ stage: String) {
     let frontmost = NSWorkspace.shared.frontmostApplication?.processIdentifier
-    check(!isFrontmost && !NSApp.isActive && NSApp.keyWindow == nil &&
+    check(!isFrontmost && !NSApp.isActive && NSApp.keyWindow == nil && NSApp.mainWindow == nil &&
       frontmost == foregroundProcessID,
       "the original app keeps focus \(stage) (expected PID \(foregroundProcessID ?? -1), " +
         "actual \(frontmost ?? -1), test PID \(ProcessInfo.processInfo.processIdentifier), " +
@@ -355,11 +356,94 @@ final class LiveTest: NSObject, NSApplicationDelegate, SessionControllerDelegate
     check(snips?.shields.shield.map { !$0.isVisible && $0.ignoresMouseEvents } ?? false,
       "the pointer shield is hidden and lets clicks through once they close")
     checkBackground("after all windows close")
-    focusMonitor?.invalidate()
-    print("SnapScreen live test passed (test hooks build): \(checks) checks, pointer selection, streamed answer, " +
-      "Copy, preview, replacement and dismissal through real windows without keyboard focus")
-    pasteboard.releaseGlobally()
-    exit(0)
+    Task { @MainActor in
+      do {
+        try await runFailureFocusTests(using: failureDriver(on: screen))
+        try await runNoticeFocusTests(using: failureDriver(on: screen))
+        checkBackground("after errors, timeouts and notices close")
+        focusMonitor?.invalidate()
+        hoveredNotice = nil
+        print("SnapScreen live test passed (test hooks build): \(checks) checks, pointer selection, streamed answer, " +
+          "Copy, preview, replacement, dismissal, errors, timeouts and notices through real windows without keyboard focus")
+        pasteboard.releaseGlobally()
+        print("SnapScreen test completed: live")
+        exit(0)
+      } catch {
+        fail(String(describing: error))
+      }
+    }
+  }
+
+  /// CI drives the actual views without posting input to the user's desktop. The focus driver
+  /// below runs these same scenarios with WindowServer events and an independent webpage observer.
+  private func failureDriver(on screen: NSScreen) -> FocusTestDriver {
+    FocusTestDriver(screen: screen, capture: capture!, require: { [self] value, message in
+      guard value else { throw FocusTestFailure(message) }
+      checks += 1
+    }, wait: { [self] message, predicate in
+      let deadline = Date().addingTimeInterval(15)
+      while !predicate() {
+        guard Date() < deadline else { throw FocusTestFailure(message) }
+        checkBackground(message)
+        try await Task.sleep(for: .milliseconds(25))
+      }
+    }, probe: { [self] stage in
+      try await Task.sleep(for: .milliseconds(30))
+      checkBackground(stage)
+    }, select: { [self] windows in
+      guard let overlay = windows.overlay, let view = windows.selectionView else {
+        throw FocusTestFailure("the failure scenario opens a selection overlay")
+      }
+      let start = NSPoint(x: view.imageRect.midX - 80, y: view.imageRect.midY - 50)
+      let end = NSPoint(x: start.x + 160, y: start.y + 100)
+      for (type, point) in [(NSEvent.EventType.leftMouseDown, start), (.leftMouseDragged, end), (.leftMouseUp, end)] {
+        overlay.sendEvent(pointer(type, at: view.convert(point, to: nil), in: overlay))
+      }
+      guard windows.panel?.isVisible == true else { throw FocusTestFailure("selection opens a conversation") }
+    }, click: { view in
+      guard let button = view as? NSButton else { throw FocusTestFailure("the passive control is a button") }
+      button.performClick(nil)
+      await Task.yield()
+    }, movePointer: { [self] point in
+      let next = NSApp.windows.compactMap { window -> NoticePanelView? in
+        guard window.isVisible, window.frame.contains(point) else { return nil }
+        return window.contentView as? NoticePanelView
+      }.first
+      if hoveredNotice !== next {
+        if let previous = hoveredNotice { previous.mouseExited(with: NSEvent()) }
+        hoveredNotice = next
+        next?.mouseEntered(with: NSEvent())
+      }
+      await Task.yield()
+    }, checkPanel: { [self] panel, stage in
+      check(panel.isVisible && !panel.isKeyWindow && !panel.isMainWindow && !panel.canBecomeKey &&
+        !panel.canBecomeMain && panel.styleMask.contains(.nonactivatingPanel) && panel.isFloatingPanel &&
+        panel.becomesKeyOnlyIfNeeded && !panel.hidesOnDeactivate && !panel.canHide &&
+        panel.collectionBehavior.contains([.canJoinAllSpaces, .fullScreenAuxiliary]), "the \(stage) panel stays passive")
+      checkBackground(stage)
+    }, checkContextMenu: { [self] text in
+      for title in ["Select All", "Copy"] {
+        guard let window = text.window else { throw FocusTestFailure("error text has a window") }
+        text.rightMouseDown(with: pointer(.rightMouseDown, at: text.convert(NSPoint(x: 4, y: 4), to: nil), in: window))
+        guard let menu = NSApp.windows.first(where: { $0.isVisible && $0.title == "SnapScreen menu" }) as? PassivePanel,
+          let content = menu.contentView as? PassiveMenuView,
+          let button = content.buttons.first(where: { $0.title == title }) else {
+          throw FocusTestFailure("error text opens its \(title) context action")
+        }
+        try failureDriver(on: screen).checkPanel(menu, "error context menu")
+        try await failureDriver(on: screen).probe("with the error context menu open for \(title)")
+        check(button.isEnabled, "the error context action \(title) is enabled")
+        button.performClick(nil)
+        if title == "Select All" {
+          check(text.selectedRange() == NSRange(location: 0, length: (text.string as NSString).length),
+            "the error context menu selects all text")
+        } else {
+          check(pasteboard.string(forType: .string) == text.string, "the error context menu copies to the private pasteboard")
+        }
+        check(!menu.isVisible, "the error context menu closes after \(title)")
+        try await failureDriver(on: screen).probe("after the error context action \(title)")
+      }
+    })
   }
 
   private func hasEditableView(_ view: NSView?) -> Bool {
@@ -677,15 +761,33 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
       "the outside click reaches the original webpage field: before \(beforeOutside), after \(afterOutside)")
     try require(nativeFailures == 0, "the original app remains frontmost with its key window throughout")
     try await checkReplacementAndClose(at: field, from: start, to: end, above: targetWindow)
+    let failureDriver = FocusTestDriver(screen: screen, capture: capture, require: { [self] in try require($0, $1) },
+      wait: { [self] in try await waitFor($0, $1) },
+      probe: { [self] in _ = try await probe($0) },
+      select: { [self] in _ = try await select($0, from: start, to: end, above: targetWindow) },
+      click: { [self] in try await click($0) },
+      movePointer: { [self] in
+        try postPointer(.mouseMoved, at: $0)
+        try await Task.sleep(for: .milliseconds(100))
+      }, checkPanel: { [self] in try passive($0, above: targetWindow, stage: $1) },
+      checkContextMenu: { [self] text in
+        guard let window = text.window else { throw FocusTestFailure("the error text has a window") }
+        let point = window.convertPoint(toScreen: text.convert(NSPoint(x: 4, y: 4), to: nil))
+        try await checkContextMenu(for: text, at: point, above: targetWindow)
+      })
+    try await runFailureFocusTests(using: failureDriver)
+    try await runNoticeFocusTests(using: failureDriver)
+    try await probe("after errors, timeouts and notices")
     try await runAppShell(at: field, on: screen)
     print("SnapScreen focus test passed (test hooks build): \(checks) checks, actual ⌥⇧S, pointer selection, " +
       "Stop, Retry, Settings return, Copy, preview, text selection, context menu typing and Copy, move, resize, " +
-      "outside click delivery, replacement and conversation close; " +
+      "outside click delivery, replacement, conversation close, errors, timeouts and notices; " +
       "then the real app shell launched through " +
       "LaunchServices, its notice, an activation it handed back, " +
       (CommandLine.arguments.contains("--fullscreen") ? "a conversation open through Settings" :
         "its menu's Snip, Close All, Settings and Quit,") + " and reopening; webpage focus and typed input preserved" +
       (CommandLine.arguments.contains("--fullscreen") ? " in a fullscreen Space" : "") + ". Capture and API used fixtures.")
+    print("SnapScreen test completed: focus" + (CommandLine.arguments.contains("--fullscreen") ? " fullscreen" : ""))
   }
 
   private func receive(_ data: Data) {

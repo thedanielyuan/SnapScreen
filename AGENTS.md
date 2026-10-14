@@ -128,7 +128,11 @@ how data is handled. Never add a privacy section to `README.md`.
   you found it: if it was running, `open build/SnapScreen.app` before you finish, including after
   a test or audit that stopped it. Give test apps their own bundle ID.
 - If `test-app-live.sh` prints `SnapScreen is already running.`, a test-hooks copy is still open
-  and nothing was tested: stop that copy, not the user's, and rerun.
+  and the duplicate test launch fails with a nonzero exit: stop that copy, not the user's, and
+  rerun. The runner requires exit 0 and the exact requested completion marker,
+  `SnapScreen test completed: live`, `SnapScreen test completed: focus`, or
+  `SnapScreen test completed: focus fullscreen`; a generic `passed` line does not verify a run.
+  Its false-success regression checks run on each invocation.
 - `--self-test` uses its own Keychain service, `com.snapscreen.app.self-test`, never the real
   key's.
 - Known limitations, accepted in Phase 4: the shortcut's modifier keys reach the app beneath, and

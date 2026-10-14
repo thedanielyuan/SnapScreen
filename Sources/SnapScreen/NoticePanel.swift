@@ -119,13 +119,21 @@ final class NoticePanelView: NSVisualEffectView {
 final class NoticeCenter {
   static let duration: TimeInterval = 8
   private(set) var panel: NoticePanel?
-  private var timer: Timer?
+  /// Returns a cancellation action. Live tests advance a clock while production uses the main
+  /// run loop, so the same pause, restart and dismissal paths run without shortened deadlines.
+  typealias Scheduler = (TimeInterval, @escaping () -> Void) -> () -> Void
+  private let schedule: Scheduler
+  private var cancelDismissal: (() -> Void)?
+
+  init(schedule: @escaping Scheduler = NoticeCenter.scheduleTimer) {
+    self.schedule = schedule
+  }
 
   func show(_ message: String, action: NoticeAction? = nil) {
     dismiss()
     let view = NoticePanelView(message: message, action: action) { [weak self] in self?.dismiss() }
     view.onHoverChange = { [weak self] hovering in
-      if hovering { self?.timer?.invalidate() } else { self?.scheduleDismissal(after: 3) }
+      if hovering { self?.cancelDismissal?() } else { self?.scheduleDismissal(after: 3) }
     }
     let notice = NoticePanel(content: view)
     let visible = screenUnderPointer()?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
@@ -141,8 +149,8 @@ final class NoticeCenter {
   }
 
   func dismiss() {
-    timer?.invalidate()
-    timer = nil
+    cancelDismissal?()
+    cancelDismissal = nil
     guard let notice = panel else { return }
     panel = nil
     notice.orderOut(nil)
@@ -151,9 +159,13 @@ final class NoticeCenter {
   }
 
   private func scheduleDismissal(after seconds: TimeInterval) {
-    timer?.invalidate()
-    let timer = Timer(timeInterval: seconds, repeats: false) { [weak self] _ in self?.dismiss() }
+    cancelDismissal?()
+    cancelDismissal = schedule(seconds) { [weak self] in self?.dismiss() }
+  }
+
+  private static func scheduleTimer(_ seconds: TimeInterval, _ action: @escaping () -> Void) -> () -> Void {
+    let timer = Timer(timeInterval: seconds, repeats: false) { _ in action() }
     RunLoop.main.add(timer, forMode: .common)
-    self.timer = timer
+    return { timer.invalidate() }
   }
 }

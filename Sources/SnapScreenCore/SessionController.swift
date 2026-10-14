@@ -155,6 +155,79 @@ private func cropAndFit(_ image: CGImage, _ rect: CGRect, _ limits: SnapScreenLi
   }.value
 }
 
+#if SNAPSCREEN_TEST_HOOKS
+/// Controls the real selection-expiry callback and crop completion in the live focus tests.
+/// Production builds have neither this API nor a way to shorten their selection timeout.
+public final class SessionFocusTestHooks: @unchecked Sendable {
+  private let lock = NSLock()
+  private var expiry: (@MainActor @Sendable () -> Void)?
+  private var cropContinuation: CheckedContinuation<Void, Never>?
+  private var holdCrop: Bool
+  private var cropFinished = false
+
+  public init(holdCrop: Bool = false) { self.holdCrop = holdCrop }
+
+  public var isCropSuspended: Bool { lock.withLock { cropContinuation != nil } }
+  public var hasFinishedCrop: Bool { lock.withLock { cropFinished } }
+
+  /// Fires the callback installed by `start`, without changing the production timer or expiry.
+  @MainActor
+  public func expireSelection() -> Bool {
+    let action = lock.withLock { () -> (@MainActor @Sendable () -> Void)? in
+      defer { expiry = nil }
+      return expiry
+    }
+    action?()
+    return action != nil
+  }
+
+  /// A cancelled crop may still finish. Tests release it after expiry to check that it is ignored.
+  public func releaseCrop() {
+    let continuation = lock.withLock { () -> CheckedContinuation<Void, Never>? in
+      holdCrop = false
+      defer { cropContinuation = nil }
+      return cropContinuation
+    }
+    continuation?.resume()
+  }
+
+  fileprivate func waitForCrop() async {
+    await withCheckedContinuation { continuation in
+      let held = lock.withLock {
+        guard holdCrop else { return false }
+        cropContinuation = continuation
+        return true
+      }
+      if !held { continuation.resume() }
+    }
+  }
+
+  fileprivate func scheduleExpiry(_ action: @escaping @MainActor @Sendable () -> Void) {
+    lock.withLock { expiry = action }
+  }
+
+  fileprivate func finishedCrop() { lock.withLock { cropFinished = true } }
+}
+
+extension SessionController {
+  /// Uses the usual client, cropping and expiry paths, with deterministic test-only timing.
+  public convenience init(answers: any AnswerClient,
+    apiKey: @escaping @MainActor () throws -> String?, focusTestHooks: SessionFocusTestHooks) {
+    let timeout = Self.selectionTimeout
+    let scheduler = SessionScheduler { delay, action in
+      if delay == timeout { focusTestHooks.scheduleExpiry(action) }
+      else { SessionScheduler.live.after(delay, action) }
+    }
+    self.init(answers: answers, apiKey: apiKey, settings: { .defaults }, scheduler: scheduler,
+      cropSelection: { image, rect, limits in
+        await focusTestHooks.waitForCrop()
+        defer { focusTestHooks.finishedCrop() }
+        return try await cropAndFit(image, rect, limits)
+      })
+  }
+}
+#endif
+
 /// One snip: its frozen screen, then its screenshot and answer. The app calls these methods from
 /// its windows, and the session reports through the controller's delegate. When it ends, it stops
 /// any request and releases every image and all text.

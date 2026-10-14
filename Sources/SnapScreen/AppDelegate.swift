@@ -7,6 +7,7 @@ struct AppServices {
   var keyStore: APIKeyStore = KeychainStore()
   var answers: any AnswerClient = AnthropicClient()
   var screenRecordingGranted: () -> Bool = { ScreenRecordingAccess.isGranted }
+  var openScreenRecordingSettings: () -> Void = { ScreenRecordingAccess.openSystemSettings() }
   var capture: @Sendable (CGDirectDisplayID) async throws -> FrozenScreen = {
     try await ScreenCapturer.capture(displayID: $0)
   }
@@ -19,7 +20,7 @@ struct AppServices {
 /// The menu bar app: its icon and menu, the global shortcut, snips, Settings and notices.
 final class AppDelegate: NSObject, NSApplicationDelegate {
   private let services: AppServices
-  private let notices = NoticeCenter()
+  private let notices: NoticeCenter
   private let hotkey = Hotkey(.snip)
   private var shortcutAvailable = false
   private var statusItem: NSStatusItem?
@@ -27,8 +28,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var settings: SettingsWindowController?
   private var snips: SnipWindows?
 
-  init(services: AppServices = AppServices()) {
+  init(services: AppServices = AppServices(), notices: NoticeCenter = NoticeCenter()) {
     self.services = services
+    self.notices = notices
   }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
@@ -92,7 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     statusMenu.dismiss()
     guard services.screenRecordingGranted() else {
       notices.show("SnapScreen needs Screen Recording permission to snip.",
-        action: NoticeAction(title: "Open System Settings") { ScreenRecordingAccess.openSystemSettings() })
+        action: NoticeAction(title: "Open System Settings", perform: services.openScreenRecordingSettings))
       return
     }
     // The display under the pointer, as the shortcut or the menu leaves it.
