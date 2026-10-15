@@ -100,6 +100,10 @@ class ReadOnlyTextView: NSTextView {
   // status until it ends. Copy and Select All do what a drag would.
   override func dragSelection(with event: NSEvent, offset mouseOffset: NSSize, slideBack: Bool) -> Bool { false }
 
+  // Look Up's popover takes the keyboard when pressed. Passive panels drop the gestures that show
+  // it; this refuses any other route to it.
+  override func quickLook(with event: NSEvent) {}
+
   override func mouseDown(with event: NSEvent) {
     if event.modifierFlags.contains(.control) { showContextMenu(for: event) }
     else { super.mouseDown(with: event) }

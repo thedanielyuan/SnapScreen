@@ -6,7 +6,8 @@ checks implemented in the repository, not a record that every listed environment
 
 Section 9 records the passive-menu verification, the later error, timeout, notice and runner
 verification, and the gap probes and their fixes, all on 14 October 2026, and the real-input
-Chrome target on 15 October 2026, on macOS 27.0.1 (26A434). The latest automated focus suites
+Chrome target and a second round of gap probes and fixes on 15 October 2026, on macOS 27.0.1
+(26A434). The latest automated focus suites
 pass, including every real-input stage in Google Chrome 155, in a normal window and a fullscreen
 Space. The earlier passive Chrome observations included an unexplained first fullscreen blur; the
 real-input Chrome runs saw none. The remaining manual checks in section 4 are unverified.
@@ -27,13 +28,13 @@ Focus is measured at four layers, and every clause must hold at every sample:
 | R2 | SnapScreen is never active: in its process `NSApp.isActive` is false and `keyWindow` and `mainWindow` are nil. | SnapScreen's process |
 | R3 | The user's app stays active, its window stays key, and its first responder is the same object. `didResignActiveNotification` and `didResignKeyNotification` never fire there. | The user's app |
 | R4 | A webpage notices nothing: `document.hasFocus()` stays true, `document.activeElement` is unchanged, no `blur` fires on the window or the focused element, `visibilityState` stays `visible`, and no `visibilitychange` to hidden fires. | The page |
-| R5 | Keystrokes keep reaching the user's focused field, verbatim and in order, including while a SnapScreen menu is open. SnapScreen consumes nothing typed: the shortcut is a Carbon hot key, not a key monitor or an event tap; menus use pointer controls in passive panels. Text in those panels starts no native menu or dragging session: labels aren't selectable, and answer and error text has a passive Copy and Select All menu and refuses drags. | The page's field |
+| R5 | Keystrokes keep reaching the user's focused field, verbatim and in order, including while a SnapScreen menu is open. SnapScreen consumes nothing typed: the shortcut is a Carbon hot key, not a key monitor or an event tap; menus use pointer controls in passive panels. Text in those panels starts no native menu, dragging session or Look Up: labels aren't selectable, answer and error text has a passive Copy and Select All menu and refuses drags, and the panels drop the force click and three-finger tap that show Look Up. | The page's field |
 | R6 | Every SnapScreen control acts on its first click, with no key window: selection drag, cancel click, Stop, Retry, Copy, the thumbnail, the preview's close button, the conversation's close button, text selection, title bar drag, edge resize, notice buttons, status-menu commands and context-menu Copy and Select All. Each leaves R1 to R5 intact except an explicit Settings action (R13). | SnapScreen's process and the user's app |
 | R7 | A click aimed at the user's app lands there. The outside-click monitor reads the press and can't consume it, so the click reaches the field and the field keeps focus. | The page |
 | R8 | Every capture-flow window, status menu and context menu for answer or error text is a `PassivePanel`: it can't become key or main, has `.nonactivatingPanel`, floats, `becomesKeyOnlyIfNeeded`, doesn't hide on deactivate, `canHide` is false, and joins all Spaces including fullscreen. It's shown with `orderFront(nil)`, sits above the user's window in WindowServer order, and never becomes key while it or another panel closes or is replaced. | SnapScreen's process and `CGWindowListCopyWindowInfo` |
 | R9 | The user's content stays visible: the overlay is non-opaque, a fullscreen Space stays fullscreen, and the page's visibility never changes. | The page and the user's app |
 | R10 | The overlay's crosshair shows while SnapScreen isn't frontmost (`BackgroundCursor`), only while the overlay is up, and the user's cursor returns after it. | The system cursor, any process |
-| R11 | Nothing takes focus on SnapScreen's behalf: no Keychain password prompt during a request (the read fails instead, including from a locked keychain, which is checked before the key is read), no Screen Recording prompt except from Open System Settings, and no activation from a LaunchServices launch by Finder, Spotlight, `open` or a login item. | WindowServer and the user's app |
+| R11 | Nothing takes focus on SnapScreen's behalf: no Keychain password prompt during a request (the read fails instead, including from a locked keychain, which is checked before the key is read), no Screen Recording prompt except from Open System Settings, no activation from a LaunchServices launch by Finder, Spotlight, `open` or a login item, and no alert for a file or URL another app asks it to open (`open -a`, Open With, a drop on the app). | WindowServer and the user's app |
 | R12 | An activation SnapScreen didn't ask for is handed back after `handbackDelay` (150 ms) plus scheduling, under 500 ms end to end. The user's app sees at most one blur/focus pair, its first responder returns, and typing resumes. | WindowServer and the page |
 | R13 | Settings, opened from the menu, a notice or reopening the running app, may take focus, as may the System Settings panes its buttons open. Closing Settings returns focus to the app that had it, with the same key window, first responder and page element, and leaves open passive panels visible. | WindowServer, the user's app and the page |
 
@@ -153,6 +154,8 @@ which the `verify` job runs; `focus` is `--focus` and `--focus --chrome`; `full`
 | S29 | A right-click and a control-click on a notice's message and on the Session ended message open no native menu, and typing after each reaches the target | A B C | CI (clicks sent to the label), focus, full (real clicks); self (no selectable or editable text in passive panels) |
 | S30 | A key in a locked keychain fails the request with the Keychain error and no password dialog; Retry after unlocking it succeeds | A B C D | CI, focus, full (the real store and a locked temporary keychain); self (lock states, and the read refused before the key is read) |
 | S31 | Dragging selected answer text onto the webpage starts no dragging session; the target keeps its key window and typed input | A B C | focus, full (a real held drag); self (`ReadOnlyTextView` refuses drags) |
+| S32 | Another app asks SnapScreen, through LaunchServices, to open a file, as `open -a`, Open With and a drop on the app do: no alert appears, and any activation the request brings is handed back under 500 ms | A B C D | focus, full; self (the request is taken and ignored) |
+| S33 | A force click or a three-finger tap on answer text, which would show Look Up, whose popover takes the keyboard when pressed, shows nothing and leaves the conversation as it was | A B C | focus, full (the event a force click sends, given to the text view); self (passive panels refuse both gestures) |
 
 `FocusFailureTests.swift` and `FocusNoticeTests.swift` run the same S21–S30 scenarios through
 `FocusTestDriver` in all three modes. CI sends events directly to views and invokes button
@@ -196,11 +199,12 @@ Each gap must be closed by the method given, with the pass criterion of section 
 | Distrusting keychain item | Probe: read an item saved by another binary with prompts off | The read fails with no dialog |
 | Real transport deadline timing | Exercise `URLSessionTransport` with an unresponsive local server and an idle or indefinitely streaming response | The idle and overall timers cancel at their configured deadlines; S23 already covers focus after their mapped timeout error |
 | Actual Open System Settings transition | Click the denied-permission notice's action during the manual round | System Settings takes focus only after the explicit click; S28 already covers passive display, dismissal and action dispatch with an inert substitute |
-| Zoom by title bar double-click, where macOS is set to zoom | Add to `focus` if the gesture is kept; a probe was clean once (section 9), and the conversation zooms to the whole visible frame | Observers clean |
+| Zoom by title bar double-click, where macOS is set to zoom, and the window manager's tiling | Add to `focus` if the gestures are kept; probes were clean (section 9): a double-click or a drag into the menu bar fills the visible frame, and a drag to an edge or an Option-drag tiles the conversation to half of it | Observers clean |
 | A sheet, popover or menu open in the user's app at ⌥⇧S | Manual | The sheet keeps focus; the overlay is usable |
 | Space switch, Mission Control, sleep or wake, screen lock with the overlay up | Manual | SnapScreen never activates; the overlay cancels or survives without a focus change |
-| Full Keyboard Access on; VoiceOver's custom actions | Manual | AX actions select and confirm without moving focus |
+| Full Keyboard Access on; VoiceOver's custom actions | Manual. Accessibility actions from another process were clean in a probe (section 9): press to place and ask about a selection, raise the conversation and press its close button | AX actions select and confirm without moving focus |
 | Login item launch at login | Manual, after Open at login | No activation after login |
+| A real force click and three-finger tap on panel text | Manual: force-click, then three-finger-tap, a word in an answer and in a notice. Posted events can't make either gesture (section 9) | Nothing appears; observers clean |
 
 ## 5. Procedure
 
@@ -244,7 +248,9 @@ scripts/test-app-live.sh --focus --chrome --fullscreen
 open build/SnapScreen.app
 ```
 
-Preconditions for `--focus`: Accessibility approval for the terminal, which event posting
+Preconditions for `--focus`: no notification alert in the top-right corner of the target's
+display, where notices appear, since Notification Center draws above SnapScreen's panels and
+takes the notice stages' clicks; Accessibility approval for the terminal, which event posting
 (`CGPreflightPostEventAccess`) and the menu bar item lookup (`AXIsProcessTrusted`) need; no
 SnapScreen copy holding ⌥⇧S; and no earlier test-hooks copy running. If the script prints
 `SnapScreen is already running.`, the duplicate live/focus launch fails with a nonzero exit and
@@ -362,13 +368,13 @@ typed character arrives, the observer never lists SnapScreen as frontmost, and f
 | Requirement | Implemented by | Checked by |
 | --- | --- | --- |
 | R1, R2 | `.accessory` policy and `LSUIElement` (`main.swift`); `applicationDidBecomeActive` handback (`AppDelegate.swift`) | self (policy), CI and focus (observer A), focus (D) |
-| R3, R4, R5 | R8, the Carbon hot key (`Hotkey.swift`), pointer-only `PassiveMenu` controls, non-selectable labels and `ReadOnlyTextView`'s refused drags | focus, full (observers B, C, probes with menus open, context clicks and a held drag); CI (native-menu watch); self (no native text in passive panels) |
+| R3, R4, R5 | R8, the Carbon hot key (`Hotkey.swift`), pointer-only `PassiveMenu` controls, non-selectable labels, `ReadOnlyTextView`'s refused drags and Look Up, which `PassivePanel.sendEvent` and `ReadOnlyTextView` refuse | focus, full (observers B, C, probes with menus open, context clicks, a held drag and a force click's event); CI (native-menu watch); self (no native text in passive panels, refused Look Up gestures) |
 | R6 | `acceptsFirstMouse` in `SelectionView` and `NoticeButton`; `.activeAlways` tracking areas; `PointerShieldController` (`UI/Panels.swift`); passive menu controls | CI (view actions including failure Retry, notice buttons and error menus); focus (WindowServer interactions in section 3); remaining controls in section 4 |
 | R7 | `SessionWindows.watchOutsideClicks` while the answer is complete; `PassiveMenu` dismissal monitors while its panel is visible; neither consumes outside clicks | CI (in-process); focus, full (real clicks and target pointer-event counts) |
 | R8 | `PassivePanel`, `CompanionPanel` and `PassiveMenu`; `SelectionOverlay.make`; `SnipWindows.closeEarlier` after the new conversation shows | self (configuration, close order); CI and focus (`checkPassive`, `passive`, menu observers) |
 | R9 | Non-opaque overlay; `.fullScreenAuxiliary` | focus (page visibility); full (fullscreen holds) |
 | R10 | `BackgroundCursor`, enabled only while the overlay is up | self (availability); manual (cursor seen) |
-| R11 | `KeychainStore.readWithoutPrompt`, `KeychainLock` and `KeychainPrompts.disallowed`; `CGPreflightScreenCaptureAccess`; `QuitRequest`; the single-instance guard | self (prompt control, lock states, quit refusal); CI, focus, full (injected key failure, a locked temporary keychain and denied Screen Recording); focus (LaunchServices launch) |
+| R11 | `KeychainStore.readWithoutPrompt`, `KeychainLock` and `KeychainPrompts.disallowed`; `CGPreflightScreenCaptureAccess`; `QuitRequest`; the single-instance guard; `AppDelegate.application(_:open:)` | self (prompt control, lock states, quit refusal, ignored open requests); CI, focus, full (injected key failure, a locked temporary keychain and denied Screen Recording); focus (LaunchServices launch); focus, full (a request to open a file) |
 | R12 | `AppDelegate.handbackDelay`; `ForegroundFocus.returnToPreviousApp` | focus, full (`yield`, handback under 500 ms, bounded window/field blur and focus counts) |
 | R13 | `showSettings`; `settingsClosed`; `PassivePanel.canHide = false` | focus (synthetic Settings, then notice, menu and reopen); full (synthetic Settings, notice and reopen); bounded focus transitions and restored first responder |
 
@@ -534,3 +540,44 @@ stayed open throughout.
 
 Not covered: Chrome with the user's own profile and extensions, other Chrome versions, Safari,
 Edge and Firefox.
+
+### Second gap probes and fixes
+
+On 15 October 2026, branch `fix/open-requests-and-look-up`, based on `0dcabfa`, on macOS 27.0.1
+(26A434), with temporary probes that were not committed. Real input reached the isolated
+`WKWebView` target, as in `focus`:
+
+| Check | Before the fixes | After the fixes |
+| --- | --- | --- |
+| LaunchServices opens a file with SnapScreen, as `open -a`, Open With and a drop on the app do | A modal "could not be opened" alert kept SnapScreen active until it was dismissed: the target and page blurred, and typed keys were lost | S32: no alert; the activation was handed back in 172 ms, one blur/focus pair (R12) |
+| The same request in the background, with no activation | The alert appeared without taking focus and stayed until dismissed | No alert |
+| A print request (pdoc) in the background | Nothing appeared | Unchanged |
+| Look Up on answer text, from the event a force click or three-finger tap sends | The popover appeared without taking focus. A press in it took the target's key window for about 1 s and lost typing. Until the next fix, the same press closed the conversation, which hid the loss: the outside-click monitor got it with popover-relative coordinates, since another process draws the popover's content | S33: nothing appears; passive panels drop both gestures and `ReadOnlyTextView` refuses Look Up |
+| Middle-clicks on answer text and the title bar; selected answer text, waiting for a Writing Tools affordance | Clean; none appeared | Not repeated |
+| Title-bar double-click, a drag to the screen's right edge, a drag into the menu bar and an Option-drag | Clean; the conversation filled the visible frame or half of it | Not repeated |
+| Accessibility actions from another process: press to place and ask about a selection, raise the conversation, press its close button | Clean | Not repeated |
+| The production app's real ⌥⇧S, twice on the built-in display and once on the external display at (-2560, -117), each cancelled by a click | Clean: 6 measurements | Clean: 6 measurements |
+
+A CGEvent of the quick-look type isn't valid, and a pressure event built from a gesture event
+isn't delivered to an offscreen window, so the panels' refusal of both gestures is checked by the
+self-test's configuration check, and `ReadOnlyTextView`'s by S33 with the event a force click
+sends. A real force click and three-finger tap remain manual (section 4). The probe of a web URL
+was dropped: LaunchServices sent it to the default browser instead.
+
+The first focus runs of the final code stopped at S29: a macOS Calendar alert sat in the
+top-right corner where notices appear, and Notification Center, which draws above SnapScreen's
+panels, took the right-click. Once the alert was dismissed, the full procedure passed, each run
+with exit 0 and its exact completion marker, in Google Chrome 155.0.8059.79 for `--chrome`:
+
+| Command | Result |
+| --- | --- |
+| `swift build` | Passed |
+| `swift test` | Passed: 92 core tests |
+| `scripts/build-app.sh` | Passed |
+| Production `--self-test` | Passed: 337 checks |
+| `scripts/test-app-live.sh` | Passed: 609 checks; runner regressions 34 checks |
+| `scripts/test-app-live.sh --focus` | Passed: 1,413 checks |
+| `scripts/test-app-live.sh --focus --fullscreen` | Passed: 1,339 checks |
+| `scripts/test-app-live.sh --focus --chrome` | Passed: 1,573 checks |
+| `scripts/test-app-live.sh --focus --chrome --fullscreen` | Passed: 1,527 checks |
+| `scripts/test-app-live.sh --focus`, pointer on the external display | Passed: 1,408 checks |
