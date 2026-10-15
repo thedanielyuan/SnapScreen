@@ -14,12 +14,31 @@ struct SettingsServices {
 }
 
 /// Plain-text input that shows a placeholder while it's empty, laid out as typed text would be.
+/// Tab and Shift-Tab move to the next and previous field, as in a text field; Option-Tab types a
+/// tab.
 final class PromptTextView: NSTextView {
   var placeholder = "" { didSet { needsDisplay = true } }
+  /// Called with whether it now has the keyboard.
+  var onFocusChange: ((Bool) -> Void)?
 
   override func didChangeText() {
     super.didChangeText()
     needsDisplay = true
+  }
+
+  override func insertTab(_ sender: Any?) { window?.selectNextKeyView(self) }
+  override func insertBacktab(_ sender: Any?) { window?.selectPreviousKeyView(self) }
+
+  override func becomeFirstResponder() -> Bool {
+    guard super.becomeFirstResponder() else { return false }
+    onFocusChange?(true)
+    return true
+  }
+
+  override func resignFirstResponder() -> Bool {
+    guard super.resignFirstResponder() else { return false }
+    onFocusChange?(false)
+    return true
   }
 
   override func draw(_ dirtyRect: NSRect) {
@@ -40,9 +59,155 @@ final class PromptTextView: NSTextView {
   }
 }
 
+/// The Default Prompt's box: a `PromptTextView` drawn like the key field, which grows with its text
+/// from `minLines` to `maxLines` lines and then scrolls.
+final class PromptEditor: NSView {
+  static let minLines: CGFloat = 4
+  static let maxLines: CGFloat = 10
+  /// Between the bezel and the text's scroll view, so scrolled text clears the rounded corners.
+  private static let margin = NSSize(width: 1, height: 3)
+
+  let textView: PromptTextView
+  let scrollView: NSScrollView
+  /// Shown while the text has the keyboard. The text view's own ring would be clipped by the
+  /// scroll view, so the box draws one like the key field's.
+  let focusRing = FocusRingView()
+  private var height: NSLayoutConstraint!
+  private var hasFocus = false
+  /// An empty text field behind the text, so the box looks just like the key field.
+  private let bezel = BezelField()
+
+  init(width: CGFloat) {
+    scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: width - 2 * Self.margin.width, height: 100))
+    textView = PromptTextView(frame: NSRect(origin: .zero, size: scrollView.contentSize))
+    super.init(frame: NSRect(x: 0, y: 0, width: width, height: 100))
+    textView.isRichText = false
+    textView.importsGraphics = false
+    textView.allowsUndo = true
+    textView.font = .systemFont(ofSize: 13)
+    textView.textColor = .labelColor
+    textView.drawsBackground = false
+    textView.isAutomaticQuoteSubstitutionEnabled = false
+    textView.isAutomaticDashSubstitutionEnabled = false
+    textView.isAutomaticTextReplacementEnabled = false
+    textView.isAutomaticSpellingCorrectionEnabled = false
+    textView.isContinuousSpellCheckingEnabled = true
+    // Text starts where the key field's does.
+    textView.textContainerInset = NSSize(width: 0, height: 3)
+    textView.minSize = .zero
+    textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
+    textView.isVerticallyResizable = true
+    textView.isHorizontallyResizable = false
+    textView.autoresizingMask = [.width]
+    textView.textContainer?.widthTracksTextView = true
+    textView.focusRingType = .none
+    textView.onFocusChange = { [weak self] focused in
+      self?.hasFocus = focused
+      self?.updateFocusRing()
+    }
+    scrollView.documentView = textView
+    scrollView.drawsBackground = false
+    scrollView.hasVerticalScroller = true
+    scrollView.autohidesScrollers = true
+    scrollView.translatesAutoresizingMaskIntoConstraints = false
+    bezel.isEditable = false
+    bezel.isSelectable = false
+    bezel.refusesFirstResponder = true
+    bezel.setAccessibilityElement(false)
+    bezel.translatesAutoresizingMaskIntoConstraints = false
+    focusRing.isHidden = true
+    focusRing.translatesAutoresizingMaskIntoConstraints = false
+    addSubview(bezel)
+    addSubview(scrollView)
+    addSubview(focusRing)
+    for name in [NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification] {
+      NotificationCenter.default.addObserver(self, selector: #selector(updateFocusRing), name: name, object: nil)
+    }
+    height = heightAnchor.constraint(equalToConstant: 0)
+    NSLayoutConstraint.activate([
+      widthAnchor.constraint(equalToConstant: width),
+      height,
+      bezel.leadingAnchor.constraint(equalTo: leadingAnchor),
+      bezel.trailingAnchor.constraint(equalTo: trailingAnchor),
+      bezel.topAnchor.constraint(equalTo: topAnchor),
+      bezel.bottomAnchor.constraint(equalTo: bottomAnchor),
+      scrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.margin.width),
+      scrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.margin.width),
+      scrollView.topAnchor.constraint(equalTo: topAnchor, constant: Self.margin.height),
+      scrollView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.margin.height),
+      focusRing.leadingAnchor.constraint(equalTo: leadingAnchor, constant: -FocusRingView.outset),
+      focusRing.trailingAnchor.constraint(equalTo: trailingAnchor, constant: FocusRingView.outset),
+      focusRing.topAnchor.constraint(equalTo: topAnchor, constant: -FocusRingView.outset),
+      focusRing.bottomAnchor.constraint(equalTo: bottomAnchor, constant: FocusRingView.outset),
+    ])
+    fitToText()
+  }
+
+  required init?(coder: NSCoder) { nil }
+
+  /// A click in the margin edits the text too, as in a text field.
+  override func mouseDown(with event: NSEvent) { window?.makeFirstResponder(textView) }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+      NotificationCenter.default.removeObserver(self, name: name, object: nil)
+      if let window = window {
+        NotificationCenter.default.addObserver(self, selector: #selector(updateFocusRing), name: name, object: window)
+      }
+    }
+    updateFocusRing()
+  }
+
+  /// Shows the ring when the text has the keyboard, as AppKit does for a text field.
+  @objc private func updateFocusRing() {
+    focusRing.isHidden = !(hasFocus && NSApp.isActive && window?.isKeyWindow == true)
+  }
+
+  /// Fits the box to its text, and returns whether its height changed.
+  @discardableResult func fitToText() -> Bool {
+    guard let manager = textView.layoutManager, let container = textView.textContainer,
+      let font = textView.font else { return false }
+    manager.ensureLayout(for: container)
+    let line = manager.defaultLineHeight(for: font)
+    let text = max(manager.usedRect(for: container).height, manager.extraLineFragmentRect.maxY)
+    let fitted = ceil(min(max(text, Self.minLines * line), Self.maxLines * line) +
+      2 * (textView.textContainerInset.height + Self.margin.height))
+    guard fitted != height.constant else { return false }
+    height.constant = fitted
+    return true
+  }
+}
+
+/// A text field that only shows its bezel. Clicks pass through it to the view behind.
+private final class BezelField: NSTextField {
+  override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+/// A ring like a text field's focus ring, around a box `outset` points inside its bounds. Clicks
+/// pass through it.
+final class FocusRingView: NSView {
+  /// How far the ring reaches outside the box. It also covers the box's outer half point.
+  static let outset: CGFloat = 3
+  /// A text field's corner radius, as macOS 27 draws it.
+  private static let radius: CGFloat = 6
+
+  override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+  override func draw(_ dirtyRect: NSRect) {
+    let outer = Self.radius + Self.outset
+    let ring = NSBezierPath(roundedRect: bounds, xRadius: outer, yRadius: outer)
+    let inner = bounds.insetBy(dx: Self.outset + 0.5, dy: Self.outset + 0.5)
+    ring.append(NSBezierPath(roundedRect: inner, xRadius: Self.radius - 0.5, yRadius: Self.radius - 0.5))
+    ring.windingRule = .evenOdd
+    NSColor.keyboardFocusIndicatorColor.setFill()
+    ring.fill()
+  }
+}
+
 /// The Settings window: the key, the Default Prompt and the advanced limits, plus Screen
 /// Recording status and Open at login. Closing it saves what you changed.
-final class SettingsWindowController: NSObject, NSWindowDelegate {
+final class SettingsWindowController: NSObject, NSWindowDelegate, NSTextViewDelegate, NSTextFieldDelegate {
   static let contentWidth: CGFloat = 440
   static let consoleURL = URL(string: "https://console.anthropic.com/")!
 
@@ -51,7 +216,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   /// Shows the key in place of `keyField` after Show.
   let visibleKeyField = NSTextField()
   let keyHint = NSTextField(labelWithString: "")
-  let promptView = PromptTextView(frame: NSRect(x: 0, y: 0, width: contentWidth, height: 64))
+  let promptEditor = PromptEditor(width: contentWidth)
+  var promptView: PromptTextView { promptEditor.textView }
+  /// The prompt's length against the Prompt characters limit.
+  let promptCount = NSTextField(labelWithString: "")
   let inputCharactersField = NSTextField()
   let screenshotSizeField = NSTextField()
   let screenshotEdgeField = NSTextField()
@@ -62,6 +230,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   let loginNote = NSTextField(wrappingLabelWithString: "")
   let shortcutLabel = NSTextField(wrappingLabelWithString: "")
   private(set) lazy var toggleKeyButton = NSButton(title: "Show", target: self, action: #selector(toggleKeyVisibility))
+  private(set) lazy var restorePromptButton = NSButton(title: "Restore Default", target: self,
+    action: #selector(restoreDefaultPrompt))
   private(set) lazy var advancedButton = NSButton(title: "", target: self, action: #selector(toggleAdvanced))
   private(set) lazy var advancedTitle = NSButton(title: "Advanced", target: self, action: #selector(toggleAdvancedTitle))
   private(set) lazy var saveButton = NSButton(title: "Save", target: self, action: #selector(save))
@@ -122,29 +292,19 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     keyHint.isSelectable = true
     keyHint.allowsEditingTextAttributes = true
 
-    promptView.isRichText = false
-    promptView.importsGraphics = false
-    promptView.allowsUndo = true
-    promptView.font = .systemFont(ofSize: 13)
-    promptView.textColor = .labelColor
-    promptView.isAutomaticQuoteSubstitutionEnabled = false
-    promptView.isAutomaticDashSubstitutionEnabled = false
-    promptView.isAutomaticTextReplacementEnabled = false
-    promptView.textContainerInset = NSSize(width: 2, height: 5)
-    promptView.minSize = .zero
-    promptView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
-    promptView.isVerticallyResizable = true
-    promptView.isHorizontallyResizable = false
-    promptView.autoresizingMask = [.width]
-    promptView.textContainer?.widthTracksTextView = true
     promptView.placeholder = SessionSettings.defaults.defaultPrompt
     promptView.setAccessibilityLabel("Default Prompt")
-    let promptScroll = NSScrollView()
-    promptScroll.documentView = promptView
-    promptScroll.borderType = .bezelBorder
-    promptScroll.hasVerticalScroller = true
-    promptScroll.autohidesScrollers = true
-    promptScroll.heightAnchor.constraint(equalToConstant: 64).isActive = true
+    promptView.delegate = self
+    restorePromptButton.controlSize = .small
+    restorePromptButton.font = .systemFont(ofSize: NSFont.systemFontSize(for: .small))
+    restorePromptButton.toolTip = "Replace the prompt with SnapScreen's default. Undo brings yours back."
+    let promptHeader = edgeRow(Self.label("Default Prompt", size: 13, weight: .semibold), restorePromptButton)
+    let promptHint = Self.label("Sent with every snip. Leave it empty to use the default.", size: 11)
+    promptHint.textColor = .secondaryLabelColor
+    promptCount.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+    let promptFooter = edgeRow(promptHint, promptCount)
+    // The count follows the limit as it's typed.
+    inputCharactersField.delegate = self
 
     advancedButton.bezelStyle = .disclosure
     advancedButton.setButtonType(.pushOnPushOff)
@@ -196,15 +356,15 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     shortcutLabel.preferredMaxLayoutWidth = Self.contentWidth
     let separator = NSBox()
     separator.boxType = .separator
-    for view in [intro, keyRow, keyHint, promptScroll, statusLabel, separator, screenRecordingRow, loginNote,
-      shortcutLabel] {
+    for view in [intro, keyRow, keyHint, promptHeader, promptFooter, statusLabel, separator, screenRecordingRow,
+      loginNote, shortcutLabel] {
       view.widthAnchor.constraint(equalToConstant: Self.contentWidth).isActive = true
     }
 
     let stack = NSStackView(views: [
       intro,
       section([Self.label("Anthropic API Key", size: 13, weight: .semibold), keyRow, keyHint]),
-      section([Self.label("Default Prompt", size: 13, weight: .semibold), promptScroll]),
+      section([promptHeader, promptEditor, promptFooter]),
       section([row([advancedButton, advancedTitle], spacing: 2), limitsSection]),
       section([row([saveButton, testKeyButton, removeKeyButton]), statusLabel]),
       separator,
@@ -226,7 +386,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
       stack.bottomAnchor.constraint(equalTo: content.bottomAnchor),
     ])
     window.contentView = content
-    window.initialFirstResponder = keyField
+    // Tab moves through the fields in the order they appear.
+    window.recalculateKeyViewLoop()
   }
 
   private func section(_ views: [NSView]) -> NSStackView {
@@ -242,6 +403,16 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     row.orientation = .horizontal
     row.alignment = .centerY
     row.spacing = spacing
+    return row
+  }
+
+  /// A row with `leading` at its start and `trailing` at its end.
+  private func edgeRow(_ leading: NSView, _ trailing: NSView) -> NSStackView {
+    let row = NSStackView()
+    row.orientation = .horizontal
+    row.alignment = .centerY
+    row.addView(leading, in: .leading)
+    row.addView(trailing, in: .trailing)
     return row
   }
 
@@ -297,7 +468,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   private func load() {
     let settings = SessionSettings.load(from: services.defaults)
     promptView.string = settings.defaultPrompt
+    promptView.setSelectedRange(NSRange(location: (promptView.string as NSString).length, length: 0))
     setLimits(settings.limits)
+    promptChanged()
     hasStoredKey = services.keyStore.hasKey
     if hasStoredKey {
       do {
@@ -307,6 +480,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         showStatus(Self.message(for: error), isError: true, sticky: true)
       }
     }
+    // Typing starts in the key field until there's a key, then at the end of the prompt.
+    window.initialFirstResponder = keyField.stringValue.isEmpty ? keyField : promptView
     updateControls()
   }
 
@@ -349,20 +524,25 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     ]
   }
 
+  /// The field's value, or nil when it isn't a whole number in its range.
+  private func value(of input: LimitInput) -> Int? {
+    guard let number = Double(input.field.stringValue.jsTrimmed), number.isFinite, number.rounded() == number,
+      abs(number) < 1e12, input.range.contains(Int(number)) else { return nil }
+    return Int(number)
+  }
+
   /// The limits as entered, or nil after reporting the first one that isn't allowed.
   private func readLimits() -> SnapScreenLimits? {
     var values: [Int] = []
     for input in limitInputs {
-      let number = Double(input.field.stringValue.jsTrimmed)
-      guard let number = number, number.isFinite, number.rounded() == number, abs(number) < 1e12,
-        input.range.contains(Int(number)) else {
+      guard let value = value(of: input) else {
         showStatus("\(input.name) must be a whole number from \(groupedDigits(input.range.lowerBound)) to " +
           "\(groupedDigits(input.range.upperBound)).", isError: true)
         setAdvancedVisible(true)
         window.makeFirstResponder(input.field)
         return nil
       }
-      values.append(Int(number))
+      values.append(value)
     }
     return SnapScreenLimits(maxInputCharacters: values[0], maxScreenshotBytes: values[1] * megabyte,
       maxScreenshotDimension: values[2])
@@ -376,6 +556,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     let prompt = typedPrompt.isEmpty ? SessionSettings.defaults.defaultPrompt : typedPrompt
     guard countTextCharacters(prompt) <= limits.maxInputCharacters else {
       showStatus("Default Prompt exceeds the \(groupedDigits(limits.maxInputCharacters)) character limit.", isError: true)
+      window.makeFirstResponder(promptView)
       return false
     }
     let apiKey = enteredKey.jsTrimmed
@@ -498,6 +679,48 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
   private static func message(for error: Error) -> String {
     (error as? KeychainError)?.message ?? error.localizedDescription
+  }
+
+  // MARK: Default Prompt
+
+  func textDidChange(_ notification: Notification) { promptChanged() }
+
+  func controlTextDidChange(_ notification: Notification) {
+    if (notification.object as? NSTextField) === inputCharactersField { updatePromptCount() }
+  }
+
+  /// Updates what follows the prompt: its count, Restore Default and the box's height.
+  private func promptChanged() {
+    let typed = promptView.string.jsTrimmed
+    restorePromptButton.isEnabled = !typed.isEmpty && typed != SessionSettings.defaults.defaultPrompt
+    updatePromptCount()
+    if promptEditor.fitToText() { fitWindow() }
+  }
+
+  /// Counts what Save checks against the Prompt characters limit, in red when it's over.
+  private func updatePromptCount() {
+    let count = countTextCharacters(promptView.string.jsTrimmed)
+    guard let limit = value(of: limitInputs[0]) else {
+      promptCount.stringValue = count == 1 ? "1 character" : "\(groupedDigits(count)) characters"
+      promptCount.textColor = .secondaryLabelColor
+      promptCount.setAccessibilityLabel(nil)
+      return
+    }
+    promptCount.stringValue = "\(groupedDigits(count)) / \(groupedDigits(limit))"
+    promptCount.textColor = count > limit ? .systemRed : .secondaryLabelColor
+    promptCount.setAccessibilityLabel("\(groupedDigits(count)) of \(groupedDigits(limit)) characters")
+  }
+
+  /// Replaces the prompt with the default one, as an edit that Undo reverses.
+  @objc func restoreDefaultPrompt() {
+    let text = SessionSettings.defaults.defaultPrompt
+    let range = NSRange(location: 0, length: (promptView.string as NSString).length)
+    guard promptView.shouldChangeText(in: range, replacementString: text) else { return }
+    promptView.replaceCharacters(in: range, with: text)
+    promptView.didChangeText()
+    promptView.undoManager?.setActionName("Restore Default")
+    promptView.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
+    window.makeFirstResponder(promptView)
   }
 
   // MARK: Screen Recording, Open at login and the shortcut

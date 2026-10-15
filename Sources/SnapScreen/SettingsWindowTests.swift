@@ -85,6 +85,84 @@ func runSettingsWindowTests() throws -> Int {
   let link = settings.keyHint.attributedStringValue.attribute(.link, at: 20, effectiveRange: nil) as? URL
   try check(settings.keyHint.stringValue == "Get a key from the Anthropic Console. Stored in your Mac's Keychain." &&
     link == SettingsWindowController.consoleURL, "the hint links to the Anthropic Console")
+  try check(settings.window.initialFirstResponder === settings.keyField, "with no key, typing starts in the key field")
+
+  // The Default Prompt's box, edited as typing does.
+  func edit(_ text: String) {
+    settings.promptView.insertText(text,
+      replacementRange: NSRange(location: 0, length: (settings.promptView.string as NSString).length))
+    // Ends the edit's undo group, as the end of an event does.
+    RunLoop.main.run(mode: .default, before: Date())
+  }
+  func setCharacterLimit(_ value: String) {
+    settings.inputCharactersField.stringValue = value
+    NotificationCenter.default.post(name: NSControl.textDidChangeNotification, object: settings.inputCharactersField)
+  }
+  func boxHeight() -> CGFloat {
+    settings.window.contentView?.layoutSubtreeIfNeeded()
+    return settings.promptEditor.frame.height
+  }
+  try check(settings.promptCount.stringValue == "45 / 4,000" && settings.promptCount.textColor == .secondaryLabelColor &&
+    !settings.restorePromptButton.isEnabled, "the default prompt shows its count, with Restore Default off")
+  let line = NSLayoutManager().defaultLineHeight(for: settings.promptView.font!)
+  let shortBox = boxHeight()
+  let shortWindow = settings.window.frame.height
+  edit("  Answer in French.  \n")
+  try check(settings.promptCount.stringValue == "17 / 4,000" && settings.restorePromptButton.isEnabled &&
+    settings.promptCount.accessibilityLabel() == "17 of 4,000 characters",
+    "typing updates the count of what's saved, and turns on Restore Default")
+  try check(boxHeight() == shortBox, "a short prompt keeps the four-line box")
+  edit(Array(repeating: "Answer in French.", count: 6).joined(separator: "\n"))
+  let grown = boxHeight() - shortBox
+  try check(abs(grown - (6 - PromptEditor.minLines) * line) < 1 && settings.window.frame.height == shortWindow + grown,
+    "the box and window grow with the prompt")
+  edit(Array(repeating: "Answer in French.", count: 30).joined(separator: "\n"))
+  try check(abs(boxHeight() - shortBox - (PromptEditor.maxLines - PromptEditor.minLines) * line) < 1 &&
+    settings.promptEditor.scrollView.documentView!.frame.height > settings.promptEditor.scrollView.contentSize.height,
+    "a long prompt stops growing the box at ten lines and scrolls")
+  settings.window.makeFirstResponder(settings.promptView)
+  try check(settings.promptEditor.focusRing.frame == settings.promptEditor.bounds.insetBy(dx: -FocusRingView.outset,
+    dy: -FocusRingView.outset) && settings.promptEditor.focusRing.isHidden && settings.promptView.focusRingType == .none,
+    "the focus ring goes around the whole box, and only while Settings has the keyboard")
+  edit("Answer in French.")
+  try check(boxHeight() == shortBox && settings.window.frame.height == shortWindow, "the box shrinks back")
+
+  setCharacterLimit("100")
+  try check(settings.promptCount.stringValue == "17 / 100", "the count follows the limit as it's typed")
+  edit(String(repeating: "a", count: 101))
+  try check(settings.promptCount.stringValue == "101 / 100" && settings.promptCount.textColor == .systemRed,
+    "a prompt over the limit shows its count in red")
+  setCharacterLimit("abc")
+  try check(settings.promptCount.stringValue == "101 characters" && settings.promptCount.textColor == .secondaryLabelColor,
+    "without a valid limit, the count stands alone")
+  setCharacterLimit("4000")
+
+  edit("Answer in French.")
+  settings.restorePromptButton.performClick(nil)
+  try check(settings.promptView.string == "Answer the question shown in this screenshot." &&
+    !settings.restorePromptButton.isEnabled && settings.promptCount.stringValue == "45 / 4,000" &&
+    settings.window.firstResponder === settings.promptView, "Restore Default puts back the default prompt")
+  try check(settings.promptView.undoManager?.undoActionName == "Restore Default", "Restore Default can be undone")
+  settings.promptView.undoManager?.undo()
+  try check(settings.promptView.string == "Answer in French." && settings.restorePromptButton.isEnabled,
+    "Undo brings back the prompt Restore Default replaced")
+  edit("")
+  try check(!settings.restorePromptButton.isEnabled && settings.promptCount.stringValue == "0 / 4,000",
+    "an empty prompt, which saves the default, leaves Restore Default off")
+
+  edit("Answer in French.")
+  settings.window.makeFirstResponder(settings.promptView)
+  settings.promptView.insertTab(nil)
+  try check(settings.promptView.string == "Answer in French." && settings.window.firstResponder !== settings.promptView,
+    "Tab moves to the next field instead of typing a tab")
+  settings.window.makeFirstResponder(settings.promptView)
+  settings.promptView.insertBacktab(nil)
+  try check(settings.window.firstResponder !== settings.promptView, "Shift-Tab moves to the previous field")
+  settings.window.makeFirstResponder(settings.promptView)
+  settings.promptView.setSelectedRange(NSRange(location: 6, length: 0))
+  settings.promptView.insertTabIgnoringFieldEditor(nil)
+  try check(settings.promptView.string == "Answer\t in French.", "Option-Tab still types a tab")
+  edit("Answer the question shown in this screenshot.")
 
   settings.keyField.stringValue = "  sk-ant-test-key  "
   settings.save()
@@ -127,8 +205,8 @@ func runSettingsWindowTests() throws -> Int {
   settings.inputCharactersField.stringValue = "100"
   settings.promptView.string = String(repeating: "a", count: 101)
   settings.save()
-  try check(settings.statusLabel.stringValue == "Default Prompt exceeds the 100 character limit.",
-    "a prompt longer than its limit isn't saved")
+  try check(settings.statusLabel.stringValue == "Default Prompt exceeds the 100 character limit." &&
+    settings.window.firstResponder === settings.promptView, "a prompt longer than its limit isn't saved")
   settings.promptView.string = String(repeating: "😀", count: 100)
   settings.save()
   try check(settings.statusLabel.stringValue == "Settings saved. Existing API key unchanged.",
@@ -178,14 +256,18 @@ func runSettingsWindowTests() throws -> Int {
   keys.key = "sk-ant-stored"
   settings = SettingsWindowController(services: services)
   try check(settings.enteredKey == "sk-ant-stored" && settings.removeKeyButton.isEnabled &&
-    settings.promptView.string == String(repeating: "😀", count: 100) && settings.inputCharactersField.stringValue == "100",
-    "reopened Settings shows what was saved")
+    settings.promptView.string == String(repeating: "😀", count: 100) && settings.inputCharactersField.stringValue == "100" &&
+    settings.promptCount.stringValue == "100 / 100", "reopened Settings shows what was saved")
+  try check(settings.window.initialFirstResponder === settings.promptView &&
+    settings.promptView.selectedRange() == NSRange(location: (settings.promptView.string as NSString).length, length: 0),
+    "with a key saved, typing starts at the end of the prompt")
   settings.window.close()
   try check(settings.enteredKey.isEmpty, "closing Settings drops the key from the window")
   keys.failure = KeychainError(operation: .read, status: errSecAuthFailed)
   settings = SettingsWindowController(services: services)
   try check(settings.statusLabel.stringValue == "Couldn't read the API key from your Keychain because access was denied." &&
-    settings.removeKeyButton.isEnabled, "an unreadable key is reported and can still be removed")
+    settings.removeKeyButton.isEnabled && settings.window.initialFirstResponder === settings.keyField,
+    "an unreadable key is reported, can still be removed, and can be typed again")
   keys.failure = nil
 
   // Closing saves what you changed, as Save does, and stays open to show what can't be saved.
