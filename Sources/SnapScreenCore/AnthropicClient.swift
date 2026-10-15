@@ -31,8 +31,33 @@ public struct StreamHandlers: Sendable {
   }
 }
 
+/// How often, and after how long, the client sends a request again after a `TransientFailure`.
+struct RetryPolicy: Sendable {
+  /// The wait before each retry, so there's one retry for each.
+  var delays: [Duration]
+  /// The longest wait the API may ask for. After a longer one, the failure is reported at once.
+  var longestRequestedDelay: Duration
+  var sleep: @Sendable (Duration) async throws -> Void
+
+  /// Two retries, as Anthropic's SDKs make, but no silent wait over 10 s while the user watches.
+  static let standard = RetryPolicy(delays: [.seconds(1), .seconds(2)], longestRequestedDelay: .seconds(10),
+    sleep: { try await Task.sleep(for: $0) })
+  /// Every failure is reported at once.
+  static let none = RetryPolicy(delays: [], longestRequestedDelay: .zero, sleep: { _ in })
+}
+
+/// A failure that sending the same request again may get past: the request never got a response,
+/// the API was briefly unable to answer, or the answer's stream failed before any of its text.
+struct TransientFailure: Error {
+  /// What's reported if the request isn't sent again.
+  let error: AnthropicError
+  /// The wait the API asked for with `retry-after-ms` or `retry-after`.
+  var requestedDelay: Duration?
+}
+
 /// The Messages API client. Cancelling the calling task stops a
-/// request with `CancellationError`; every other failure is an `AnthropicError`.
+/// request with `CancellationError`; every other failure is an `AnthropicError`. A transient
+/// failure is retried first, so it's reported only if it persists.
 public struct AnthropicClient: Sendable {
   public static let model = "claude-opus-5-5"
   static let url = URL(string: "https://api.anthropic.com/v1/messages")!
@@ -42,9 +67,15 @@ public struct AnthropicClient: Sendable {
   static let maxProviderErrorBytes = 16_384
 
   private let transport: any HTTPTransport
+  private let retries: RetryPolicy
 
   public init(transport: any HTTPTransport = URLSessionTransport()) {
+    self.init(transport: transport, retries: .standard)
+  }
+
+  init(transport: any HTTPTransport, retries: RetryPolicy) {
     self.transport = transport
+    self.retries = retries
   }
 
   /// Answers a screenshot. The Default Prompt goes with it as guidance, and `userQuestion` when
@@ -114,15 +145,35 @@ public struct AnthropicClient: Sendable {
     }
   }
 
-  /// Reports a stop as `CancellationError` and turns transport failures into user-facing errors.
+  /// Runs `operation`, retrying it as the policy allows, then reports a stop as `CancellationError`
+  /// and turns transport failures into user-facing errors.
   private func mappingFailures<T>(_ operation: () async throws -> T) async throws -> T {
     do {
-      return try await operation()
+      return try await retrying(operation)
     } catch {
       if Task.isCancelled { throw CancellationError() }
       if isTimeout(error) { throw AnthropicError.timeout }
       if isCancellation(error) { throw AnthropicError.network }
       throw error
+    }
+  }
+
+  /// Runs `attempt` again after each transient failure, once for each of the policy's delays. Stop
+  /// ends a wait at once.
+  private func retrying<T>(_ attempt: () async throws -> T) async throws -> T {
+    for delay in retries.delays {
+      do {
+        return try await attempt()
+      } catch let failure as TransientFailure {
+        let wait = failure.requestedDelay ?? delay
+        guard wait <= retries.longestRequestedDelay else { throw failure.error }
+        try await retries.sleep(wait)
+      }
+    }
+    do {
+      return try await attempt()
+    } catch let failure as TransientFailure {
+      throw failure.error
     }
   }
 
@@ -142,9 +193,14 @@ public struct AnthropicClient: Sendable {
       response = try await transport.send(request)
     } catch {
       if Task.isCancelled || isCancellation(error) || isTimeout(error) { throw error }
+      if retriesConnectionFailure(error) { throw TransientFailure(error: .network) }
       throw AnthropicError.network
     }
-    guard (200...299).contains(response.status) else { throw try await failure(of: response) }
+    guard (200...299).contains(response.status) else {
+      let error = try await failure(of: response)
+      guard shouldRetry(response) else { throw error }
+      throw TransientFailure(error: error, requestedDelay: requestedRetryDelay(response.headers))
+    }
     return response
   }
 
@@ -195,6 +251,16 @@ public struct AnthropicClient: Sendable {
   }
 }
 
+#if SNAPSCREEN_TEST_HOOKS
+extension AnthropicClient {
+  /// Without retries, the focus tests' scripted failures reach the window at once. Production
+  /// builds have no way to turn retries off.
+  public init(transport: any HTTPTransport, retryingTransientFailures: Bool) {
+    self.init(transport: transport, retries: retryingTransientFailures ? .standard : .none)
+  }
+}
+#endif
+
 private struct MessagesRequest: Encodable {
   struct TypeField: Encodable { let type: String }
   struct OutputConfig: Encodable { let effort: String }
@@ -220,6 +286,36 @@ func isCancellation(_ error: any Error) -> Bool {
 }
 
 func isTimeout(_ error: any Error) -> Bool { (error as? URLError)?.code == .timedOut }
+
+/// Whether a request that failed this way, before any response, may get one in a moment: a pooled
+/// connection that died while the Mac slept, Wi-Fi that's still reconnecting, or a failed lookup.
+func retriesConnectionFailure(_ error: any Error) -> Bool {
+  guard let code = (error as? URLError)?.code else { return false }
+  return [.networkConnectionLost, .notConnectedToInternet, .cannotConnectToHost, .cannotFindHost,
+    .dnsLookupFailed].contains(code)
+}
+
+/// Whether to send a request again after this failed response. As in Anthropic's SDKs, the API's
+/// `x-should-retry` decides, and without it a timeout, conflict, rate limit or server error does.
+private func shouldRetry(_ response: HTTPResponse) -> Bool {
+  switch response.headers["x-should-retry"] {
+  case "true": return true
+  case "false": return false
+  default: return [408, 409, 429].contains(response.status) || response.status >= 500
+  }
+}
+
+/// The wait a failed response asks for, from `retry-after-ms` in milliseconds or `retry-after` in
+/// seconds. A date isn't read, so the policy's own wait applies.
+func requestedRetryDelay(_ headers: [String: String]) -> Duration? {
+  if let milliseconds = headers["retry-after-ms"].flatMap({ Double($0) }), milliseconds.isFinite, milliseconds >= 0 {
+    return .milliseconds(milliseconds)
+  }
+  if let seconds = headers["retry-after"].flatMap({ Double($0) }), seconds.isFinite, seconds >= 0 {
+    return .seconds(seconds)
+  }
+  return nil
+}
 
 /// Makes text from the API safe to show: API keys are redacted, each run of control characters and
 /// whitespace becomes one space, and the result is trimmed and capped at 240 UTF-16 code units.

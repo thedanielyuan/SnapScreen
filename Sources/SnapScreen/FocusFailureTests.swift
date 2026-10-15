@@ -322,7 +322,8 @@ private func checkRequestFailure(_ fixture: FocusFailureFixture, retry: Bool = t
       kSecMatchSearchList as String: [locked.keychain.reference]]
     try driver.require(KeychainLock.state(of: item) == .locked, "the key's temporary keychain is locked before the snip")
   }
-  let controller = SessionController(answers: AnthropicClient(transport: api),
+  // Each failure must reach the window, so the client doesn't first retry the transient ones.
+  let controller = SessionController(answers: AnthropicClient(transport: api, retryingTransientFailures: false),
     apiKey: { try key.read(for: fixture) }, settings: { .defaults })
   let observer = FocusFailureWindows(controller: controller)
   defer {

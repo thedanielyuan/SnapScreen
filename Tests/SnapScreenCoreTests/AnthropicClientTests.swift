@@ -2,8 +2,8 @@ import Foundation
 import Testing
 @testable import SnapScreenCore
 
-// The cases the fixtures can't express: timeouts, Stop, body cleanup, and thinking with a question.
-// Fixture replays cover request bodies, stream parsing, and error mapping.
+// The cases the fixtures can't express: timeouts, Stop, body cleanup, thinking with a question,
+// and retries. Fixture replays cover request bodies, stream parsing, and error mapping.
 
 private let limits = SnapScreenLimits.defaults
 
@@ -131,7 +131,7 @@ private func events(_ handlers: (StreamHandlers) async throws -> Void) async ret
   for response in [ScriptedResponse.json(401), .json(429), .json(503), .json(400, String(repeating: "z", count: 20_000))] {
     let transport = MockTransport(response)
     _ = await thrownError(AnthropicError.self) {
-      _ = try await AnthropicClient(transport: transport).analyzeImage(apiKey: "key", image: pixelPNG)
+      _ = try await AnthropicClient(transport: transport, retries: .none).analyzeImage(apiKey: "key", image: pixelPNG)
     }
     #expect(transport.cancelledBodies >= 1, "status \(response.status ?? 0)")
   }
@@ -162,4 +162,205 @@ private func events(_ handlers: (StreamHandlers) async throws -> Void) async ret
     == "sk-ant-abcdefg \u{017F}k-ant-abcdefgh \u{212A}k-ant-abcdefgh")
   // The cap never splits a surrogate pair.
   #expect(sanitizeProviderMessage(String(repeating: "a", count: 239) + "🙂") == String(repeating: "a", count: 239))
+}
+
+// MARK: Retries
+
+/// The standard policy without the waits, which it records.
+private func instantRetries(recording waits: Locked<[Duration]>) -> RetryPolicy {
+  var policy = RetryPolicy.standard
+  policy.sleep = { delay in waits.withLock { $0.append(delay) } }
+  return policy
+}
+
+private let overloaded = #"{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#
+
+@Test func retriesAnOverloadedAPIWithTheSameRequest() async throws {
+  let waits = Locked<[Duration]>([])
+  let transport = MockTransport(.json(529), .answer("OK"))
+  let answer = try await AnthropicClient(transport: transport, retries: instantRetries(recording: waits))
+    .analyzeImage(apiKey: "key", image: pixelPNG, hiddenInstruction: "Keep it concise.")
+  #expect(answer == "OK")
+  #expect(waits.current == [.seconds(1)])
+  let requests = transport.requests
+  #expect(requests.count == 2)
+  // The same JSON, though the encoder may order its keys differently.
+  #expect(try requestBody(requests.first) == requestBody(requests.last))
+  #expect(requests.first?.allHTTPHeaderFields == requests.last?.allHTTPHeaderFields)
+  #expect(transport.cancelledBodies >= 1)
+}
+
+@Test func retriesAConnectionThatFailedBeforeAnyResponse() async throws {
+  let waits = Locked<[Duration]>([])
+  let transport = MockTransport(ScriptedResponse(networkError: true), .answer("OK"))
+  let answer = try await AnthropicClient(transport: transport, retries: instantRetries(recording: waits))
+    .analyzeImage(apiKey: "key", image: pixelPNG)
+  #expect(answer == "OK")
+  #expect(waits.current == [.seconds(1)])
+  #expect(transport.requests.count == 2)
+}
+
+@Test func retriesOnlyConnectionsThatMayComeBack() {
+  for code: URLError.Code in [.networkConnectionLost, .notConnectedToInternet, .cannotConnectToHost, .cannotFindHost,
+    .dnsLookupFailed] {
+    #expect(retriesConnectionFailure(URLError(code)), "\(code)")
+  }
+  for error: any Error in [URLError(.timedOut), URLError(.cancelled), URLError(.badServerResponse),
+    URLError(.serverCertificateUntrusted), CancellationError(), MockTransport.Failure()] {
+    #expect(!retriesConnectionFailure(error), "\(error)")
+  }
+}
+
+@Test func givesUpAfterTwoRetriesWithTheUsualError() async {
+  let waits = Locked<[Duration]>([])
+  let transport = MockTransport(.json(503), .json(503), .json(503), .answer("Too late"))
+  let error = await thrownError(AnthropicError.self) {
+    _ = try await AnthropicClient(transport: transport, retries: instantRetries(recording: waits))
+      .analyzeImage(apiKey: "key", image: pixelPNG)
+  }
+  #expect(error == AnthropicError("server", "Service unavailable. Please try again."))
+  #expect(waits.current == [.seconds(1), .seconds(2)])
+  #expect(transport.requests.count == 3)
+  #expect(transport.cancelledBodies == 3)
+}
+
+@Test func waitsAsLongAsTheAPIAsksWhenThatIsShort() async throws {
+  let cases: [([String: String], Duration)] = [(["retry-after": "3"], .seconds(3)),
+    (["retry-after-ms": "1500"], .milliseconds(1500)), (["retry-after": "0"], .zero)]
+  for (headers, wait) in cases {
+    let waits = Locked<[Duration]>([])
+    var limited = ScriptedResponse.json(429)
+    limited.headers?.merge(headers) { $1 }
+    let transport = MockTransport(limited, .answer("OK"))
+    let answer = try await AnthropicClient(transport: transport, retries: instantRetries(recording: waits))
+      .analyzeImage(apiKey: "key", image: pixelPNG)
+    #expect(answer == "OK" && waits.current == [wait], "\(headers)")
+  }
+}
+
+@Test func reportsALongRateLimitInsteadOfWaitingSilently() async {
+  let waits = Locked<[Duration]>([])
+  var limited = ScriptedResponse.json(429)
+  limited.headers?["retry-after"] = "30"
+  let transport = MockTransport(limited, .answer("Too soon"))
+  let error = await thrownError(AnthropicError.self) {
+    _ = try await AnthropicClient(transport: transport, retries: instantRetries(recording: waits))
+      .analyzeImage(apiKey: "key", image: pixelPNG)
+  }
+  #expect(error == AnthropicError("rate_limit", "Rate limit reached. Try again in ~30s."))
+  #expect(waits.current.isEmpty && transport.requests.count == 1)
+}
+
+@Test func readsTheWaitAResponseAsksFor() {
+  #expect(requestedRetryDelay(["retry-after": "7"]) == .seconds(7))
+  #expect(requestedRetryDelay(["retry-after": "1.5"]) == .milliseconds(1500))
+  #expect(requestedRetryDelay(["retry-after-ms": "250", "retry-after": "7"]) == .milliseconds(250))
+  #expect(requestedRetryDelay(["retry-after": "Wed, 21 Oct 2026 07:28:00 GMT"]) == nil)
+  #expect(requestedRetryDelay(["retry-after": "-1"]) == nil)
+  #expect(requestedRetryDelay(["retry-after": "inf"]) == nil)
+  #expect(requestedRetryDelay([:]) == nil)
+}
+
+@Test func followsTheAPIsAdviceOnWhetherToRetry() async throws {
+  var unavailable = ScriptedResponse.json(503)
+  unavailable.headers?["x-should-retry"] = "false"
+  let once = MockTransport(unavailable, .answer("Never"))
+  let error = await thrownError(AnthropicError.self) {
+    _ = try await AnthropicClient(transport: once, retries: instantRetries(recording: Locked([])))
+      .analyzeImage(apiKey: "key", image: pixelPNG)
+  }
+  #expect(error?.code == "server" && once.requests.count == 1)
+
+  var conflict = ScriptedResponse.json(400, #"{"error":{"message":"Try again"}}"#)
+  conflict.headers?["x-should-retry"] = "true"
+  let twice = MockTransport(conflict, .answer("OK"))
+  let answer = try await AnthropicClient(transport: twice, retries: instantRetries(recording: Locked([])))
+    .analyzeImage(apiKey: "key", image: pixelPNG)
+  #expect(answer == "OK" && twice.requests.count == 2)
+}
+
+@Test func neverRetriesFailuresThatWouldRecurOrThatShowedText() async {
+  let failures: [ScriptedResponse] = [.json(400), .json(401), .json(403), .json(404), .json(413), .json(422),
+    .answer("No", stopReason: "refusal"), .sse(["{broken"]),
+    // An error event without a transient type.
+    .sse([#"{"type":"error","error":{"type":"invalid_request_error","message":"Bad"}}"#]),
+    .sse([#"{"type":"error","error":{"message":"Unknown"}}"#]),
+    // Answer text already reached the user.
+    .sse([textDelta("Partial"), overloaded]), .sse([textDelta("Partial")], end: .error), .sse([textDelta("Partial")])]
+  for (index, failure) in failures.enumerated() {
+    let waits = Locked<[Duration]>([])
+    let transport = MockTransport(failure, .answer("Never"))
+    let error = await thrownError(AnthropicError.self) {
+      _ = try await AnthropicClient(transport: transport, retries: instantRetries(recording: waits))
+        .analyzeImage(apiKey: "key", image: pixelPNG)
+    }
+    #expect(error != nil && waits.current.isEmpty && transport.requests.count == 1, "failure \(index)")
+  }
+
+  let timedOut = MockTransport(.answer("Never"))
+  timedOut.sendError = URLError(.timedOut)
+  let timeout = await thrownError(AnthropicError.self) {
+    _ = try await AnthropicClient(transport: timedOut, retries: instantRetries(recording: Locked([])))
+      .analyzeImage(apiKey: "key", image: pixelPNG)
+  }
+  #expect(timeout?.code == "timeout" && timedOut.requests.count == 1)
+}
+
+@Test func retriesAStreamThatFailedBeforeAnyText() async throws {
+  let failures: [ScriptedResponse] = [.sse([thinkingStart, overloaded]),
+    .sse([#"{"type":"error","error":{"type":"api_error","message":"Internal server error"}}"#]),
+    // The connection drops, or the stream ends early, while the model thinks.
+    .sse([thinkingStart], end: .error), .sse([thinkingStart])]
+  for (index, failure) in failures.enumerated() {
+    let waits = Locked<[Duration]>([])
+    let transport = MockTransport(failure, .answer("OK"))
+    let seen = try await events { handlers in
+      _ = try await AnthropicClient(transport: transport, retries: instantRetries(recording: waits))
+        .analyzeImage(apiKey: "key", image: pixelPNG, handlers: handlers)
+    }
+    #expect(seen.last == "OK" && waits.current == [.seconds(1)] && transport.requests.count == 2, "failure \(index)")
+  }
+}
+
+@Test func stopEndsTheWaitBeforeARetry() async throws {
+  let transport = MockTransport(.json(529), .answer("Never"))
+  let waiting = Locked(false)
+  var policy = RetryPolicy.standard
+  policy.sleep = { _ in
+    waiting.withLock { $0 = true }
+    try await Task.sleep(for: .seconds(3600))
+  }
+  let task = Task {
+    try await AnthropicClient(transport: transport, retries: policy).analyzeImage(apiKey: "key", image: pixelPNG)
+  }
+  while !waiting.current { await Task.yield() }
+  task.cancel()
+  let result = await task.result
+  #expect(throws: CancellationError.self) { try result.get() }
+  #expect(transport.requests.count == 1)
+}
+
+@Test func retriesAKeyCheckToo() async throws {
+  let waits = Locked<[Duration]>([])
+  let transport = MockTransport(.json(529), .json(200, #"{"content":[{"type":"text","text":"Hi"}]}"#))
+  try await AnthropicClient(transport: transport, retries: instantRetries(recording: waits)).verifyAPIKey("key")
+  #expect(waits.current == [.seconds(1)] && transport.requests.count == 2)
+}
+
+@Test @MainActor func aRetriedFailureNeverReachesTheConversation() async throws {
+  let transport = MockTransport(.json(529), .answer("OK"))
+  let log = EventLog()
+  let controller = SessionController(
+    answers: AnthropicClient(transport: transport, retries: instantRetries(recording: Locked([]))),
+    apiKey: { "key" }, settings: { .defaults }, scheduler: ManualTimers().scheduler,
+    cropSelection: { _, _, _ in pixelPNG })
+  controller.delegate = log
+  let session = try #require(controller.start { FrozenScreen(image: try decodePNG(pixelPNG), displayID: 1) })
+  try await waitUntil { session.phase == .selecting }
+  #expect(session.select(CGRect(x: 0, y: 0, width: 1, height: 1)))
+  try await waitUntil { session.phase == .ready }
+  #expect(!log.events.contains { if case .failed = $0 { true } else { false } })
+  #expect(log.events.last == .answer("OK", .done))
+  #expect(transport.requests.count == 2)
+  session.close()
 }
