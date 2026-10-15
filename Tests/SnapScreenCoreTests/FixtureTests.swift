@@ -5,7 +5,8 @@ import Testing
 // Replays the golden fixtures recorded from the Chrome extension's TypeScript before it was
 // removed. Every client call must send the same request and reach the same result. Edit them by
 // hand only for an intended change to the client, limits or prompt. The session fixtures also
-// replay through SessionController.
+// replay through SessionController. Each records one attempt, so the client replays them without
+// retries, which AnthropicClientTests covers.
 
 private let fixturesURL = Bundle.module.url(forResource: "Fixtures", withExtension: nil)!
 private let fixtureNames = (try? FileManager.default.contentsOfDirectory(atPath: fixturesURL.path))
@@ -72,7 +73,7 @@ func replaysFixture(_ name: String) async throws {
 
 private func replayCall(_ step: Step, _ location: Comment) async throws {
   let transport = MockTransport(step.response)
-  let client = AnthropicClient(transport: transport)
+  let client = AnthropicClient(transport: transport, retries: .none)
   let events = Locked<[StreamEvent]>([])
   let handlers = StreamHandlers(
     onThinking: { events.withLock { $0.append(StreamEvent(type: "thinking", text: nil)) } },
@@ -149,7 +150,8 @@ func replaysSessionThroughTheController(_ name: String) async throws {
   let image = dataURLBytes(first.image)
   let transport = MockTransport(fixture.steps.map(\.response))
   let log = EventLog()
-  let controller = SessionController(answers: AnthropicClient(transport: transport), apiKey: { first.apiKey },
+  let controller = SessionController(answers: AnthropicClient(transport: transport, retries: .none),
+    apiKey: { first.apiKey },
     settings: { SessionSettings(defaultPrompt: first.hiddenInstruction ?? "", limits: first.limits) },
     scheduler: ManualTimers().scheduler, cropSelection: { _, _, _ in image })
   controller.delegate = log

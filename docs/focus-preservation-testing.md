@@ -159,6 +159,8 @@ which the `verify` job runs; `focus` is `--focus` and `--focus --chrome`; `full`
 actions. `focus` and `full` use real pointer input, independent target observers and typing
 probes. Error context-menu Copy uses a private pasteboard. Retry checks both the resulting answer
 and the unchanged request body; key failures make no request until Retry obtains the fixture key.
+The failure scenarios' client reports each failure at once. The app's client first retries
+transient ones (AGENTS.md), which only lengthens the wait before the same failure appears.
 
 The time substitutions preserve production behavior under test: selection expiry invokes the
 callback scheduled for 120 seconds, and the notice clock checks its eight-second initial

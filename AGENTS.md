@@ -114,7 +114,13 @@ how data is handled. Never add a privacy section to `README.md`.
   `UI/AnswerView.swift` each parse for Copy buttons: change the prompt's formatting rules and both
   parsers together.
 - Thinking can stream no text for over 30 s, so keep `URLSessionTransport.idleTimeout` (60 s)
-  above that; `overallTimeout` (10 minutes) bounds the whole answer.
+  above that; `overallTimeout` (10 minutes) bounds each attempt.
+- Transient failures are retried twice, 1 s and then 2 s later: a connection that fails before
+  any response; a 408, 409, 429 or 5xx, with `x-should-retry` overriding the status; and a stream
+  that drops, ends early or reports `overloaded_error` or `api_error` before any answer text. A
+  `retry-after` of up to 10 s replaces the wait, and a longer one is reported instead. Timeouts,
+  Stop and anything after answer text are never retried. The fixtures record single attempts, so
+  they replay without retries; `AnthropicClientTests` covers retries.
 - The golden fixtures, recorded from the extension's TypeScript, pin request bodies, streams and
   the prompt, and nothing regenerates them: after an intended change to the client, limits or
   prompt, edit them by hand in the same change. `JavaScriptStrings` keeps the string behavior

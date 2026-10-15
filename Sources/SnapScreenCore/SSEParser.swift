@@ -110,11 +110,23 @@ struct AnswerStreamReader {
     case "message_stop":
       sawMessageStop = true
     case "error":
-      let message = ((data["error"] as? [String: Any])?["message"] as? String).map(sanitizeProviderMessage) ?? ""
-      throw AnthropicError("api", message.isEmpty ? "The API stream reported an error." : message)
+      let details = data["error"] as? [String: Any]
+      let message = (details?["message"] as? String).map(sanitizeProviderMessage) ?? ""
+      let error = AnthropicError("api", message.isEmpty ? "The API stream reported an error." : message)
+      // The API reports an overload or its own failure mid-stream as well as by status.
+      guard let type = details?["type"] as? String, ["overloaded_error", "api_error"].contains(type) else {
+        throw error
+      }
+      throw failure(error)
     default:
       break
     }
+  }
+
+  /// Before any answer text, a failure has shown nothing, so the same request can be sent again.
+  func failure(_ error: AnthropicError) -> any Error {
+    if text.isEmpty { return TransientFailure(error: error) }
+    return error
   }
 }
 
@@ -130,7 +142,7 @@ func readAnswerStream(_ response: HTTPResponse, handlers: StreamHandlers) async 
       chunk = try await chunks.next()
     } catch {
       if Task.isCancelled || isCancellation(error) || isTimeout(error) { throw error }
-      throw AnthropicError.stream("The API response stream was interrupted. Please try again.")
+      throw reader.failure(.stream("The API response stream was interrupted. Please try again."))
     }
     // A cancelled stream ends early, which isn't the end of the answer.
     try Task.checkCancellation()
@@ -139,7 +151,7 @@ func readAnswerStream(_ response: HTTPResponse, handlers: StreamHandlers) async 
   }
   for event in splitter.finish() { try reader.handle(event) }
   guard reader.sawMessageStop else {
-    throw AnthropicError.stream("The API response ended before it was complete. Please try again.")
+    throw reader.failure(.stream("The API response ended before it was complete. Please try again."))
   }
   return (reader.text, reader.stopReason)
 }
