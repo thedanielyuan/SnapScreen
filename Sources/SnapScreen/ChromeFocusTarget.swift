@@ -293,6 +293,7 @@ final class ChromeFocusTarget: NSObject, NSApplicationDelegate {
       pending.removeSubrange(...newline)
       switch command.first {
       case "launch": LiveFocusTarget.openAppShell { [weak self] in self?.report($0) }
+      case "open": LiveFocusTarget.openFileInAppShell { [weak self] in self?.report($0) }
       case "yield": activate(command.dropFirst().first.flatMap { pid_t($0) })
       default:
         let reset = command.first == "reset"

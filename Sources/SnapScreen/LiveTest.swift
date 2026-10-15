@@ -761,6 +761,7 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
     try require(windows.panel?.isVisible == true, "dragging from selected answer text leaves the conversation open")
     try await probe("after dragging selected answer text onto the webpage")
     try await checkContextMenu(for: text, at: textStart, above: targetWindow)
+    try await checkLookUp(in: text, of: windows)
     let beforeMove = panel.frame
     let moveX: CGFloat = beforeMove.maxX + 24 <= screen.visibleFrame.maxX ? 24 : -24
     let moveHandle = NSPoint(x: beforeMove.midX, y: beforeMove.maxY - 12)
@@ -828,10 +829,10 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
     try await runAppShell(at: field, on: screen)
     let fullscreen = CommandLine.arguments.contains("--fullscreen")
     print("SnapScreen focus test passed (test hooks build): \(checks) checks, actual ⌥⇧S, pointer selection, " +
-      "Stop, Retry, Settings return, Copy, preview, text selection, context menu typing and Copy, move, resize, " +
+      "Stop, Retry, Settings return, Copy, preview, text selection, context menu typing and Copy, Look Up, move, resize, " +
       "outside click delivery, replacement, conversation close, errors, timeouts and notices; " +
       "then the real app shell launched through " +
-      "LaunchServices, its notice, an activation it handed back, " +
+      "LaunchServices, its notice, an activation it handed back, a request to open a file, " +
       (fullscreen ? "a conversation open through Settings" : "its menu's Snip, Close All, Settings and Quit,") +
       " and reopening; webpage focus and typed input preserved" +
       (chrome ? " in \(ready["browser"] ?? "Chrome")" : "") + (fullscreen ? " in a fullscreen Space" : "") +
@@ -915,6 +916,24 @@ final class LiveFocusTest: NSObject, NSApplicationDelegate {
       }
       try await probe("after the answer context menu's \(title)")
     }
+  }
+
+  /// A force click or a three-finger tap on a word would show Look Up, whose popover takes the
+  /// keyboard when pressed. Passive panels drop both gestures, which posted events can't make, so
+  /// the text view gets the event a force click sends it, and nothing may appear.
+  private func checkLookUp(in text: NSTextView, of windows: SessionWindows) async throws {
+    guard let panel = windows.panel, let force = NSEvent.mouseEvent(with: .leftMouseDown,
+      location: text.convert(NSPoint(x: 14, y: min(8, text.bounds.height / 2)), to: nil), modifierFlags: [],
+      timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: panel.windowNumber, context: nil, eventNumber: 0,
+      clickCount: 1, pressure: 1) else { throw Failure(description: "a force click on the answer can be made") }
+    let shown = Set(NSApp.windows.filter(\.isVisible).map(\.windowNumber))
+    text.quickLook(with: force)
+    try await Task.sleep(for: .milliseconds(1000))
+    try require(!NSApp.windows.contains { $0.isVisible && !shown.contains($0.windowNumber) },
+      "a force click on answer text shows no Look Up")
+    try require(windows.panel === panel && panel.isVisible && windows.session.phase == .ready,
+      "a force click on answer text leaves the conversation as it was")
+    try await probe("after a force click on answer text")
   }
 
   private var contextMenu: PassivePanel? {
@@ -1197,6 +1216,29 @@ extension LiveFocusTest {
     front = .target
     try await settle("after SnapScreen hands activation back", blurAllowed: true)
     try await probe("after another app activates SnapScreen")
+
+    // Another app asks SnapScreen to open a file, as `open -a`, Open With and a drop on the app do.
+    // It opens none, so no alert takes the keyboard, and it hands back any activation that brings.
+    front = .handback
+    activations.removeAll()
+    messages.removeAll()
+    try commands.fileHandleForWriting.write(contentsOf: Data("open\n".utf8))
+    try await waitFor("LaunchServices asks SnapScreen to open a file") { self.messages.contains { $0["opened"] != nil } }
+    try require(messages.contains { $0["opened"] as? Bool == true }, "LaunchServices delivers the request to open a file")
+    messages.removeAll()
+    try await Task.sleep(for: .milliseconds(1500))
+    try require(windowFrames(of: pid, .modalPanelWindow).isEmpty, "a request to open a file shows no alert")
+    if let up = activations.firstIndex(where: { $0.pid == pid }) {
+      guard let back = activations[up...].first(where: { $0.pid == foregroundPID }) else {
+        throw Failure(description: "SnapScreen hands back the activation a request to open a file brings")
+      }
+      let held = back.time.timeIntervalSince(activations[up].time)
+      try require(held < 0.5, "SnapScreen hands an open request's activation back within half a second, " +
+        "not after \(Int(held * 1000)) ms")
+    }
+    front = .target
+    try await settle("after SnapScreen is asked to open a file", blurAllowed: true)
+    try await probe("after another app asks SnapScreen to open a file")
 
     // A fullscreen Space hides the menu bar until the pointer reaches the top, which posted events
     // don't do, so the fullscreen run keeps its conversation open through Settings and quits by
@@ -1547,6 +1589,7 @@ final class LiveFocusTarget: NSObject, NSApplicationDelegate, NSWindowDelegate, 
       pending.removeSubrange(...newline)
       switch command.first {
       case "launch": Self.openAppShell { [weak self] in self?.report($0) }
+      case "open": Self.openFileInAppShell { [weak self] in self?.report($0) }
       case "yield": yieldActivation(to: command.dropFirst().first.flatMap { pid_t($0) })
       default: reportState(reset: command.first == "reset")
       }
@@ -1598,6 +1641,22 @@ final class LiveFocusTarget: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: path), configuration: configuration) { app, _ in
       let pid = Int(app?.processIdentifier ?? 0)
       Task { @MainActor in report(["launched": pid]) }
+    }
+  }
+
+  /// Asks the running app shell, through LaunchServices, to open a file, as `open -a` and Open With
+  /// do. The file is removed once LaunchServices has delivered the request.
+  static func openFileInAppShell(then report: @escaping @MainActor ([String: Any]) -> Void) {
+    guard let path = ProcessInfo.processInfo.environment["SNAPSCREEN_FOCUS_APP"] else {
+      return report(["opened": false])
+    }
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("snapscreen-focus-open-\(UUID().uuidString).txt")
+    guard (try? Data("SnapScreen focus test".utf8).write(to: file)) != nil else { return report(["opened": false]) }
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.addsToRecentItems = false
+    NSWorkspace.shared.open([file], withApplicationAt: URL(fileURLWithPath: path), configuration: configuration) { _, error in
+      try? FileManager.default.removeItem(at: file)
+      Task { @MainActor in report(["opened": error == nil]) }
     }
   }
 

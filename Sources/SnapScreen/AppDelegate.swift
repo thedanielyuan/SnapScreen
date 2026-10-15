@@ -91,6 +91,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     return false
   }
 
+  /// SnapScreen opens no files or URLs. Taking the requests that `open -a`, Open With and a drop on
+  /// the app send keeps AppKit from answering them with a modal alert, which takes the keyboard.
+  func application(_ application: NSApplication, open urls: [URL]) {}
+
   /// SnapScreen quits only when you mean it to, so a script or a test can't quit the copy you use.
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     QuitRequest.isAccepted(NSAppleEventManager.shared().currentAppleEvent) ? .terminateNow : .terminateCancel

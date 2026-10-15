@@ -40,6 +40,8 @@ func runAppShellTests() throws -> Int {
     styleMask: [.titled], backing: .buffered, defer: false)
   try check(hasPassivePanelConfiguration(passive) && passive.styleMask.contains(.titled) && passive.level == .floating,
     "passive panels preserve the requested style and install nonactivating behavior at creation")
+  try check(PassivePanel.refusedEvents == [.quickLook, .pressure],
+    "passive panels refuse the force click and three-finger tap that show Look Up")
 
   let snip = Hotkey.Combination.snip
   try check(snip.keyCode == UInt32(kVK_ANSI_S) && snip.modifiers == UInt32(optionKey | shiftKey) && snip.display == "⌥⇧S",
@@ -126,6 +128,14 @@ func runAppShellTests() throws -> Int {
     "/System/Volumes/Data/Users/me/input", nil,
   ].contains { QuitRequest.isAccepted(senderPath: $0) }, "command-line tools and scripts can't quit SnapScreen")
   try check(QuitRequest.executablePath(of: 1) == "/sbin/launchd", "a quit event's sender is found from its process ID")
+  // AppKit answers a request to open a file or URL that no delegate method takes, such as `open -a`
+  // and Open With send, with a modal alert that activates SnapScreen and takes the keyboard.
+  let delegate = AppDelegate()
+  let windows = NSApp.windows.count
+  delegate.application(NSApp, open: [URL(fileURLWithPath: "/tmp/snapscreen-self-test.txt"),
+    URL(string: "https://example.com/snapscreen-self-test")!])
+  try check(delegate.responds(to: #selector(NSApplicationDelegate.application(_:open:))) && NSApp.windows.count == windows,
+    "a request from another app to open a file or URL is taken and ignored")
 
   installEditingMenu(applicationName: "SnapScreen")
   let edit = NSApp.mainMenu?.item(withTitle: "Edit")?.submenu

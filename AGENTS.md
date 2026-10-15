@@ -78,7 +78,8 @@ how data is handled. Never add a privacy section to `README.md`.
   menus offer only Copy and Select All, and only Copy writes the clipboard. Other text in passive
   panels is a non-selectable label, since a selectable one opens the native text menu, and
   `ReadOnlyTextView` refuses to drag its selection, since a dragging session takes the foreground
-  window's key status.
+  window's key status. Passive panels drop the force click and three-finger tap that show Look Up,
+  and `ReadOnlyTextView` refuses it too, since pressing in its popover takes the keyboard.
 - Only Settings, opened explicitly, keeps the app active: `applicationDidBecomeActive` hands any
   other activation back after `AppDelegate.handbackDelay`, and closing Settings hands focus back
   (`ForegroundFocus`). A missing key shows a passive notice instead of opening Settings.
@@ -91,9 +92,10 @@ how data is handled. Never add a privacy section to `README.md`.
 - Selecting a region in a new snip closes the earlier snips' windows (`SnipWindows.closeEarlier`)
   through `closeConversation()`, only after the new conversation is shown. Keep that order, and
   don't make the close activate or refocus anything.
-- The app takes no commands from other processes (no URL scheme, socket or XPC service) and
-  refuses quit events from command-line tools and scripts (`QuitRequest`), so a test can't quit
-  the user's copy. Don't widen what it accepts.
+- The app takes no commands from other processes (no URL scheme, socket or XPC service), ignores
+  requests to open files or URLs (`application(_:open:)`), which AppKit would otherwise answer
+  with a modal alert that takes focus, and refuses quit events from command-line tools and
+  scripts (`QuitRequest`), so a test can't quit the user's copy. Don't widen what it accepts.
 - Test hooks (`SNAPSCREEN_TEST_HOOKS`) compile only into `build/test-hooks/`, which has its own
   bundle ID, and `build-app.sh` refuses a production binary that contains them.
 

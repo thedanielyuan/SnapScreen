@@ -22,6 +22,15 @@ class PassivePanel: NSPanel {
     isReleasedWhenClosed = false
     collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
   }
+
+  /// A force click or a three-finger tap shows Look Up, whose popover's content runs in another
+  /// process, and pressing in it takes the keyboard from your app. Nothing here uses either.
+  static let refusedEvents: Set<NSEvent.EventType> = [.quickLook, .pressure]
+
+  final override func sendEvent(_ event: NSEvent) {
+    guard !Self.refusedEvents.contains(event.type) else { return }
+    super.sendEvent(event)
+  }
 }
 
 extension CompanionPanel {
